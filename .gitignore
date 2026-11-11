@@ -1,0 +1,9 @@
+# Agent command and skill copies are installed per machine
+# (openspec init/update, shared workflows); they are not part of this repo.
+/.claude/
+/.agents/
+/.opencode/
+
+# Build output
+/dist/
+/bin/
