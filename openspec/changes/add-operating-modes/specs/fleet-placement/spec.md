@@ -20,6 +20,32 @@ Dispatch SHALL consider only active changes that are valid, pass the run gate, h
 - **WHEN** change `add-login` is valid but its approval is stale
 - **THEN** dispatch does not place it and lists it as `not approved`
 
+### Requirement: Continuing ready runs
+Dispatch SHALL also continue each approved change whose fleet claim is `ready` and whose run is not complete, on the machine holding the claim, as autopilot's `Incomplete ready runs` says: with `--tasks next` when the run has a scope or the repository's `[autopilot] scope` is `group`; otherwise it SHALL report it and not continue it. Complete ready runs and parked claims SHALL NOT be continued.
+
+#### Scenario: Next group across passes
+- **WHEN** `max_runs = 1`, `add-login` is ready on `studio` after group 1 with group 2 unticked, and `add-users` holds the only room on `mini`
+- **THEN** a pass reports `add-login` waiting for room and starts nothing; once `add-users` is ready, the next pass runs `tuckerbox run --for <remote> --tasks next add-login` on `studio`, which reactivates the claim
+
+#### Scenario: Complete ready run
+- **WHEN** `add-login` is ready on `studio` with every task ticked, waiting for its merge request
+- **THEN** dispatch does not continue it
+
+#### Scenario: Stopped by a person
+- **WHEN** a person stopped `add-login` on `studio`, so its claim is parked
+- **THEN** dispatch does not continue it, and reports nothing new for it
+
+### Requirement: Order of a pass
+A pass SHALL take continuations before new changes, each in admission order, and stop at the fleet limit. A continuation SHALL go only to its holder's machine, which SHALL answer the report and have every agent the run's steps use; a run that was dispatched SHALL also need a free fleet slot there. The started command SHALL make the claim's admission check itself.
+
+#### Scenario: Continuations first
+- **WHEN** `max_runs = 2`, one claim is active, `add-login` is ready on `studio` with group 2 unticked, and approved `add-users` has no claim
+- **THEN** the pass continues `add-login` on `studio` and does not place `add-users`, which waits for the next pass
+
+#### Scenario: Holder unreachable
+- **WHEN** `add-login` is ready on `studio` and `studio` doesn't answer the report
+- **THEN** dispatch names `studio` as unreachable, does not continue `add-login` elsewhere, and goes on with other changes
+
 ### Requirement: Candidate machines
 A machine SHALL be a candidate for a change only if it answers the report in time, has free fleet capacity, has a checkout of the repository's remote, and has every agent the change's steps use installed and not signed out. This machine SHALL be a candidate too, by the same rules.
 

@@ -69,15 +69,16 @@
 - [ ] 3.34 Release with a remote branch (with or without `--force`): one atomic push removing the claim and moving the branch to an empty `Release <change> from <machine>` commit, leasing both; without a branch, the fleet ref only; the old holder blocks with `claim released`
 - [ ] 3.35 Test "Forced release while the holder is about to merge" (two state directories, bare remote, fake forge refusing a pinned merge when the tip moved)
 - [ ] 3.36 Test "Release before any push"
-- [ ] 3.37 Next scope of a ready run on the holder's machine: one lease push turns the claim active (same epoch) with the fleet limit in the same compare-and-swap; `fleet limit reached` keeps run and claim ready; refuse from another machine
+- [ ] 3.37 Any restart of a ready run with another scope or none, on the holder's machine: one lease push turns the claim active (same epoch) with the fleet limit in the same compare-and-swap; `fleet limit reached` keeps run and claim ready; refuse from another machine
 - [ ] 3.38 Test "Next group on the same machine"
-- [ ] 3.39 Test "Room taken meanwhile" (two state directories, bare remote, `max_runs = 1`)
-- [ ] 3.40 Test "Next scope from another machine"
-- [ ] 3.41 Next scope of a stopped, blocked or failed run reactivates its parked claim as `resume` does; record `dispatched` in `run.json`; free the fleet slot on ready; a dispatched run's next scope takes a fleet slot before the claim
-- [ ] 3.42 Test "Next scope after a block"
-- [ ] 3.43 Test "Dispatched run on a full machine"
-- [ ] 3.44 Run TLC on `formal/fleet.tla` and its broken variants (`scripts/tla-check.sh` locally, the `tla` job in CI): the model passes, all five variants are rejected
-- [ ] 3.45 Code review against model.md's mapping table: every fleet ref write is a lease push; every branch push, take-over and release in fleet mode is atomic with the fleet ref; every merge is pinned; dispatched runs take a fleet slot before claiming; a next scope's reactivation checks the limit
+- [ ] 3.39 Test "Rest of the change after a scope" (`run` with no `--tasks` reuses and reactivates the claim)
+- [ ] 3.40 Test "Room taken meanwhile" (two state directories, bare remote, `max_runs = 1`)
+- [ ] 3.41 Test "Next scope from another machine"
+- [ ] 3.42 Next scope of a stopped, blocked or failed run reactivates its parked claim as `resume` does; record `dispatched` in `run.json`; free the fleet slot on ready; a dispatched run's next scope takes a fleet slot before the claim
+- [ ] 3.43 Test "Next scope after a block"
+- [ ] 3.44 Test "Dispatched run on a full machine"
+- [ ] 3.45 Run TLC on `formal/fleet.tla` and its broken variants (`scripts/tla-check.sh` locally, the `tla` job in CI): the model passes, all five variants are rejected
+- [ ] 3.46 Code review against model.md's mapping table: every fleet ref write is a lease push; every branch push, take-over and release in fleet mode is atomic with the fleet ref; every merge is pinned; dispatched runs take a fleet slot before claiming; a next scope's reactivation checks the limit
 
 ## 4. Dispatch (fleet-placement)
 
@@ -94,6 +95,12 @@
 - [ ] 4.11 Report refused claims and failed starts without retrying in the pass
 - [ ] 4.12 Test "Two dispatchers"
 - [ ] 4.13 Test "Dry run" (fleet ref unchanged)
+- [ ] 4.14 Continuations in dispatch: approved changes with a `ready` claim and an incomplete run, continued on the holder only with `--tasks next` when scoped or `[autopilot] scope = "group"`, else reported; never complete ready runs or parked claims; continuations first, then new changes; read run state, scope, completeness and `dispatched` from the holder's machine report (extend `machine --json --for`)
+- [ ] 4.15 Test "Next group across passes" (two state directories, bare remote, `max_runs = 1`: first pass reports and starts nothing, second pass after the other change is ready continues on the holder)
+- [ ] 4.16 Test "Complete ready run"
+- [ ] 4.17 Test "Stopped by a person"
+- [ ] 4.18 Test "Continuations first"
+- [ ] 4.19 Test "Holder unreachable"
 
 ## 5. Team mode (team-claims)
 
@@ -102,29 +109,30 @@
 - [ ] 5.3 Test "Marker with the owner"
 - [ ] 5.4 Treat a marker whose `by` differs from the merge request's author as someone else's claim
 - [ ] 5.5 Test "Marker copied by someone else"
-- [ ] 5.6 Team next scope: check the open draft's marker and login and that the remote tip is the run's last push; start with no new commit and no push; refuse with ship-claim's reasons; run gate from the protected base
+- [ ] 5.6 Team restart with another scope or none: check the open draft's marker and login and that the remote tip is the run's last push; start with no new commit and no push; refuse with ship-claim's reasons; run gate from the protected base
 - [ ] 5.7 Test "Next group in a team" (fake forge: no push, same draft open)
-- [ ] 5.8 Test "Draft closed between scopes"
-- [ ] 5.9 Test "Someone else's next scope"
-- [ ] 5.10 Ship stage in team mode: update the run's draft and mark it ready on GitHub and GitLab, open none
-- [ ] 5.11 Test "Last step done in team mode"
-- [ ] 5.12 Refuse `--take-over` and `dispatch` in team mode
-- [ ] 5.13 Test "Take over refused"
-- [ ] 5.14 Test "Dispatch in a team repository"
-- [ ] 5.15 `approve` records the forge login; in team mode the run gate reads the approval only from the fetched base commit, requires a listed login, and refuses worktrees or retained branches whose files don't match it
-- [ ] 5.16 Test "Approval by someone not listed"
-- [ ] 5.17 Test "No approvers"
-- [ ] 5.18 Test "Forged approval on a retained branch" (local branch with recomputed hashes and a listed login; nothing created locally or on the fake forge)
-- [ ] 5.19 Test "Worktree edited after approval"
-- [ ] 5.20 Team mode `resume` and `rerun`: compare the `agent` and `permissions` overrides with `settings_hash` from the approval on the fetched base (listed login), never the worktree's; refuse on mismatch; a stale text hash alone still passes
-- [ ] 5.21 Test "Forged settings approval on resume"
-- [ ] 5.22 Test "Forged settings approval on rerun"
-- [ ] 5.23 Test "Design rewritten by a plan step"
-- [ ] 5.24 Ask the forge whether the base branch refuses direct pushes and needs an approving review (GitHub branch rules, GitLab protected branches and approval rules); refuse in `run` and fail `check` when not, or when unreadable
-- [ ] 5.25 Test "Unprotected base"
-- [ ] 5.26 Test "Protection can't be read"
-- [ ] 5.27 Open claimed merge requests for the board, at most once a minute, kept in the state directory, with their age when the forge is down
-- [ ] 5.28 Test "Board read twice"
+- [ ] 5.8 Test "Rest of the change in a team" (no push, same draft open)
+- [ ] 5.9 Test "Draft closed between scopes"
+- [ ] 5.10 Test "Someone else's next scope"
+- [ ] 5.11 Ship stage in team mode: update the run's draft and mark it ready on GitHub and GitLab, open none
+- [ ] 5.12 Test "Last step done in team mode"
+- [ ] 5.13 Refuse `--take-over` and `dispatch` in team mode
+- [ ] 5.14 Test "Take over refused"
+- [ ] 5.15 Test "Dispatch in a team repository"
+- [ ] 5.16 `approve` records the forge login; in team mode the run gate reads the approval only from the fetched base commit, requires a listed login, and refuses worktrees or retained branches whose files don't match it
+- [ ] 5.17 Test "Approval by someone not listed"
+- [ ] 5.18 Test "No approvers"
+- [ ] 5.19 Test "Forged approval on a retained branch" (local branch with recomputed hashes and a listed login; nothing created locally or on the fake forge)
+- [ ] 5.20 Test "Worktree edited after approval"
+- [ ] 5.21 Team mode `resume` and `rerun`: compare the `agent` and `permissions` overrides with `settings_hash` from the approval on the fetched base (listed login), never the worktree's; refuse on mismatch; a stale text hash alone still passes
+- [ ] 5.22 Test "Forged settings approval on resume"
+- [ ] 5.23 Test "Forged settings approval on rerun"
+- [ ] 5.24 Test "Design rewritten by a plan step"
+- [ ] 5.25 Ask the forge whether the base branch refuses direct pushes and needs an approving review (GitHub branch rules, GitLab protected branches and approval rules); refuse in `run` and fail `check` when not, or when unreadable
+- [ ] 5.26 Test "Unprotected base"
+- [ ] 5.27 Test "Protection can't be read"
+- [ ] 5.28 Open claimed merge requests for the board, at most once a minute, kept in the state directory, with their age when the forge is down
+- [ ] 5.29 Test "Board read twice"
 
 ## 6. Board (modes-board)
 

@@ -36,7 +36,7 @@ A run started by dispatch (`tuckerbox run --for <remote> --dispatched`) SHALL ta
 - **THEN** that run starts under its repository's `max_parallel` and takes no fleet slot
 
 ### Requirement: Machine report
-`tuckerbox machine --json [--for <remote>]` SHALL print the machine's name, Tuckerbox version, operating system, capacity and fleet runs, each agent CLI with whether it is installed and signed in, and, with `--for`, whether this machine has a checkout of that remote and its path. It SHALL NOT print tokens or permission flags.
+`tuckerbox machine --json [--for <remote>]` SHALL print the machine's name, Tuckerbox version, operating system, capacity and fleet runs, each agent CLI with whether it is installed and signed in, and, with `--for`, whether this machine has a checkout of that remote, its path, and each run of it here with state, scope, whether complete, and whether dispatched. It SHALL NOT print tokens or permission flags.
 
 #### Scenario: Codex signed out
 - **WHEN** Codex is installed on `mini` but not signed in

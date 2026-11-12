@@ -110,12 +110,13 @@ The steps themselves only change the machine's own worktree, so a zombie working
 
 ### The next task scope
 
-`add-task-scope` lets a ready (or stopped, blocked, failed) run start its next group with `tuckerbox run <change> --tasks <scope>`, in the same run, worktree and branch; `add-autopilot` relies on it. That run already holds a claim, so the next scope reuses it rather than claiming again.
+`add-task-scope` lets a ready (or stopped, blocked, failed) run start again with another scope, `tuckerbox run <change> --tasks <scope>`, or with none, `tuckerbox run <change>` for the rest of the change, in the same run, worktree and branch; `add-autopilot` relies on it. That run already holds a claim, so every such restart reuses it rather than claiming again. Below, "next scope" means any of them, dropping the scope included.
 
 **Fleet.** A ready claim doesn't count toward `max_runs`, which is the point: a change waiting between groups shouldn't block other changes. So other changes may take that room meanwhile, and starting the next scope is an admission, not a renewal:
-- On the holder's machine, one lease push turns the claim from `ready` to `active`, same holder and epoch, and counts it against `max_runs` in the same compare-and-swap. If the limit is full, the push isn't made: `fleet limit reached`, naming the claims that fill it, and the run and claim stay ready. Nothing is lost; `run` again later, or autopilot's next pass, tries again.
+- On the holder's machine, one lease push turns the claim from `ready` to `active`, same holder and epoch, and counts it against `max_runs` in the same compare-and-swap. If the limit is full, the push isn't made: `fleet limit reached`, naming the claims that fill it, and the run and claim stay ready. Nothing is lost: a person runs it again later, or dispatch continues it (next paragraph).
 - From another machine it is refused (`claimed by`): the worktree, with the earlier scopes' work, is on the holder's machine. Moving it needs `claim release` and a fresh start there.
 - A parked claim (stopped, blocked or failed run) already counts, so it becomes active as on `resume`, with no new limit check.
+- **Continuing from dispatch.** Autopilot in fleet mode only runs `tuckerbox dispatch`, and dispatch places only unclaimed changes, so a ready claim would otherwise sit until a person acted. Dispatch therefore also continues approved changes whose claim is `ready` and whose run isn't complete, on the holder's machine only, with the same rule as autopilot's `Incomplete ready runs`: `--tasks next` when the run has a scope or the repository's `[autopilot] scope` is `group` (the default); otherwise it reports the change for a person. Dispatch reads `[autopilot] scope` from repository config itself, so `add-autopilot` needs no change. It learns a run's state, scope, completeness and whether it was dispatched from the holder's `tuckerbox machine --json --for` report. Complete ready runs (waiting to ship or merge) and parked claims (a person stopped it, or it blocked or failed) are not continued. Continuations go before new changes, so started work finishes first. If the limit is full the started command refuses, dispatch reports it, and a later pass tries again once room frees.
 - A dispatched run records `dispatched` in `run.json`. It freed its machine-wide fleet slot when it became ready, so its next scope takes one again first, before touching the claim; a full machine refuses with `<machine> is full` and the claim stays ready. Slot first, then claim, as at the start.
 
 `formal/fleet.tla` models this: `BecomeReady` (the claim stops counting) and `NextScope` (back to active only if `ScopeAdmit`, the limit check, holds). `fleet_broken_scopecount` drops the check, and TLC finds the 7-state behaviour where `m1`'s change is ready, `m2` claims another into the freed room, and `m1`'s next scope goes over the limit.
@@ -163,8 +164,12 @@ mini:   wakes; push fix (lease abc) → refused; merge pinned abc → refused; r
 ```
 tuckerbox dispatch [change...] [--dry-run] [--json]
   fetch base and fleet ref
+  continue = approved, claim ready, run not complete, scoped or [autopilot] scope = "group"  (admission order)
   changes  = active, valid, run gate passes, dependencies met, no claim  (Approved column order)
   reports  = tuckerbox machine --json --for <remote> on this machine and each [machines.*], in parallel, 30 s timeout
+  for each continuation, until max_runs:
+    holder must answer, have the run's agents, and (if dispatched) a free fleet slot
+    start      = on the holder: tuckerbox run --for <remote> --tasks next <change>
   for each change, until max_runs:
     candidates = answered, free capacity, has checkout, every step's agent installed and not signed out
     pick       = first in change.machines that is a candidate; else most free capacity; else name
@@ -234,7 +239,8 @@ A claimed change whose machine isn't connected to Herdr still shows its claim, s
 - `change-approval`: in team mode the run gate reads only the protected base (`team-claims`, `Approvals only from the protected base`).
 - `change-settings` (`add-change-settings`): in team mode `resume` and `rerun` take `settings_hash` from the protected base (`team-claims`, `Resumed settings from the protected base`).
 - `change-runs`' slot locks: dispatched runs also take a machine-wide fleet slot (`machine-inventory`, `Machine-wide admission`).
-- `task-scope` (`add-task-scope`): the next scope reuses the run's claim (`fleet-claims`, `Starting the next scope` and `Next scope of other runs`; `team-claims`, `Next scope keeps the team claim`).
+- `task-scope` (`add-task-scope`): the next scope, or dropping the scope, reuses the run's claim (`fleet-claims`, `Starting the next scope` and `Next scope of other runs`; `team-claims`, `Next scope keeps the team claim`).
+- `autopilot` (`add-autopilot`, approved): unchanged. Its fleet pass runs `tuckerbox dispatch`, which now continues incomplete ready runs on their holder (`fleet-placement`, `Continuing ready runs` and `Order of a pass`), using autopilot's own `[autopilot] scope` rule.
 - `board-data` and `herdr-board`: additions are in `modes-board`, as `ship-board` does.
 - `run-status`: `status --all-machines` adds a `machine` field, an addition within the format version.
 - `change-runs`' `Parallel limit` is unchanged: per machine. Fleet limits are new and separate.

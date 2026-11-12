@@ -14,11 +14,15 @@ In team mode, `tuckerbox run` SHALL, after the run gate and before any agent sta
 - **THEN** one push creates the branch and opens the draft, the other is refused by its lease, and that person's run refuses with `claimed by` the first person and machine
 
 ### Requirement: Next scope keeps the team claim
-In team mode, `tuckerbox run <change> --tasks <scope>` on a ready, stopped, blocked or failed run SHALL reuse its claim: it SHALL check that the open draft carries this run's marker and login and that the remote tip is the run's last push, then start the scope with no new start commit and no push. Otherwise it SHALL refuse with `ship-claim`'s reason. The run gate SHALL apply as at the start.
+In team mode, when `tuckerbox run <change>` starts a ready, stopped, blocked or failed run again with another scope or none, it SHALL reuse its claim: it SHALL check that the open draft carries this run's marker and login and that the remote tip is the run's last push, then start the scope with no new start commit and no push. Otherwise it SHALL refuse with `ship-claim`'s reason. The run gate SHALL apply as at the start.
 
 #### Scenario: Next group in a team
 - **WHEN** `sam`'s run of `add-login` is ready after scope `1`, its draft merge request is open with its marker, and `sam` runs `tuckerbox run add-login --tasks 2` on the same machine
 - **THEN** the first step starts with scope `2`, nothing is pushed, and the same draft merge request stays open
+
+#### Scenario: Rest of the change in a team
+- **WHEN** `sam`'s run of `add-login` is ready after scope `1` and `sam` runs `tuckerbox run add-login` with no `--tasks`
+- **THEN** the first step starts with no scope, nothing is pushed, and the same draft merge request stays open
 
 #### Scenario: Draft closed between scopes
 - **WHEN** `add-login`'s draft merge request was closed after scope `1` and `sam` runs `tuckerbox run add-login --tasks 2`
