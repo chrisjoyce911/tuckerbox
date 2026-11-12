@@ -143,6 +143,16 @@ agent_backend = "auto" # the default; or "terminal" or "headless"
 
 `auto` uses herdr-core terminals when `hc` is on the PATH and `hc server status` succeeds, and otherwise runs agents headless, as child processes of Tuckerbox with their output in the step's log. `headless` always does that. `terminal` requires herdr-core: when it isn't installed or its server isn't running, `tuckerbox run` refuses and starts nothing. `tuckerbox doctor` reports the backend in use and why, for example `agent backend: headless, because herdr-core wasn't found (no hc on the PATH)`.
 
+In a terminal, Claude and Codex run in their interactive mode, with "read the brief" as the first prompt, so a person can watch the agent and type to it. Each step's terminal is named for the change (`tb-` and a hash), labelled `herdr.space` (the repository) and `herdr.tab` (`<change> · <step>`), so the Herdr app shows it as a tab. At the end of every turn the CLI's own hook (Claude Code's `Stop` hook, passed with `--settings`; Codex's `notify`, passed with `-c`) hands the turn's final message to Tuckerbox; no user or project config file is changed. A turn that ends without a result leaves the step running, waiting for you. A custom agent runs in a terminal only when it has an `interactive` command with `{turnhook}`, the hook to run at the end of each turn (as a whole argument, its program and arguments; inside an argument, one shell command; it takes the message as its last argument or on standard input):
+
+```toml
+[agents.myagent]
+command = ["myagent", "--prompt-file", "{brief_file}"]
+interactive = ["myagent", "--on-turn-end", "{turnhook}", "{brief}"]
+```
+
+The agent outlives Tuckerbox's run process. If that process dies, `tuckerbox status` shows the run `running (not watched)`; `tuckerbox resume` (or autopilot's crash resume) adopts the live agent in the same round, and `tuckerbox stop` ends it. The agent keeps its parallel slot while it lives, so no other change starts in its place. `tuckerbox logs` reads a live agent's terminal, and the step's log keeps its session afterwards. `doctor` checks each installed CLI's turn hook.
+
 `doctor` exits non-zero only when a required tool (`git` or `openspec`) is missing. Agent CLIs are optional. It does not yet check whether an agent is signed in, and says `sign-in not checked`.
 
 ## Forge configuration

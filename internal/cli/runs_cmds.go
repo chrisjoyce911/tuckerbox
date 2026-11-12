@@ -368,7 +368,10 @@ func (a App) engine(args []string) int {
 	}
 	logw := &switchWriter{w: a.Stderr}
 	var logFile *os.File
-	e := a.newEngine(repo, cfg, logw)
+	e, err := a.newEngine(repo, cfg, logw)
+	if err != nil {
+		return a.errf("engine", "%v", err)
+	}
 	e.OnLocked = func(ws runs.Workspace, r *runs.Run) {
 		f, err := os.OpenFile(runs.EngineLog(ws.State), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		if err == nil {
@@ -396,8 +399,15 @@ func (a App) engine(args []string) int {
 	return exitFor(r)
 }
 
-func (a App) newEngine(repo runs.Repo, cfg *config.Config, log io.Writer) *runs.Engine {
-	e := &runs.Engine{Repo: repo, Config: cfg, Log: log}
+// newEngine makes the engine for a run in repo. It fails when the
+// machine's agent backend can't be used (agent_backend = "terminal"
+// without herdr-core), before the run changes anything.
+func (a App) newEngine(repo runs.Repo, cfg *config.Config, log io.Writer) (*runs.Engine, error) {
+	backend, err := a.agentBackend(cfg.AgentBackend)
+	if err != nil {
+		return nil, err
+	}
+	e := &runs.Engine{Repo: repo, Config: cfg, Log: log, Backend: backend}
 	if a.Forge != nil {
 		e.Forge = func(ctx context.Context) (forge.Client, func(string) string, error) { return a.Forge(ctx, cfg) }
 	}
@@ -424,14 +434,17 @@ func (a App) newEngine(repo runs.Repo, cfg *config.Config, log io.Writer) *runs.
 	} else {
 		fmt.Fprintf(log, "warning: no machine index: %v\n", err)
 	}
-	return e
+	return e, nil
 }
 
 // foreground runs req in this process, attached to the terminal; Ctrl-C
 // stops it.
 func (a App) foreground(repo runs.Repo, cfg *config.Config, req runs.Request) int {
 	logw := &switchWriter{w: a.Stdout}
-	e := a.newEngine(repo, cfg, logw)
+	e, err := a.newEngine(repo, cfg, logw)
+	if err != nil {
+		return a.errf("run", "%v", err)
+	}
 	var logFile *os.File
 	e.OnLocked = func(ws runs.Workspace, r *runs.Run) {
 		if f, err := os.OpenFile(runs.EngineLog(ws.State), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
@@ -534,6 +547,10 @@ func (a App) stop(args []string) int {
 		return a.errf("stop", "%v", err)
 	}
 	if !l.active() {
+		// The run process died; its agent may work on in a terminal.
+		if code, ok := a.stopOrphan(pos[0], l.State); ok {
+			return code
+		}
 		v := l.Run.Effective(false)
 		return a.errf("stop", "change %s has no active run (it is %s)", pos[0], v.State)
 	}
@@ -553,6 +570,13 @@ func (a App) stop(args []string) int {
 			}
 			killRun(pid, agentPid)
 			fmt.Fprintf(a.Stdout, "%s: did not stop within %s; killed the run process (pid %d)\n", pos[0], stopWait, pid)
+			// Its agent may outlive it in a terminal: end that too.
+			for i := 0; i < 50 && l.active(); i++ {
+				time.Sleep(100 * time.Millisecond)
+			}
+			if code, ok := a.stopOrphan(pos[0], l.State); ok {
+				return code
+			}
 			return 0
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -564,6 +588,34 @@ func (a App) stop(args []string) int {
 	v := r.Effective(false)
 	fmt.Fprintf(a.Stdout, "%s: %s at step %s (resume with tuckerbox resume %s)\n", v.Change, v.State, v.Step, v.Change)
 	return 0
+}
+
+// stopOrphan stops a run whose process died while its agent works on in a
+// terminal: it takes the change lock, ends the terminal by name, records
+// the run stopped and lets the lock go (formal/terminals.tla, Stop with
+// the lock free). ok is false when the run has no agent terminal.
+func (a App) stopOrphan(change string, st statedir.Dir) (code int, ok bool) {
+	hc, found := a.hc()
+	end := func(ctx context.Context, name string) error {
+		if !found {
+			return errors.New("herdr-core's hc is not on the PATH, so the agent's terminal can't be ended")
+		}
+		return hc.End(ctx, name, 30*time.Second)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	r, err := runs.StopOrphan(ctx, st, end)
+	switch {
+	case errors.Is(err, runs.ErrNoOrphan), errors.Is(err, runs.ErrNoRun):
+		return 0, false
+	case errors.Is(err, runs.ErrLocked):
+		return a.errf("stop", "change %s was started again meanwhile; run tuckerbox stop %s again", change, change), true
+	case err != nil:
+		return a.errf("stop", "%v", err), true
+	}
+	fmt.Fprintf(a.Stdout, "%s: ended the agent's terminal; %s at step %s (resume with tuckerbox resume %s)\n",
+		change, r.State, r.Step, change)
+	return 0, true
 }
 
 // resume: tuckerbox resume [--foreground] <change>
@@ -641,6 +693,10 @@ func (a App) logs(args []string) int {
 	if err := statedir.CheckID("step", step); err != nil {
 		return a.errf("logs", "%v", err)
 	}
+	// A step whose agent works in a live terminal: read the terminal.
+	if hc, name, ok := a.liveTerminal(l.Run, step); ok {
+		return a.terminalLogs(hc, name, l, follow)
+	}
 	if !follow {
 		if err := agent.ReadLog(l.State.Log(step), a.Stdout); err != nil {
 			if errors.Is(err, agent.ErrNoLog) {
@@ -706,6 +762,69 @@ func (a App) logs(args []string) int {
 	}
 }
 
+// liveTerminal returns the terminal of r's agent when step is r's current
+// step and its terminal lives.
+func (a App) liveTerminal(r *runs.Run, step string) (agent.HC, string, bool) {
+	if r == nil || r.Terminal == nil || r.State != runs.Running || r.Step != step {
+		return agent.HC{}, "", false
+	}
+	hc, ok := a.hc()
+	if !ok {
+		return agent.HC{}, "", false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	t, err := hc.Get(ctx, r.Terminal.Name)
+	if err != nil || !t.Live() || !agent.MatchesStep(t, r.Change, r.Step, r.Round) {
+		return agent.HC{}, "", false
+	}
+	return hc, r.Terminal.Name, true
+}
+
+// terminalLogs shows a live agent terminal's history through hc read and,
+// with follow, what it writes next until it ends. Its history goes into
+// the step's log file when the step ends, where logs reads it after.
+func (a App) terminalLogs(hc agent.HC, name string, l located, follow bool) int {
+	ctx, stop := signal.NotifyContext(context.Background(), stopSignals...)
+	defer stop()
+	out, err := hc.Read(ctx, name)
+	if err != nil {
+		return a.errf("logs", "%v", err)
+	}
+	a.Stdout.Write(out)
+	if !follow {
+		return 0
+	}
+	prev := out
+	for {
+		select {
+		case <-ctx.Done():
+			return 0
+		case <-time.After(500 * time.Millisecond):
+		}
+		t, err := hc.Get(ctx, name)
+		if err != nil && ctx.Err() == nil {
+			return a.errf("logs", "%v", err)
+		}
+		cur, rerr := hc.Read(ctx, name)
+		if rerr == nil {
+			// Only what is new since the last read.
+			n := 0
+			for n < len(prev) && n < len(cur) && prev[n] == cur[n] {
+				n++
+			}
+			a.Stdout.Write(cur[n:])
+			prev = cur
+		}
+		r, _ := runs.ReadRun(l.State.RunFile())
+		if !t.Live() || r == nil || r.Terminal == nil || r.Terminal.Name != name {
+			fmt.Fprintf(a.Stdout, "\n==> tuckerbox: the agent's terminal %s ended; tuckerbox logs %s %s shows its session <==\n",
+				name, l.Run.Change, l.Run.Step)
+			return 0
+		}
+	}
+}
+
 // displayTime is how status shows a time: the machine's local time zone.
 func displayTime(t time.Time) string {
 	if t.IsZero() {
@@ -731,6 +850,16 @@ type statusRun struct {
 	Branch    string       `json:"branch"`
 	Pid       int          `json:"pid,omitempty"`
 	Created   string       `json:"created"`
+	// AgentBackend is where the current or last step's agent runs:
+	// "terminal" or "headless".
+	AgentBackend string `json:"agent_backend,omitempty"`
+	// Terminal is the agent's herdr-core terminal address while a step
+	// runs in one; AgentState is "working" or "waiting for you" there.
+	Terminal   string `json:"terminal,omitempty"`
+	AgentState string `json:"agent_state,omitempty"`
+	// NotWatched is set on a running run whose process died while its
+	// agent works on in a terminal; resume adopts it.
+	NotWatched bool `json:"not_watched,omitempty"`
 	// Scope is the run's task scope; absent for the whole change.
 	Scope *scope.Scope `json:"scope,omitempty"`
 }
@@ -763,12 +892,17 @@ func (a App) statusRuns() ([]statusRun, error) {
 		if err != nil {
 			continue // worktree removed, or not started
 		}
-		v := r.Effective(runs.Active(st.RunLock()))
-		out = append(out, statusRun{
+		v, watched := runs.Seen(context.Background(), r, runs.Active(st.RunLock()))
+		sr := statusRun{
 			Repo: e.Repo, Change: v.Change, State: string(v.State), Step: v.Step, Round: v.Round,
 			Since: rfc3339(v.Since), Reason: v.Reason, Worktree: v.Worktree, Branch: v.Branch,
 			Pid: v.Pid, Created: rfc3339(v.Created), Scope: v.Scope, MR: v.MR, CI: v.CI, ShipRound: v.ShipRound,
-		})
+			AgentBackend: v.AgentBackend, AgentState: v.AgentState, NotWatched: !watched,
+		}
+		if v.State == runs.Running && v.Terminal != nil {
+			sr.Terminal = v.Terminal.Address
+		}
+		out = append(out, sr)
 	}
 	return out, nil
 }
@@ -812,7 +946,11 @@ func (a App) status(args []string) int {
 		if r.ShipRound > 0 {
 			shipRound = strconv.Itoa(r.ShipRound)
 		}
-		rows = append(rows, []string{filepath.Base(r.Repo), r.Change, r.State, step, tasks, strconv.Itoa(r.Round), displayTime(since), mr, ci, shipRound, r.Reason})
+		state := r.State
+		if r.NotWatched {
+			state += " (not watched)"
+		}
+		rows = append(rows, []string{filepath.Base(r.Repo), r.Change, state, step, tasks, strconv.Itoa(r.Round), displayTime(since), mr, ci, shipRound, r.Reason})
 	}
 	writeTable(a.Stdout, rows)
 	return 0

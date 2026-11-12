@@ -36,3 +36,10 @@ func killRun(pid, agentPid int) {
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 	}
 }
+
+// holdSignals are the signals agent-hold catches while its agent runs.
+var holdSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}
+
+// forwardSignal reports whether agent-hold passes sig on to its agent. An
+// interrupt reaches the agent from its terminal by itself.
+func forwardSignal(sig os.Signal) bool { return sig != os.Interrupt }

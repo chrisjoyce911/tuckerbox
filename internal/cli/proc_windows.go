@@ -43,3 +43,10 @@ func killRun(pid, agentPid int) {
 		}
 	}
 }
+
+// holdSignals are the signals agent-hold catches while its agent runs.
+var holdSignals = []os.Signal{os.Interrupt}
+
+// forwardSignal reports whether agent-hold passes sig on to its agent. An
+// interrupt reaches the agent from its console by itself.
+func forwardSignal(sig os.Signal) bool { return false }

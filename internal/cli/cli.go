@@ -99,6 +99,9 @@ func (a App) Run(args []string) int {
 			return 1
 		}
 		fmt.Fprintln(a.Stdout, a.backendDoctorLine())
+		for _, line := range a.turnHookDoctorLines() {
+			fmt.Fprintln(a.Stdout, line)
+		}
 		if line := a.herdrDoctorLine(); line != "" {
 			fmt.Fprintln(a.Stdout, line)
 		}
@@ -128,6 +131,10 @@ func (a App) Run(args []string) int {
 		return a.run(rest)
 	case "engine":
 		return a.engine(rest)
+	case "agent-turn":
+		return a.agentTurn(rest)
+	case "agent-hold":
+		return a.agentHold(rest)
 	case "status":
 		return a.status(rest)
 	case "logs":
