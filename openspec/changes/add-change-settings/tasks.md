@@ -2,18 +2,18 @@
 
 ## 1. Allow-list and sidecar (repo-config, change-settings)
 
-- [ ] 1.1 Parse `[overrides]` (agents, models per agent, efforts, permissions) from repository config only; refuse it in machine config; `tuckerbox init` comments show an example; document it in README
-- [ ] 1.2 Test "Machine config sets the allow-list"
-- [ ] 1.3 Test "Allowed profile not defined on the machine"
-- [ ] 1.4 Parse `[steps.<step>]` (agent, model, effort, permissions) and `machines` from the change sidecar, keeping `title`, `depends_on` and `[approval]`; refuse other keys in step tables and steps not in `[steps]`
-- [ ] 1.5 Test "Override one step"
-- [ ] 1.6 Test "Unknown step"
-- [ ] 1.7 Test "Raw flags in an override" (the value is not printed)
-- [ ] 1.8 Test "Machines in solo mode"
-- [ ] 1.9 Check overrides against the allow-list in `tuckerbox check`, naming change, key, value and the allowed values
-- [ ] 1.10 Test "Value not allowed"
-- [ ] 1.11 Test "No allow-list"
-- [ ] 1.12 Test "Model for another agent"
+- [x] 1.1 Parse `[overrides]` (agents, models per agent, efforts, permissions) from repository config only; refuse it in machine config; `tuckerbox init` comments show an example; document it in README
+- [x] 1.2 Test "Machine config sets the allow-list"
+- [x] 1.3 Test "Allowed profile not defined on the machine"
+- [x] 1.4 Parse `[steps.<step>]` (agent, model, effort, permissions) and `machines` from the change sidecar, keeping `title`, `depends_on` and `[approval]`; refuse other keys in step tables and steps not in `[steps]`
+- [x] 1.5 Test "Override one step"
+- [x] 1.6 Test "Unknown step"
+- [x] 1.7 Test "Raw flags in an override" (the value is not printed)
+- [x] 1.8 Test "Machines in solo mode"
+- [x] 1.9 Check overrides against the allow-list in `tuckerbox check`, naming change, key, value and the allowed values
+- [x] 1.10 Test "Value not allowed"
+- [x] 1.11 Test "No allow-list"
+- [x] 1.12 Test "Model for another agent"
 
 ## 2. Effective settings and runs (change-settings)
 
