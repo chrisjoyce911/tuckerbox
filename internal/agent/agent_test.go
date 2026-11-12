@@ -161,6 +161,7 @@ func TestBuildAfterRejection(t *testing.T) {
 		"[high] `login.go`: password is logged",
 		`"round": 2`,
 		`"step": "build"`,
+		"make your final message this JSON object",
 		bo.ResultPath,
 	} {
 		if !strings.Contains(brief, want) {
@@ -392,5 +393,135 @@ func TestBadStepID(t *testing.T) {
 	s := newStep(t, "../escape", "builder", 1, fake("done"))
 	if _, err := Run(context.Background(), s, fast); err == nil {
 		t.Fatal("want an error for a step id with a path in it")
+	}
+}
+
+// Scenario: Result in the final message. An agent that cannot write outside
+// its worktree ends with the result JSON as its final message: Tuckerbox
+// accepts it and writes the result file itself.
+func TestResultFromFinalMessage(t *testing.T) {
+	cases := []struct {
+		name  string
+		agent func(t *testing.T) Template
+		want  Status
+	}{
+		{"bare object on stdout", func(*testing.T) Template { return fake("message") }, Done},
+		{"fenced block on stdout", func(*testing.T) Template { return fake("message-fenced") }, Rejected},
+		{"claude stream-json result event", func(*testing.T) Template { return fake("stream-json") }, Done},
+		{"codex json agent message", func(*testing.T) Template { return fake("codex-jsonl") }, Done},
+		{"lastmessage file", func(*testing.T) Template { return fake("lastmessage", PhLastMessage) }, Done},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := newStep(t, "review", "reviewer", 2, c.agent(t))
+			o := run(t, s, fast)
+			if o.Status() != c.want {
+				t.Fatalf("status %s, want %s: %s\n%s", o.Status(), c.want, o.FailureReason(), readFile(t, o.LogPath))
+			}
+			if o.Source != "final message" || o.Result.Round != 2 || o.Result.Step != "review" {
+				t.Errorf("source %q, result %+v", o.Source, o.Result)
+			}
+			// The engine wrote the result file from the message.
+			got, err := ReadResult(o.ResultPath, Expect{"fix-login", "review", 2})
+			if err != nil {
+				t.Fatalf("result file not written: %v", err)
+			}
+			if !sameResult(got, *o.Result) {
+				t.Errorf("result file %+v, want %+v", got, *o.Result)
+			}
+			if !strings.Contains(readFile(t, o.LogPath), "accepted result from the final message") {
+				t.Error("log does not say where the result came from")
+			}
+		})
+	}
+	t.Run("lastmessage is a Tuckerbox file outside the worktree", func(t *testing.T) {
+		s := newStep(t, "review", "reviewer", 1, fake("lastmessage", PhLastMessage))
+		o := run(t, s, fast)
+		if o.MessagePath != s.State.LastMessage("review", 1) {
+			t.Errorf("message path %q", o.MessagePath)
+		}
+		if o.Result == nil || o.Result.Summary != "from the last-message file" {
+			t.Errorf("result %+v", o.Result)
+		}
+	})
+}
+
+// A {lastmessage} file left by an earlier attempt of the same round is
+// removed before the agent starts, never taken as this attempt's message.
+func TestLeftoverLastMessageNotAccepted(t *testing.T) {
+	tpl := Template{Name: "fake", Command: []string{fakeAgent, "noresult", "-o", PhLastMessage}}
+	s := newStep(t, "review", "reviewer", 1, tpl)
+	if err := s.State.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	old := `{"change":"fix-login","step":"review","round":1,"status":"done","summary":"old"}`
+	if err := os.WriteFile(s.State.LastMessage("review", 1), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if o := run(t, s, fast); o.Result != nil {
+		t.Fatalf("leftover final message accepted: %+v", o.Result)
+	}
+}
+
+// Scenario: Malformed final message. The agent's final message holds no
+// well-formed result and there is no result file: the step fails, and why
+// is recorded.
+func TestMalformedFinalMessage(t *testing.T) {
+	s := newStep(t, "review", "reviewer", 1, fake("message-malformed"))
+	o := run(t, s, fast)
+	if o.Result != nil || o.Status() != Failed {
+		t.Fatalf("accepted %+v", o.Result)
+	}
+	if !strings.Contains(o.FailureReason(), "final message: malformed result") {
+		t.Errorf("reason %q", o.FailureReason())
+	}
+	if !strings.Contains(readFile(t, o.LogPath), "ignored final message") {
+		t.Error("malformed final message not logged")
+	}
+	if _, err := os.Stat(o.ResultPath); err == nil {
+		t.Error("a result file was written for a malformed message")
+	}
+}
+
+// The round and step check applies to a result in the final message too
+// (StaleNeverAccepted).
+func TestStaleFinalMessageNotAccepted(t *testing.T) {
+	for mode, want := range map[string]string{
+		"message-stale":      "stale result from round 1",
+		"message-wrong-step": `result is for step "other"`,
+	} {
+		t.Run(mode, func(t *testing.T) {
+			s := newStep(t, "review", "reviewer", 2, fake(mode))
+			o := run(t, s, fast)
+			if o.Result != nil {
+				t.Fatalf("accepted %+v", o.Result)
+			}
+			if !strings.Contains(o.FailureReason(), want) {
+				t.Errorf("reason %q, want %q", o.FailureReason(), want)
+			}
+		})
+	}
+}
+
+// Scenario: Result file and final message differ. The agent writes a
+// result file and ends with a different result: the file wins, and the
+// difference is logged.
+func TestResultFileAndFinalMessageDiffer(t *testing.T) {
+	s := newStep(t, "review", "reviewer", 1, fake("both-differ"))
+	o := run(t, s, fast)
+	if o.Status() != Done || o.Source != "result file" {
+		t.Fatalf("status %s from %q, want done from the result file", o.Status(), o.Source)
+	}
+	if log := readFile(t, o.LogPath); !strings.Contains(log, "result file and final message differ; using the result file") {
+		t.Errorf("difference not logged:\n%s", log)
+	}
+
+	s = newStep(t, "review", "reviewer", 1, fake("both-same"))
+	o = run(t, s, fast)
+	if o.Status() != Done {
+		t.Fatalf("status %s", o.Status())
+	}
+	if strings.Contains(readFile(t, o.LogPath), "differ") {
+		t.Error("identical results logged as different")
 	}
 }

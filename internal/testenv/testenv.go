@@ -118,6 +118,7 @@ type Action struct {
 	Touch      string    `json:"touch,omitempty"`
 	Exit       int       `json:"exit,omitempty"`
 	StaleFirst bool      `json:"stale_first,omitempty"`
+	Message    bool      `json:"message,omitempty"`
 }
 
 // Finding is a fake agent finding.

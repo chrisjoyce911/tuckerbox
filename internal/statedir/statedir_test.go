@@ -79,7 +79,7 @@ func TestResolveMainAndWorktree(t *testing.T) {
 	if err := wd.Ensure(); err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{filepath.Dir(wd.Brief("build", 1)), filepath.Dir(wd.Result("build", 1)), filepath.Dir(wd.Log("build"))} {
+	for _, p := range []string{filepath.Dir(wd.Brief("build", 1)), filepath.Dir(wd.Result("build", 1)), filepath.Dir(wd.LastMessage("build", 1)), filepath.Dir(wd.Log("build"))} {
 		if fi, err := os.Stat(p); err != nil || !fi.IsDir() {
 			t.Errorf("%s not created: %v", p, err)
 		}
