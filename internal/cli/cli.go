@@ -24,6 +24,7 @@ Commands:
   stop <change>             Stop a run's agent and mark the run stopped
   resume <change>           Continue a stopped or blocked run
   rerun <change> <step>     Start a run again from a step
+  history <change> [--json] Show a run's events, oldest first
   version [--json]          Print the version, commit, Go version and platform
   doctor                    Check that git, openspec and the agent CLIs are installed
   check                     Validate .tuckerbox/config.toml with machine config
@@ -96,6 +97,8 @@ func (a App) Run(args []string) int {
 		return a.resume(rest)
 	case "rerun":
 		return a.rerun(rest)
+	case "history":
+		return a.history(rest)
 	default:
 		fmt.Fprintf(a.Stderr, "tuckerbox: unknown command %q\n\n%s", cmd, usage)
 		return 2

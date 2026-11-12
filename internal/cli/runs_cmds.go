@@ -412,7 +412,7 @@ func (a App) locate(change string) (located, error) {
 	}
 	switch len(found) {
 	case 0:
-		return located{}, fmt.Errorf("no run of change %s on this machine", change)
+		return located{}, &noRunError{change}
 	case 1:
 		return found[0], nil
 	}

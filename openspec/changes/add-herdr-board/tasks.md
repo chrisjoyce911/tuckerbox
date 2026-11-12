@@ -2,9 +2,9 @@
 
 ## 1. Run history (run-history)
 
-- [ ] 1.1 Append events to `<git-dir>/tuckerbox/history.jsonl` from the run engine; skip a torn last line on read
-- [ ] 1.2 `tuckerbox history <change> [--json]`
-- [ ] 1.3 Tests for each run-history scenario
+- [x] 1.1 Append events to `<git-dir>/tuckerbox/history.jsonl` from the run engine; skip a torn last line on read
+- [x] 1.2 `tuckerbox history <change> [--json]`
+- [x] 1.3 Tests for each run-history scenario
 
 ## 2. Dependencies (change-dependencies)
 
