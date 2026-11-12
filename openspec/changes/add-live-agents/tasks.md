@@ -62,20 +62,20 @@
 
 ## 4. Answers (blocked-answers)
 
-- [ ] 4.1 Question of a blocked run (summary and findings of its `blocked` result, step, round) in `status`, `board --json` and card detail
-- [ ] 4.2 Test "Builder blocked on a decision"
-- [ ] 4.3 `tuckerbox answer <change> <text|--file|->` under the change lock: append to `answers` in `run.json`, `answered` history event, 16 KiB limit, refuse unless blocked or a terminal agent waits; document it in README
-- [ ] 4.4 Test "Answer from the command line"
-- [ ] 4.5 Test "Run not blocked"
-- [ ] 4.6 Brief section "Answers from a person" with the question and answers, kept in the resumed step's briefs until it reports a result, then marked used
-- [ ] 4.7 Test "Resume with the decision" (brief snapshot)
-- [ ] 4.8 Test "Two answers"
-- [ ] 4.9 `--resume`: record, then resume with all its gates; keep the answer when the resume is refused
-- [ ] 4.10 Test "Resume refused after the answer"
-- [ ] 4.11 Answer to a waiting terminal agent with `hc send`, recorded in history
-- [ ] 4.12 Test "Answer without opening the tab" (fake `hc` records the send)
-- [ ] 4.13 Board mod: question and text box on blocked and waiting cards; Answer and Answer and resume run `tuckerbox answer <change> [--resume] -` with the text on standard input
-- [ ] 4.14 Node test "Answer and resume from the card"
+- [x] 4.1 Question of a blocked run (summary and findings of its `blocked` result, step, round) in `status`, `board --json` and card detail
+- [x] 4.2 Test "Builder blocked on a decision"
+- [x] 4.3 `tuckerbox answer <change> <text|--file|->` under the change lock: append to `answers` in `run.json`, `answered` history event, 16 KiB limit, refuse unless blocked or a terminal agent waits; document it in README
+- [x] 4.4 Test "Answer from the command line"
+- [x] 4.5 Test "Run not blocked"
+- [x] 4.6 Brief section "Answers from a person" with the question and answers, kept in the resumed step's briefs until it reports a result, then marked used
+- [x] 4.7 Test "Resume with the decision" (brief snapshot)
+- [x] 4.8 Test "Two answers"
+- [x] 4.9 `--resume`: record, then resume with all its gates; keep the answer when the resume is refused
+- [x] 4.10 Test "Resume refused after the answer"
+- [x] 4.11 Answer to a waiting terminal agent with `hc send`, recorded in history
+- [x] 4.12 Test "Answer without opening the tab" (fake `hc` records the send)
+- [x] 4.13 Board mod: question and text box on blocked and waiting cards; Answer and Answer and resume run `tuckerbox answer <change> [--resume] -` with the text on standard input
+- [x] 4.14 Node test "Answer and resume from the card"
 
 ## 5. Integration
 
