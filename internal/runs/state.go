@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/agent"
+	"github.com/chrisjoyce911/tuckerbox/internal/history"
 	"github.com/chrisjoyce911/tuckerbox/internal/scope"
 	"github.com/chrisjoyce911/tuckerbox/internal/ship"
 )
@@ -75,6 +76,11 @@ type Run struct {
 	// write that leaves ready clears it. Dependents read it from this one
 	// file, never from tasks.md (formal/scope.tla).
 	Complete bool `json:"complete"`
+	// StepSettings is what the latest step to start began with: its
+	// effective agent, model, effort and permission profile name and the
+	// source of each, as in its step_started history event. A profile's
+	// flags are never recorded. It is replaced when the next step starts.
+	StepSettings *StepSettings `json:"step_settings,omitempty"`
 	// History holds every accepted step result, oldest first.
 	History []Entry `json:"history,omitempty"`
 	// Pid is the engine process, AgentPid the running step's agent.
@@ -84,6 +90,13 @@ type Run struct {
 	Since time.Time `json:"since"`
 	// Created is when the run was first started.
 	Created time.Time `json:"created"`
+}
+
+// StepSettings is the settings a step started with in a round.
+type StepSettings struct {
+	Step     string           `json:"step"`
+	Round    int              `json:"round"`
+	Settings history.Settings `json:"settings"`
 }
 
 // Entry is one finished step.

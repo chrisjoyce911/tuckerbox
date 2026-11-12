@@ -1,4 +1,4 @@
-// The board's drag handling (change-priority: Drag to reorder), with the
+// The board's drag handling (herdr-board: Drag to reorder), with the
 // real model and a stand-in for gpui and the action runner.   node --test test/
 import { test } from "node:test";
 import assert from "node:assert/strict";

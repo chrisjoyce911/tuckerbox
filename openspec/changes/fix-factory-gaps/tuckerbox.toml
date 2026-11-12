@@ -1,0 +1,2 @@
+title = "Close the factory's gaps"
+depends_on = ["add-forge-shipping", "add-autopilot"]

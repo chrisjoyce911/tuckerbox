@@ -63,10 +63,15 @@ func RolePrompt(root, role string) (prompt, source string, err error) {
 // Brief is what a step's agent is told.
 type Brief struct {
 	ShippingFeedback bool
-	Change           string
-	Step             string
-	Role             string
-	Round            int
+	// ShipsToForge is set when the run ships to a forge (ship = "mr" or
+	// "merge"). Only then does shipping tick CI tasks, so only then does
+	// the brief say not to tick them; in local mode they are ticked like
+	// any other task.
+	ShipsToForge bool
+	Change       string
+	Step         string
+	Role         string
+	Round        int
 	// Root is the change's worktree. Role overrides and change files are
 	// looked up under it, and paths in the brief are relative to it.
 	Root string
@@ -162,6 +167,12 @@ func (b Brief) Render() (string, error) {
 	for _, t := range tasks {
 		if t.Ship {
 			s.WriteString("\nTasks whose text starts with `(ship)` are done by shipping the change, not by a step: don't tick them.\n")
+			break
+		}
+	}
+	for _, t := range tasks {
+		if t.CI && b.ShipsToForge {
+			s.WriteString("\nTasks marked `(ci)`, or that say they pass on CI, are ticked when shipping finds CI green on the merge request: make the work ready for CI but don't tick them.\n")
 			break
 		}
 	}

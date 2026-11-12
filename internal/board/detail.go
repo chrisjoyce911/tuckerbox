@@ -15,7 +15,7 @@ import (
 )
 
 func readDetail(id, folder string, state statedir.Dir, run *runs.Run) (*Detail, error) {
-	d := &Detail{Change: id, Specs: []Spec{}, Tasks: []Task{}, Rounds: []Round{}, History: []Event{}, Groups: []Group{}}
+	d := &Detail{Change: id, Specs: []Spec{}, Tasks: []Task{}, Rounds: []Round{}, History: []Event{}, Groups: []Group{}, Choices: noChoices()}
 	var err error
 	d.Proposal, err = readOptional(filepath.Join(folder, "proposal.md"))
 	if err != nil {

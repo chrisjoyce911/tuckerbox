@@ -87,6 +87,10 @@ export function normaliseCard(c, src = {}) {
     needs_you: str(c?.needs_you),
     // The run's task scope (add-task-scope), or null for the whole change.
     scope: c?.scope && str(c.scope.spec) ? { spec: str(c.scope.spec), tasks: list(c.scope.tasks).map(str) } : null,
+    // Each workflow step's effective settings with their sources
+    // (settings-board); `started` when a running step started with them.
+    settings: list(c?.settings).map(stepSettings),
+    machines: list(c?.machines).map(str).filter(Boolean),
     on: src.on ?? null,
     path: src.path ?? "",
   };
@@ -148,7 +152,26 @@ export function normaliseDetail(d) {
     })),
     // Task groups with ticked and total counts, ship tasks left out (add-task-scope).
     groups: list(d?.groups).map((g) => ({ number: num(g?.number), title: str(g?.title), ticked: num(g?.ticked), total: num(g?.total) })),
+    choices: normaliseChoices(d?.choices),
   };
+}
+
+const SETTING_SOURCES = ["change", "repo", "machine", "default"];
+const setting = (v) => ({ value: str(v?.value), source: SETTING_SOURCES.includes(v?.source) ? v.source : "default" });
+const stepSettings = (s) => ({
+  step: str(s?.step), agent: setting(s?.agent), model: setting(s?.model), effort: setting(s?.effort),
+  permissions: setting(s?.permissions), started: s?.started === true,
+});
+
+// Card detail's allow-list for the settings pickers (settings-board:
+// Allowed choices in board data). Empty lists: nothing may be picked.
+export function normaliseChoices(c) {
+  const models = {};
+  if (c?.models && typeof c.models === "object" && !Array.isArray(c.models)) {
+    for (const [agent, names] of Object.entries(c.models)) models[agent] = list(names).map(str).filter(Boolean);
+  }
+  const strs = (v) => list(v).map(str).filter(Boolean);
+  return { agents: strs(c?.agents), models, efforts: strs(c?.efforts), permissions: strs(c?.permissions), voids_approval: strs(c?.voids_approval) };
 }
 
 const finding = (f) => ({ severity: str(f?.severity), file: str(f?.file), detail: str(f?.detail) });
@@ -180,9 +203,10 @@ export function group(board) {
   return cols;
 }
 
-// Columns listed in priority order, where a card can be dragged to reorder
-// it (change-priority: Priority on the board, Drag to reorder). Ready and
-// Done keep their order, and cards never move between columns.
+// Columns listed in priority order, where a card can be dragged to
+// reorder it (board-data: Priority on the board; herdr-board: Drag to
+// reorder). Ready and Done keep their order, and cards never move between
+// columns.
 export function sortedColumn(id) {
   return ["proposed", "approved", "in_progress", "queued"].includes(id) || String(id ?? "").startsWith("step:");
 }
@@ -238,7 +262,7 @@ export function liveDrop(drop, point) {
 }
 
 // The card a reorder runs for: `tuckerbox priority` writes the checkout on
-// the board's machine (change-priority: Drag to reorder), so it runs there
+// the board's machine (herdr-board: Drag to reorder), so it runs there
 // whatever machine the card's run is on.
 export function priorityCard(card, board) {
   return { ...card, on: board?.on ?? null, path: board?.path ?? "" };
