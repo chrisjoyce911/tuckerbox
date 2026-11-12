@@ -15,6 +15,7 @@ import (
 	"github.com/chrisjoyce911/tuckerbox/internal/agent"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/history"
+	"github.com/chrisjoyce911/tuckerbox/internal/scope"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 )
 
@@ -44,6 +45,11 @@ type Request struct {
 	// a new worktree is made at it, or refused if the change's branch is
 	// no longer there.
 	StartRev string
+	// Scope, for Start, is the task scope to run (see package scope), or
+	// "" for the whole change. It is judged again in the worktree under
+	// the change lock. A scope other than the run's own starts a ready,
+	// stopped, blocked or failed run again from the first step.
+	Scope string
 }
 
 // Engine runs one change's workflow in this process.
@@ -77,6 +83,8 @@ type Engine struct {
 	mu      sync.Mutex
 	saved   Run
 	machine string
+	// scopeFrom is the scope a run had before this Start gave it another.
+	scopeFrom *scope.Scope
 }
 
 // ActiveError means the change already has an active run.
@@ -213,6 +221,8 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	rs.Pid = os.Getpid()
 	rs.AgentPid = 0
 	rs.State = Queued
+	// Leaving ready clears the completeness record in this same write.
+	rs.Complete = false
 	rs.Reason, rs.Tail = "", ""
 	if err := e.save(ws, rs); err != nil {
 		return nil, err
@@ -332,10 +342,14 @@ func (e *Engine) prepare(req Request, ws Workspace) (*Run, int, error) {
 		if req.Mode == Resume {
 			return nil, 0, &StateError{Change: req.Change, State: "not started", Hint: "use tuckerbox run " + req.Change}
 		}
+		sc, _, err := e.startScope(req, ws, nil)
+		if err != nil {
+			return nil, 0, err
+		}
 		now := e.now()
 		rs = &Run{
 			Change: req.Change, Repo: e.Repo.Root, Worktree: ws.Path, Branch: ws.Branch, Base: ws.Base,
-			Step: steps[0].ID, Round: 1, Created: now, Since: now,
+			Step: steps[0].ID, Round: 1, Created: now, Since: now, Scope: sc,
 		}
 		if req.Mode == Rerun {
 			rs.Step = req.Step
@@ -352,8 +366,19 @@ func (e *Engine) prepare(req Request, ws Workspace) (*Run, int, error) {
 	cur := rs.Effective(false)
 	switch req.Mode {
 	case Start:
-		if cur.State == Ready {
-			return nil, 0, &StateError{Change: req.Change, State: Ready, Hint: "its work is on branch " + rs.Branch + "; use tuckerbox rerun " + req.Change + " <step> to run a step again"}
+		sc, same, err := e.startScope(req, ws, rs)
+		if err != nil {
+			return nil, 0, err
+		}
+		if !same {
+			// Another scope: the run starts again from the first step,
+			// in the same worktree, with its own max_rounds.
+			e.scopeFrom = rs.Scope
+			rs.Scope = sc
+			rs.Step = steps[0].ID
+			rs.Rejections = nil
+		} else if cur.State == Ready {
+			return nil, 0, &StateError{Change: req.Change, State: Ready, Hint: "its work is on branch " + rs.Branch + "; use tuckerbox rerun " + req.Change + " <step> to run a step again, or tuckerbox run " + req.Change + " --tasks <scope> to run other tasks"}
 		}
 	case Resume:
 		switch cur.State {
@@ -491,10 +516,28 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 	return e.ship(ws, rs)
 }
 
-// ship finishes a run whose last step is done. In local mode the work is
-// committed on the change's branch and nothing is pushed.
+// ship finishes a run whose last step is done. A scoped run is ready only
+// when its scope's tasks are ticked in the worktree. Whether the change is
+// complete decides, with the ship mode, whether the run ships (see
+// shipDecision). In local mode the work is committed on the change's
+// branch and nothing is pushed.
 func (e *Engine) ship(ws Workspace, rs *Run) (*Run, error) {
-	if e.Config.Ship != "" && e.Config.Ship != config.ShipLocal {
+	// The worktree's tasks.md, read while this run holds the change lock:
+	// tuckerbox tasks and edit write it only under that lock.
+	tasks, err := readTasks(TasksFile(ws.Path, rs.Change))
+	if err != nil {
+		return e.finish(ws, rs, Failed, "reading tasks.md: "+err.Error())
+	}
+	if rs.Scope != nil {
+		if reason := scopeReason(scope.Check(rs.Scope, tasks)); reason != "" {
+			return e.finish(ws, rs, Blocked, reason)
+		}
+	}
+	left := scope.Unticked(tasks)
+	switch shipDecision(e.Config.Ship, rs.Scope != nil, len(left) == 0) {
+	case outcomeBlocked:
+		return e.finish(ws, rs, Blocked, "tasks not ticked: "+strings.Join(left, ", "))
+	case outcomeShip:
 		return e.finish(ws, rs, Failed, fmt.Sprintf("ship mode %q is not supported yet", e.Config.Ship))
 	}
 	msg := fmt.Sprintf("%s: work from tuckerbox run\n\nCommitted by Tuckerbox (ship = \"local\") after the last step, %s, reported done.\n",
@@ -507,6 +550,8 @@ func (e *Engine) ship(ws Workspace, rs *Run) (*Run, error) {
 		e.logf(rs.Change, "committed the remaining work on branch %s", rs.Branch)
 	}
 	rs.Step = ""
+	// Recorded in the same run.json write that makes the run ready.
+	rs.Complete = len(left) == 0
 	return e.finish(ws, rs, Ready, "")
 }
 
@@ -631,4 +676,26 @@ func oneLine(s string) string {
 		s = s[:200] + "…"
 	}
 	return s
+}
+
+// startScope judges req's scope in the worktree's tasks.md for a Start.
+// cur is the run's current state, or nil for a new run; same reports that
+// it already has that scope.
+func (e *Engine) startScope(req Request, ws Workspace, cur *Run) (*scope.Scope, bool, error) {
+	if req.Mode != Start {
+		return nil, true, nil
+	}
+	var text string
+	if req.Scope != "" {
+		data, err := os.ReadFile(TasksFile(ws.Path, req.Change))
+		if err != nil && !os.IsNotExist(err) {
+			return nil, false, err
+		}
+		text = string(data)
+	}
+	sc, same, err := ScopeFor(req.Scope, text, cur)
+	if err != nil {
+		return nil, false, fmt.Errorf("change %s: %w", req.Change, err)
+	}
+	return sc, same, nil
 }

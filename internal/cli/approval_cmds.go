@@ -117,6 +117,16 @@ func (g *runGate) check(ctx context.Context, change string) (string, error) {
 	if !g.cfg.RequireApproval {
 		return "", nil
 	}
+	sp, err := g.start(ctx, change)
+	if err != nil {
+		return "", err
+	}
+	return sp.Rev, judgeStart(ctx, g.repo, change, sp, true)
+}
+
+// start says where change's run would start from: its worktree, or the
+// commit a new one would be made at. The base is fetched once.
+func (g *runGate) start(ctx context.Context, change string) (runs.StartPoint, error) {
 	if !g.done {
 		g.done = true
 		g.base, g.err = g.repo.Base(ctx, g.cfg.Worktree.Base, func(msg string) {
@@ -124,13 +134,9 @@ func (g *runGate) check(ctx context.Context, change string) (string, error) {
 		})
 	}
 	if g.err != nil {
-		return "", g.err
+		return runs.StartPoint{}, g.err
 	}
-	sp, err := g.repo.ResolveStart(ctx, g.cfg.Worktree, change, g.base, nil)
-	if err != nil {
-		return "", err
-	}
-	return sp.Rev, judgeStart(ctx, g.repo, change, sp, true)
+	return g.repo.ResolveStart(ctx, g.cfg.Worktree, change, g.base, nil)
 }
 
 // approvalGate is the engine's runs.Engine.Gate when approval is
