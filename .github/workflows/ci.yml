@@ -38,7 +38,7 @@ jobs:
           CGO_ENABLED: "1"
         # internal/cli spawns many tuckerbox and git processes, which are
         # slow on Windows runners: go test's default 10m is not enough there.
-        run: go test -race -timeout 25m -v ./...
+        run: go test -race -timeout 25m ./...
       - name: go build (no cgo)
         env:
           CGO_ENABLED: "0"

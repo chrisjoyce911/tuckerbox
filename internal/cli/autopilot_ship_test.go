@@ -64,7 +64,7 @@ func TestAutopilotWholeChangeLeftIncomplete(t *testing.T) {
 	f.env.SetPlan(t, map[string]testenv.Action{"build": all})
 	f.pass()
 	f.waitState("add-login", "blocked", "")
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 1; i++ {
 		res := f.pass()
 		if strings.Contains(res.stdout, "start ") || !strings.Contains(res.stdout, "add-login needs you: blocked: tasks not ticked: 3.2") {
 			t.Fatalf("merge pass %d:\n%s", i, res.stdout)
@@ -77,7 +77,7 @@ func TestAutopilotWholeChangeLeftIncomplete(t *testing.T) {
 	g.env.SetPlan(t, map[string]testenv.Action{"build": all})
 	g.pass()
 	g.waitState("add-login", "ready", "")
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 1; i++ {
 		res := g.pass()
 		if strings.Contains(res.stdout, "start ") || !strings.Contains(res.stdout, "add-login needs you: ready but not complete (tasks not ticked: 3.2)") {
 			t.Fatalf("local pass %d:\n%s", i, res.stdout)

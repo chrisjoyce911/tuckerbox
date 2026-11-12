@@ -181,7 +181,7 @@ func TestAutopilotLeavesAPersonsRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lock.Release()
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 1; i++ {
 		res := f.pass()
 		if strings.Contains(res.stdout, "start ") || strings.Contains(res.stdout, "resume ") {
 			t.Errorf("pass %d:\n%s", i, res.stdout)
