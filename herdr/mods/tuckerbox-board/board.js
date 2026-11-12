@@ -4,7 +4,7 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, props, openOverlay, closeOverlay, spaces, panes, focused, run, notify } from "herdr";
 import { MOD, loadAll, locate, candidates, fixturesFolder } from "./data.js";
-import { group, counts, columnName, due, isShown, ago, needsYou, candidatesKey, openGate, NO_CONFIG, sortedColumn, dropPosition, eventBox, liveDrop, priorityCard } from "./model.js";
+import { group, counts, columnName, due, isShown, ago, needsYou, needsYouReason, newlyNeeding, toastCall, candidatesKey, openGate, NO_CONFIG, sortedColumn, dropPosition, eventBox, liveDrop, priorityCard } from "./model.js";
 import { cardActions, invocation, actionLabel, defaultStep, ACTIONS, dockCall, undockCalls } from "./actions.js";
 import { perform, watchEdits, changed } from "./perform.js";
 import { editOf, editNote } from "./edits.js";
@@ -78,6 +78,12 @@ export class BoardView extends View {
       // Keep the last good board of the same repository on screen when a later read fails.
       if (b.error && b.error.code !== "no_config" && same && this.board && !this.board.error) this.readError = b.error.message;
       else { this.board = b; this.readError = null; }
+      if (!b.error) {
+        // A toast for each card that newly needs you; none at the first read.
+        const n = newlyNeeding(same ? this.needing : null, b);
+        this.needing = n.seen;
+        for (const t of n.toasts) notify(toastCall(t));
+      }
       cx.notify();
     });
   }
@@ -208,7 +214,7 @@ export class BoardView extends View {
         .when(Boolean(c.agent), (el) => el.child(div().child("·")).child(div().child(c.agent)))
         .child(div().flex_1())
         .when(Boolean(c.machine), (el) => el.child(div().truncate().max_w(90).child(c.machine)))))
-      .when(Boolean(c.reason), (el) => el.child(div().text_size(11).text_color(flag ? tm.blocked : tm.dim).child(c.reason)))
+      .when(Boolean(c.reason || c.needs_you), (el) => el.child(div().text_size(11).text_color(flag ? tm.blocked : tm.dim).child(c.needs_you && c.state !== "blocked" && c.state !== "failed" ? needsYouReason(c) : c.reason)))
       .when(c.depends_on.length > 0 && !c.archived, (el) => el.child(div().text_size(11).text_color(tm.dim)
         .child(`after ${c.depends_on.map((d) => `${d.change} (${columnName(b, d.column)})`).join(", ")}`)))
       .when(Boolean(c.branch), (el) => el.child(div().text_size(10.5).text_color(tm.dim).truncate().child(`⎇ ${c.branch}`)))
@@ -252,6 +258,9 @@ export class BoardView extends View {
       .when(n.needs > 0, (el) => el.child(h_flex().items_center().gap(5).text_size(11.5).text_color(tm.blocked)
         .child(dot(tm.blocked, 8)).child(`${n.needs} need${n.needs === 1 ? "s" : ""} you`)))
       .when(Boolean(b && !b.require_approval), (el) => el.child(div().text_size(11).text_color(tm.dim).child("approval off")))
+      .when(Boolean(b && !b.fixtures), (el) => el.child(div().text_size(11).text_color(b.autopilot?.running ? tm.working : tm.dim)
+        .tooltip(b.autopilot?.running ? `tuckerbox autopilot, pid ${b.autopilot.pid}` : "tuckerbox autopilot is not running for this repository here")
+        .child(b.autopilot?.running ? "autopilot on" : "autopilot off")))
       .when(Boolean(this.readError), (el) => el.child(div().text_size(11).text_color(tm.blocked).truncate().max_w(260).tooltip(this.readError).child("last read failed")))
       .child(div().flex_1())
       // Machines that couldn't be asked: named, their cards missing, the others shown.

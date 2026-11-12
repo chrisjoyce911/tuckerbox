@@ -6,9 +6,9 @@
 // click opens or hides the board window.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { theme, placement, run } from "herdr";
+import { theme, placement, run, notify } from "herdr";
 import { MOD, loadAll, locate, candidates } from "./data.js";
-import { counts, candidatesKey, drawerRows, DRAWER_POLL_MS } from "./model.js";
+import { counts, candidatesKey, drawerRows, newlyNeeding, toastCall, DRAWER_POLL_MS } from "./model.js";
 import { toggleCall } from "./actions.js";
 import { dot, SPINNER } from "./ui.js";
 
@@ -38,6 +38,14 @@ export class DrawerView extends View {
         if (at.found) {
           const b = await loadAll(at);
           n = b.error ? { error: b.error.message } : counts(b);
+          if (!b.error) {
+            // Toasts for cards that newly need you; none at the first read
+            // of a repository.
+            const same = this.at && this.at.root === at.root && this.at.on === at.on;
+            const t = newlyNeeding(same ? this.needing : null, b);
+            this.needing = t.seen;
+            for (const x of t.toasts) notify(toastCall(x));
+          }
         }
         this.at = at;
         this.counts = n;
