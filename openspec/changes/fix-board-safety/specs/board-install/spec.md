@@ -32,7 +32,7 @@ When writing the install record fails, install SHALL put every file it changed i
 - **THEN** `keys.json` is byte for byte as before the run, the record is as before, the journal is gone, and install exits non-zero naming the record file
 
 ### Requirement: Recovering from a left journal
-When rollback fails too, install SHALL keep the journal and say the next install or uninstall will finish the undo. Every install and uninstall SHALL first, under the lock, undo a journal it finds: put back files still as the journal says it wrote them, remove a clone still as it was cloned and show its source again, report entries changed since and leave them, then remove the journal.
+When rollback fails too, install SHALL keep the journal and say the next install or uninstall will finish the undo. Every install and uninstall SHALL first, under the lock, undo a journal it finds: put back files still as the journal says it wrote them, remove a clone still as it was cloned and show its source again, and report entries the person changed since, leaving those files as they are. Then it SHALL remove the journal.
 
 #### Scenario: Record write and rollback both fail
 - **WHEN** replacing the record fails every time and putting `keys.json` back also fails during `tuckerbox herdr install --keys`
@@ -41,6 +41,21 @@ When rollback fails too, install SHALL keep the journal and say the next install
 #### Scenario: Uninstall finishes the undo
 - **WHEN** a journal was left as above, the faults are gone, and the person runs `tuckerbox herdr uninstall`
 - **THEN** `keys.json` is byte for byte as before that install, the journal is gone, and the record is as before that install
+
+#### Scenario: File edited since
+- **WHEN** a journal names `keys.json`, and the person has edited `keys.json` since that install
+- **THEN** recovery leaves `keys.json` as it is, reports it, drops that entry, removes the journal and carries on
+
+### Requirement: Recovery that fails keeps the journal
+When recovery can't undo an entry because a write, layout switch or removal fails, it SHALL keep the journal with every entry not yet undone, exit non-zero naming what failed, and start no new change: install and uninstall SHALL refuse to do anything else until a recovery succeeds. An entry left because the person changed its file is not a failure.
+
+#### Scenario: Fault still there on the next try
+- **WHEN** a journal names `keys.json`, restoring `keys.json` still fails, and the person runs `tuckerbox herdr uninstall`, then `tuckerbox herdr install --drawer`
+- **THEN** both exit non-zero naming `keys.json`, the journal is unchanged, and no layout, key or mod file changes
+
+#### Scenario: Fault cleared after a failed recovery
+- **WHEN** the recovery above failed twice and the fault is then cleared, and the person runs `tuckerbox herdr uninstall`
+- **THEN** `keys.json` is byte for byte as before the first install, the journal is gone, and uninstall goes on to finish
 
 ### Requirement: Failed drawer step after a clone
 When the drawer step fails after `layout.clone` made and showed a clone, install SHALL show the layout that was shown before, remove the clone, record no drawer, and exit non-zero. If that clean-up fails, the record SHALL hold the clone as a drawer entry with `cloned_from` set, empty `before`, and `after` the hash of the clone as found, and install SHALL say so.

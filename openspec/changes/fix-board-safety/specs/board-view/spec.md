@@ -59,26 +59,23 @@ Cards in Done SHALL show no approval badge on the board or in card detail, whate
 - **THEN** it still shows the `not approved` badge
 
 ### Requirement: Columns scroll sideways
-In the board window and in a docked board pane, every column SHALL keep a fixed width of 236 px. When the columns don't fit, the column row SHALL scroll horizontally with a visible scrollbar, by trackpad swipe and by dragging the scrollbar. It SHALL NOT squeeze, wrap or hide columns. The header SHALL stay in place.
+In the board window and a docked board pane, every column SHALL keep a fixed width of 236 px. When the columns don't fit, the row SHALL scroll sideways with Herdr's own scrolling: a visible scrollbar that can be dragged, and trackpad swipes. Shift with the mouse wheel SHALL scroll it where the operating system turns that into sideways scrolling. Nothing is promised for a plain vertical wheel. Columns SHALL NOT be squeezed, wrapped or hidden.
 
 #### Scenario: Narrow docked pane
 - **WHEN** the board is docked in a pane 500 px wide and has five columns
-- **THEN** the first two columns show at full width, a horizontal scrollbar shows, and scrolling right reaches Ready and Done
+- **THEN** the first two columns show at full width, a horizontal scrollbar shows, and dragging it or swiping reaches Ready and Done
 
 #### Scenario: Wide window
 - **WHEN** every column fits in the board window
 - **THEN** no horizontal scrollbar shows and nothing scrolls sideways
 
-### Requirement: Shift and the mouse wheel step through columns
-Over a column row that doesn't fit, a wheel movement with shift held and no sideways part SHALL reveal the next column to the right (wheel down) or left (wheel up), one column per 236 px of movement, and SHALL NOT scroll a column's list. A wheel movement that already has a sideways part SHALL be left to Herdr's own scrolling.
+#### Scenario: Shift and the wheel turned sideways
+- **WHEN** the operating system delivers shift with the mouse wheel as a sideways movement over a row that doesn't fit
+- **THEN** the row scrolls sideways
 
-#### Scenario: Shift and the mouse wheel
-- **WHEN** the board is docked 500 px wide showing Proposed and Approved, and the person turns the wheel down one column's worth with shift held
-- **THEN** In progress comes into view and no column's list moves
-
-#### Scenario: Sideways wheel left alone
-- **WHEN** the platform delivers shift with the wheel as a sideways movement
-- **THEN** the board leaves it to Herdr's scrolling and does not step a column as well
+#### Scenario: Plain wheel over a column
+- **WHEN** the person turns the mouse wheel without shift over a column whose list is longer than the column
+- **THEN** that column's list scrolls up or down, and the row does not move sideways
 
 ### Requirement: Titles of this repository's changes
 A card's title SHALL come from `title` in the change's `tuckerbox.toml`, else the change id with dashes as spaces. The proposal's first heading SHALL NOT be used. Every active change in this repository SHALL have a `tuckerbox.toml` with a non-empty `title`, and a test SHALL fail when one does not.

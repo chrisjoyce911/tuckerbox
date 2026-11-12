@@ -19,7 +19,8 @@ small and every rule has a test.
   read, change and record, so two at once can't lose each other's record.
 - **A journal file is written before anything changes,** so a failed
   record write rolls back, and when rollback fails too, the next install or
-  uninstall finishes the undo.
+  uninstall finishes the undo. A recovery that fails keeps the journal and
+  blocks any new change until it succeeds.
 - **A failed drawer step after a layout clone** removes the clone and shows
   the layout that was shown before. A clone that can't be removed is
   recorded, and uninstall removes it even if it is malformed.
@@ -36,9 +37,10 @@ small and every rule has a test.
   resolves to the repository's main worktree, never the change worktree.
 - **Done cards show no approval badge.**
 - **Columns scroll sideways** in the board window and a docked pane when
-  they don't fit, at a fixed width each, by trackpad and scrollbar drag;
-  shift with the wheel steps a column at a time, using only Herdr's real
-  API. In a narrow docked pane Ready and Done were unreachable.
+  they don't fit, at a fixed width each, with Herdr's own scrolling:
+  scrollbar drag and trackpad, and shift with the wheel where the operating
+  system turns it sideways. In a narrow docked pane Ready and Done were
+  unreachable.
 - **Titles come from `title` in each change's `tuckerbox.toml`,** as now.
   The proposal's heading is not used. Every active change in this
   repository gets a title, `add-herdr-board` gets `title = "Herdr board"`,
