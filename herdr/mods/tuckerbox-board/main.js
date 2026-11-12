@@ -1,17 +1,19 @@
 // The Tuckerbox board in Herdr: OpenSpec changes as cards in columns derived
 // by `tuckerbox board --json`. One mod, two views:
 //   (no view)     the board (a window from mod.open, or a tab or pane)
-//   view: "card"  one change's detail, as a dialog the board opens
+//   view: "card"      one change's detail, as a dialog the board opens
+//   view: "proposal"  a change's proposal, as a pane beside the board
 // Props: space (the space to follow), folder and on (read the board there),
 // fixtures (true or a folder: render fixtures/*.json instead of running tuckerbox).
 import { View, div } from "gpui-kit";
 import { props } from "herdr";
 import { BoardView } from "./board.js";
 import { CardView } from "./card.js";
+import { ProposalView } from "./proposal.js";
 
 export default class Main extends View {
   init(p, cx) {
-    const Inner = props()?.view === "card" ? CardView : BoardView;
+    const Inner = { card: CardView, proposal: ProposalView }[props()?.view] ?? BoardView;
     this.inner = new Inner(p);
     this.inner.init?.(p, cx);
   }

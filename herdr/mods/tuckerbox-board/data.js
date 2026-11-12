@@ -29,7 +29,7 @@ export async function fixturesFolder() {
 async function readFixture(folder, name) {
   const text = await readTextFile(`${folder}/${name}`);
   if (text == null) return { error: { code: "failed", message: `fixture ${folder}/${name} not found` } };
-  try { return normaliseBoard(JSON.parse(text), { on: null }); } catch (e) {
+  try { return { ...normaliseBoard(JSON.parse(text), { on: null }), fixtures: true }; } catch (e) {
     return { error: { code: "failed", message: `fixture ${name}: ${e?.message ?? e}` } };
   }
 }
