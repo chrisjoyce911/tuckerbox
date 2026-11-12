@@ -182,7 +182,15 @@ func (e *Engine) Run(ctx context.Context, resume bool) Outcome {
 	hadMR := r.MR != nil
 	var mr *forge.MR
 	if resume {
-		mr, err = claim.Resume(ctx, e.Forge, e.Request, e.persistPush)
+		mr, err = claim.Resume(ctx, e.Forge, e.Request, func(sha string) error {
+			if !claim.adopting {
+				return e.persistPush(sha)
+			}
+			r.LastPush = sha
+			r.PushedAt = e.now()
+			r.CI = &CIInfo{State: "pending", Commit: sha}
+			return e.save()
+		})
 	} else {
 		mr, err = claim.Acquire(ctx, e.Forge, e.Request, e.persistPush)
 	}

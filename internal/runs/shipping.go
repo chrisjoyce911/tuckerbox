@@ -13,8 +13,17 @@ import (
 
 func (e *Engine) forgeShip(ctx context.Context, ws Workspace, rs *Run, resume bool) (*Run, error) {
 	rs.State, rs.Step, rs.Reason = Shipping, "", ""
+	if !rs.ShippingStarted {
+		rs.ShippingStarted = true
+		rs.ShipRound = 1
+	}
 	if err := e.save(ws, rs); err != nil {
 		return rs, err
+	}
+	if e.workflowSlot != nil {
+		if err := e.workflowSlot.Release(); err != nil {
+			return e.finish(ws, rs, Blocked, err.Error())
+		}
 	}
 	client, mask, err := e.shippingClient(ctx)
 	if err != nil {

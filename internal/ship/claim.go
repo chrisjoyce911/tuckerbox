@@ -60,6 +60,7 @@ type ClaimForge interface {
 	OpenMR(context.Context, forge.OpenRequest) (*forge.MR, error)
 }
 type Claim struct {
+	adopting bool
 	Identity Identity
 	Git      Git
 	Lease    string
@@ -195,6 +196,8 @@ func (c *Claim) Resume(ctx context.Context, f ClaimForge, request forge.OpenRequ
 			return nil, fmt.Errorf("shipping requires durable lease storage")
 		}
 		c.Lease = adopted
+		c.adopting = true
+		defer func() { c.adopting = false }()
 		if err := save(adopted); err != nil {
 			return nil, err
 		}
