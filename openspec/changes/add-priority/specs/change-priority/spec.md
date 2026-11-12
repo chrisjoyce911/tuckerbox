@@ -97,7 +97,7 @@ A change's admission rank SHALL be the lowest `priority` value of it and every a
 - **THEN** C starts first, then A, then B
 
 ### Requirement: Queue follows the order
-When a slot frees, the queued run first in admission order SHALL take it. Runs waiting on dependencies SHALL NOT be queued. A run SHALL choose the first run and take a slot in one step under the sidecar lock, which a `priority` move holds for all its writes. Edits made outside Tuckerbox SHALL count from the next admission. Model: `formal/priority.tla`, `OrderedAdmission`.
+When a slot frees, the queued run first in admission order SHALL take it. Runs waiting on dependencies SHALL NOT be queued. A run SHALL choose the first run and try for a slot while holding the sidecar lock, which a `priority` move holds for all its writes and a run holds to join the queue. Edits made outside Tuckerbox SHALL count from the next admission. Model: `formal/priority.tla`, `OrderedAdmission`.
 
 #### Scenario: Reorder while queued
 - **WHEN** `max_parallel = 1`, A runs, B and then C are queued, and the user moves C to the top
@@ -106,6 +106,10 @@ When a slot frees, the queued run first in admission order SHALL take it. Runs w
 #### Scenario: Reorder as a slot frees
 - **WHEN** B is first in the queue, A ends, and `tuckerbox priority C top` finishes before B takes the free slot
 - **THEN** C takes the slot and B stays queued
+
+#### Scenario: Higher-priority arrival during admission
+- **WHEN** A holds the only slot, B finds itself first in the queue, and C, ranked above B, is started as A ends
+- **THEN** either C joins before B's check and takes the slot, or C joins after B took it; B never takes the slot while C is queued
 
 #### Scenario: Slot frees during a renumber
 - **WHEN** a move renumbers five changes and a slot frees while it writes them

@@ -167,12 +167,29 @@ Choosing the first run and taking a slot must be one step. Otherwise:
 - a run reads the priorities halfway through a renumber and picks the
   wrong first run
 
-So a waiting run, on each check, takes the sidecar lock, lists the live
-tickets, reads their changes' `priority` and `depends_on` from the
-checkout, builds the admission order, and, if it is first, tries for a
-slot. Then it lets the lock go. It never waits while holding the lock.
-`formal/priority.tla` checks this. Its broken variants (deciding outside
-the lock, and taking a slot without the lock) are rejected.
+- a better-ranked run publishes its ticket after the check has listed
+  the queue, and a slot frees before the check tries for it
+
+So three things take the sidecar lock:
+- a `priority` move, for all its writes
+- `JoinQueue`, to publish a ticket
+- a waiting run's check: list the live tickets, read their changes'
+  `priority` and `depends_on` from the checkout, build the admission
+  order, and, if it is first, try for a slot, then let the lock go
+
+While a check holds the lock, the queue and the ranks can't change. Only
+the slots can, because a run ends without the lock. So the check counts
+as happening at the moment it tries for the slot: it was first then, and
+the slot was free then. Removing a ticket (a run leaving the queue, or a
+dead ticket cleaned up) needs no lock: it can only make a run first
+sooner, never put another run ahead of it. No holder of the lock waits
+while holding it.
+
+`formal/priority.tla` checks this, with the check and the slot try as two
+steps and a run's end between them. Its broken variants are rejected:
+publishing a ticket without the lock (`join`), deciding outside the lock
+and taking the slot later (`decide`), and taking a slot without the lock
+during a move (`halfmove`).
 
 The consistency boundary: a run is admitted only if it is first by the
 ranks of the last finished `priority` move. Edits outside Tuckerbox (an
