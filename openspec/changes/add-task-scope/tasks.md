@@ -16,16 +16,27 @@
 - [ ] 2.1 Add `scope` (as typed, task numbers) to `run.json`; `resume` and `rerun` keep it
 - [ ] 2.2 `run` with a different scope on a ready, stopped, blocked or failed run starts again from the first step: round up, rejections cleared, same worktree; same scope behaves as today
 - [ ] 2.3 After the last step's `done`, check the scope's ticks in the worktree; `blocked` with `scope tasks not ticked: …` or a missing number
-- [ ] 2.4 A dependency's ready scoped run counts as met only when all its tasks are ticked; queued reason shows the scope
-- [ ] 2.5 Test: Second scope while running
-- [ ] 2.6 Test: Resume keeps the scope
-- [ ] 2.7 Test: Next group after a ready one (round keeps counting, a late result from the old round is ignored)
-- [ ] 2.8 Test: Rest of the change
-- [ ] 2.9 Test: Ticks keep the next scope approved
-- [ ] 2.10 Test: Design edited during a scope
-- [ ] 2.11 Test: Scope ticked
-- [ ] 2.12 Test: Task left unticked
-- [ ] 2.13 Test: Dependency ready for one group
+- [ ] 2.4 Write `complete` into `run.json` in the same write that sets `ready` (under the change lock); clear it in the write that starts another scope; no scope counts as complete
+- [ ] 2.5 Dependency check (local mode): met when `ready` and `complete` from one read of the dependency's `run.json`, never its tasks.md; queued reason shows the scope
+- [ ] 2.6 Ship decision after the last step: in `mr`/`merge`, not complete means `ready` with nothing archived, pushed, opened or merged; unit-test the decision for every ship mode and `complete` value
+- [ ] 2.7 Test: Second scope while running
+- [ ] 2.8 Test: Resume keeps the scope
+- [ ] 2.9 Test: Next group after a ready one (round keeps counting, a late result from the old round is ignored)
+- [ ] 2.10 Test: Rest of the change
+- [ ] 2.11 Test: Ticks keep the next scope approved
+- [ ] 2.12 Test: Design edited during a scope
+- [ ] 2.13 Test: Scope ticked
+- [ ] 2.14 Test: Task left unticked
+- [ ] 2.15 Test: Dependency ready for one group
+- [ ] 2.16 Test: Last group ready (`ready` and `complete` in one `run.json` write)
+- [ ] 2.17 Test: Earlier group ready
+- [ ] 2.18 Test: Next group ticked while the dependent checks (interleaving test: start scope 2 and tick its tasks between the dependent's reads, with hooks in the engine; run with `-race`)
+- [ ] 2.19 Test: Dependency complete
+- [ ] 2.20 Test: Ticks by hand don't release dependents
+- [ ] 2.21 Test: First group in merge mode (unit test of the ship decision here; end-to-end in `add-forge-shipping`)
+- [ ] 2.22 Test: Last group in mr mode (unit test of the ship decision here; end-to-end in `add-forge-shipping`)
+- [ ] 2.23 Test: Dependents in merge mode (archive on the base required; end-to-end in `add-forge-shipping`)
+- [ ] 2.24 `formal/scope.tla` passes and `formal/scope_broken_split.tla` is rejected by `scripts/tla-check.sh`
 
 ## 3. Brief (agent-launch)
 

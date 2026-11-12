@@ -33,8 +33,15 @@ small.
   not, it is `blocked` and names the unticked tasks.
 - Approval still covers the whole change. The run gate is unchanged, and
   starting the next scope is a start, so it is gated again.
-- A dependency counts as ready only once all its tasks are ticked, so one
-  finished group doesn't release the changes that depend on it.
+- A dependency counts as ready only when its run recorded the whole change
+  as complete, in the same `run.json` write that made it `ready`.
+  Dependents read that record, never the dependency's tasks.md, so one
+  finished group doesn't release the changes that depend on it. TLA+ model
+  `formal/scope.tla`, with a broken split-read variant TLC rejects.
+- **Partial runs don't ship:** in `mr` or `merge` mode (`add-forge-shipping`),
+  a scoped run whose change isn't complete ends `ready` and never archives,
+  pushes, opens a merge request or merges. There, only an archive on the
+  base branch releases dependents.
 - `status`, history and board cards show the scope. A new history event,
   `scope_started`, marks a run starting again for a new scope.
 - The board's card detail gets **Run group…**: pick a group with unticked
@@ -62,6 +69,9 @@ design.md.
   gate).
 - Run engine, brief, `status`, `history` and `board` code, and the board
   mod. No new config keys and no new state files.
-- `run.json` gains a `scope` field. Runs without one behave as today.
-- No new concurrency: a scope is a field of the one run a change already
-  has. See model.md.
+- `run.json` gains `scope` and `complete` fields. Runs without one behave as today.
+- A scope is a field of the one run a change already has, so one run per
+  change is unchanged. Dependency readiness is a new reader-writer race, so
+  it is modelled. See model.md.
+- `add-forge-shipping` now depends on this change and defers to its
+  shipping rule.

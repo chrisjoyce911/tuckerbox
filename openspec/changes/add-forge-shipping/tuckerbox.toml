@@ -1,2 +1,2 @@
 title = "Forge shipping"
-depends_on = ["add-herdr-board"]
+depends_on = ["add-herdr-board", "add-task-scope"]

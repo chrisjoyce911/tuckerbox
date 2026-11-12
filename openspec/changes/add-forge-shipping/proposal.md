@@ -82,7 +82,9 @@ against that race.
 
 ## Impact
 
-- Depends on `add-herdr-board` (run history, the board and dependencies).
+- Depends on `add-herdr-board` (run history, the board and dependencies)
+  and `add-task-scope`: a scoped run whose change isn't complete ends
+  `ready` and never ships (task-scope, `Partial runs don't ship`).
   Its `board-data` and `run-history` specs are not archived yet, so this
   change keeps their additions in `ship-board` (see design.md).
 - New Go packages for forge access (an HTTP client per forge, no new

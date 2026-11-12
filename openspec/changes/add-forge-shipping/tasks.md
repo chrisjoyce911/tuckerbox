@@ -40,6 +40,7 @@
 - [ ] 4.7 Merge request closed or merged by someone else; verify with "Closed by a person"
 - [ ] 4.8 Dependencies in `mr` and `merge` mode are met only when archived on the base; verify with "Dependency waits for merge"
 - [ ] 4.9 `tuckerbox run` checks forge, token and foreign claims first; warns when the forge is unreachable; verify with "Claimed elsewhere" and "No token"
+- [ ] 4.10 Honour task-scope's partial-run rule: a scoped run whose `run.json` records the change as not complete becomes `ready` and ships nothing; end-to-end tests against a fake forge for "Partial scope in merge mode" (no archive commit, no push, no merge request, no merge) and for task-scope's "Last group in mr mode" and "Dependents in merge mode"
 
 ## 5. CI and review (ship-feedback)
 
