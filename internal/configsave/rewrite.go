@@ -267,9 +267,10 @@ func rewriteOne(data []byte, e Edit) ([]byte, error) {
 		}
 	}
 	if e.Unset {
-		// An empty step table disappears; comments surrounding it stay.
+		// Empty step and token-host tables disappear; surrounding comments stay.
 		for _, s := range stmts {
-			if s.header && len(s.path) == 2 && s.path[0] == "steps" {
+			if s.header && len(s.path) == 2 && (s.path[0] == "steps" ||
+				(s.path[0] == "forges" && len(e.Path) == 3 && e.Path[0] == "forges" && e.Path[2] == "token")) {
 				n, _ := lookup(expected, s.path).(map[string]any)
 				if len(n) == 0 {
 					drop[s.start] = true

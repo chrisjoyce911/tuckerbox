@@ -388,3 +388,39 @@ Named after the [Dog on the Tuckerbox](https://en.wikipedia.org/wiki/Dog_on_the_
 ## Licence
 
 Apache-2.0. See [LICENSE](LICENSE).
+
+Save repository or machine settings together with `tuckerbox config set`:
+
+```sh
+tuckerbox config set --local max_parallel=3 steps.review.max_rounds=2
+tuckerbox config set --unset steps.review.effort
+tuckerbox config set --machine editor='code --wait'
+tuckerbox config set --dry-run --json max_parallel=3
+tuckerbox config set --if-match <revision-from-config-show> max_parallel=3
+tuckerbox config edit                 # edit the main checkout, then check it
+tuckerbox config edit --machine
+```
+
+Values follow the key catalogue's types; lists are comma-separated. Repeat
+`--unset` to remove several keys. A save checks the merged configuration before
+writing, preserves comments and unrelated lines, and refuses new problems.
+Existing problems and affected change overrides are reported. Saves hold a
+per-file OS lock and write by rename. `--if-match none` requires an absent file.
+
+Repository saves open a pull request when this machine has a forge token;
+otherwise they write the main checkout and explain that nothing was committed.
+`--local` always writes the main checkout. Commit and push local changes for
+other machines and new runs; existing worktrees keep their own configuration.
+`--pr` requires a token and never falls back to local. Pull request saves check
+and compare revisions against the fetched default branch, create one commit on
+a fresh `tuckerbox/config-...` branch, and print the review link. They leave the
+checkout untouched and never merge the pull request, including in `ship = "merge"`
+mode. `--dry-run` checks the same target and writes no configuration or branch.
+
+Store a forge token with `tuckerbox config set --machine
+'forges."github.com".token'` (enter it at the hidden prompt, or supply a line on
+standard input). Never put a token value in the command arguments. Tokens are
+saved separately in private `credentials.toml`, beside machine config, with mode
+0600 on Unix. Remove one with `--machine --unset 'forges."github.com".token'`.
+Machine saves never commit or push. `config set --json` reports the target,
+reason, problems, affected changes and any pull request link for tools.
