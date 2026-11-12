@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"context"
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -13,21 +13,18 @@ import (
 	"github.com/chrisjoyce911/tuckerbox/internal/runs"
 	"github.com/chrisjoyce911/tuckerbox/internal/ship"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
-	"github.com/chrisjoyce911/tuckerbox/internal/testenv"
 )
 
 func TestShippingStatusSnapshot(t *testing.T) {
-	f := newCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}})
-	st, err := statedir.Resolve(context.Background(), f.repo)
-	if err != nil {
-		t.Fatal(err)
-	}
+	tools.Setup(t)
+	repo := t.TempDir()
+	st := statedir.Dir(filepath.Join(repo, "state"))
 	lock, err := runs.TryChangeLock(st.RunLock())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer lock.Release()
-	r := &runs.Run{Record: ship.Record{ShippingStarted: true, MR: &ship.MRInfo{Link: "https://github.com/example/shop/pull/12", Number: 12, State: "open"}, CI: &ship.CIInfo{State: "pending", Commit: "abc123"}, ShipRound: 2}, Change: "add-login", Repo: f.repo, Worktree: f.repo, Branch: "add-login", State: runs.Shipping, Round: 2, Since: time.Now(), Created: time.Now()}
+	r := &runs.Run{Record: ship.Record{ShippingStarted: true, MR: &ship.MRInfo{Link: "https://github.com/example/shop/pull/12", Number: 12, State: "open"}, CI: &ship.CIInfo{State: "pending", Commit: "abc123"}, ShipRound: 2}, Change: "add-login", Repo: repo, Worktree: repo, Branch: "add-login", State: runs.Shipping, Round: 2, Since: time.Now(), Created: time.Now()}
 	if err := runs.WriteRun(st.RunFile(), r); err != nil {
 		t.Fatal(err)
 	}
@@ -35,15 +32,16 @@ func TestShippingStatusSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runs.Remember(stateHome, runs.IndexEntry{Repo: f.repo, Change: r.Change, Worktree: f.repo, State: string(st)}); err != nil {
+	if err := runs.Remember(stateHome, runs.IndexEntry{Repo: repo, Change: r.Change, Worktree: repo, State: string(st)}); err != nil {
 		t.Fatal(err)
 	}
-	result := f.tb("status", "--json")
-	if result.code != 0 {
-		t.Fatal(result.stderr)
+	var out, stderr bytes.Buffer
+	app := App{Stdout: &out, Stderr: &stderr}
+	if code := app.Run([]string{"status", "--json"}); code != 0 {
+		t.Fatal(stderr.String())
 	}
 	var doc map[string]any
-	if err := json.Unmarshal([]byte(result.stdout), &doc); err != nil {
+	if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
 		t.Fatal(err)
 	}
 	rows := doc["runs"].([]any)
@@ -63,10 +61,12 @@ func TestShippingStatusSnapshot(t *testing.T) {
 	if !reflect.DeepEqual(extracted, expected) {
 		t.Fatal(extracted, expected)
 	}
-	table := f.tb("status")
+	out.Reset()
+	stderr.Reset()
+	code := app.Run([]string{"status"})
 	for _, want := range []string{"shipping", "https://github.com/example/shop/pull/12", "pending", "SHIP ROUND"} {
-		if table.code != 0 || !strings.Contains(table.stdout, want) {
-			t.Fatal(table)
+		if code != 0 || !strings.Contains(out.String(), want) {
+			t.Fatal(out.String(), stderr.String())
 		}
 	}
 }

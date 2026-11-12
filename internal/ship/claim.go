@@ -108,6 +108,11 @@ func (c *Claim) Acquire(ctx context.Context, f ClaimForge, request forge.OpenReq
 		return nil, err
 	}
 	if c.Lease == "" && tip != "" {
+		if current, err := f.FindMR(ctx, c.Git.Branch); err == nil && current != nil {
+			if err := c.owner(current); err != nil {
+				return nil, err
+			}
+		}
 		return nil, fmt.Errorf("remote branch exists")
 	}
 	if tip != c.Lease {
@@ -120,6 +125,11 @@ func (c *Claim) Acquire(ctx context.Context, f ClaimForge, request forge.OpenReq
 	if head != c.Lease {
 		pushed, err := c.Git.Push(ctx, c.Lease)
 		if err != nil {
+			if current, readErr := f.FindMR(ctx, c.Git.Branch); readErr == nil && current != nil {
+				if ownerErr := c.owner(current); ownerErr != nil {
+					return nil, ownerErr
+				}
+			}
 			return nil, err
 		}
 		c.Lease = pushed
