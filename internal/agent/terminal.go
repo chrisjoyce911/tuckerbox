@@ -579,3 +579,16 @@ func (m *turnWatcher) check() (r *Result, ended bool) {
 	m.accepted = &res
 	return &res, false
 }
+
+// SaveHistory appends the history of the terminal called name to the step
+// log at logPath, as Run does when a step ends: for an agent that ended
+// while no run process watched it (tuckerbox stop after a crash).
+func (t Terminal) SaveHistory(logPath, step string, round int, name string) error {
+	f, err := openLog(logPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	t.appendHistory(f, Step{Step: step, Round: round}, name)
+	return nil
+}

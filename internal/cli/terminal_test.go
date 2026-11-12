@@ -247,6 +247,45 @@ func TestStopAfterACrash(t *testing.T) {
 	}
 }
 
+// Logs after a crash, stop and resume: stopping the orphaned agent saves
+// its terminal's history to the step log, so logs shows its session at
+// once, and still does after resume starts the step's next agent in the
+// same terminal name.
+func TestLogsAfterCrashStopAndResume(t *testing.T) {
+	f := newTermCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}})
+	f.plan(map[string]testenv.Action{"build": {Ask: "Which design?", ExitAfter: true}})
+	f.start("add-login")
+	f.waitAgent("add-login", "build")
+	waitFor(t, "the build agent's question", func() bool { return f.runOf("add-login").AgentState == agent.AgentWaiting })
+	f.kill("add-login")
+	if res := f.tb("stop", "add-login"); res.code != 0 {
+		t.Fatalf("stop: exit %d\n%s%s", res.code, res.stdout, res.stderr)
+	}
+	st := mustState(t, f.worktreeOf("add-login"))
+	want := []string{"history of terminal", "fakeagent: add-login build round 1", "Which design?"}
+	res := f.tb("logs", "add-login", "build")
+	for _, w := range want {
+		if !strings.Contains(res.stdout, w) {
+			t.Errorf("logs after the stop lacks %q:\n%s%s", w, res.stdout, res.stderr)
+		}
+	}
+
+	f.plan(map[string]testenv.Action{"build": {WaitFor: f.gate("build2"), ExitAfter: true}})
+	if res := f.tb("resume", "add-login"); res.code != 0 {
+		t.Fatalf("resume: %s%s", res.stdout, res.stderr)
+	}
+	waitFor(t, "the resumed build agent", func() bool { return len(f.startsOf("add-login")) == 2 })
+	f.waitAgent("add-login", "build")
+	log := readLog(t, st.Log("build"))
+	for _, w := range want {
+		if !strings.Contains(log, w) {
+			t.Errorf("build log after resume lacks %q:\n%s", w, log)
+		}
+	}
+	f.open("build2")
+	waitFor(t, "the resumed build to finish", func() bool { return len(f.runOf("add-login").History) > 0 })
+}
+
 // Stop with the run process alive: it ends its agent's terminal itself.
 func TestStopEndsTheAgentTerminal(t *testing.T) {
 	f := newTermCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}})

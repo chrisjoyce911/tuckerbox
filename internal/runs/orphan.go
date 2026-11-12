@@ -25,8 +25,11 @@ var ErrNoOrphan = errors.New("the run has no agent terminal to stop")
 // it is gone, records the run stopped and lets the lock go. It returns
 // ErrLocked when a process holds the lock (signal that process instead),
 // and ErrNoOrphan when run.json names no terminal. Nothing is recorded
-// when end fails.
-func StopOrphan(ctx context.Context, st statedir.Dir, end func(ctx context.Context, name string) error) (*Run, error) {
+// when end fails. Once the terminal has ended, save (when not nil) appends
+// its history to the step's log, before run.json lets the terminal go, so
+// logs shows the agent's session.
+func StopOrphan(ctx context.Context, st statedir.Dir, end func(ctx context.Context, name string) error,
+	save func(logPath, step string, round int, name string) error) (*Run, error) {
 	lock, err := TryChangeLock(st.RunLock())
 	if err != nil {
 		return nil, err
@@ -41,6 +44,9 @@ func StopOrphan(ctx context.Context, st statedir.Dir, end func(ctx context.Conte
 	}
 	if err := end(ctx, rs.Terminal.Name); err != nil {
 		return rs, err
+	}
+	if save != nil && rs.Step != "" {
+		_ = save(st.Log(rs.Step), rs.Step, rs.Round, rs.Terminal.Name)
 	}
 	now := time.Now()
 	rs.State, rs.Reason, rs.Since = Stopped, StoppedOrphan, now

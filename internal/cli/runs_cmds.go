@@ -612,7 +612,17 @@ func (a App) stopOrphan(change string, st statedir.Dir) (code int, ok bool) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	r, err := runs.StopOrphan(ctx, st, end)
+	save := func(logPath, step string, round int, name string) error {
+		if !found {
+			return nil
+		}
+		err := agent.Terminal{HC: hc}.SaveHistory(logPath, step, round, name)
+		if err != nil {
+			fmt.Fprintf(a.Stderr, "tuckerbox stop: %s: saving the agent's session to the %s log: %v\n", change, step, err)
+		}
+		return err
+	}
+	r, err := runs.StopOrphan(ctx, st, end, save)
 	switch {
 	case errors.Is(err, runs.ErrNoOrphan), errors.Is(err, runs.ErrNoRun):
 		return 0, false
