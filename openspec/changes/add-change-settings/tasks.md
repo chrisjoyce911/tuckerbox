@@ -38,13 +38,13 @@
 
 ## 4. Approval (change-settings)
 
-- [ ] 4.1 `approve` writes `settings_hash` over sorted `agent` and `permissions` overrides; `unapprove` removes it; approval state is `stale` when either hash is off; a missing `settings_hash` is the hash of no overrides
-- [ ] 4.2 Test "Agent changed after approval"
-- [ ] 4.3 Test "Old approval without overrides"
-- [ ] 4.4 Test "Model changed after approval" (also for `effort` and `machines`)
-- [ ] 4.5 `resume` and `rerun` refuse on a stale `settings_hash` when approval is required, naming the changed override; a stale text hash alone still lets them run
-- [ ] 4.6 Test "Agent changed on a stopped run"
-- [ ] 4.7 Test "Plan step rewrote the design"
+- [x] 4.1 `approve` writes `settings_hash` over sorted `agent` and `permissions` overrides; `unapprove` removes it; approval state is `stale` when either hash is off; a missing `settings_hash` is the hash of no overrides
+- [x] 4.2 Test "Agent changed after approval"
+- [x] 4.3 Test "Old approval without overrides"
+- [x] 4.4 Test "Model changed after approval" (also for `effort` and `machines`)
+- [x] 4.5 `resume` and `rerun` refuse on a stale `settings_hash` when approval is required, naming the changed override; a stale text hash alone still lets them run
+- [x] 4.6 Test "Agent changed on a stopped run"
+- [x] 4.7 Test "Plan step rewrote the design"
 
 ## 5. Board (settings-board)
 
