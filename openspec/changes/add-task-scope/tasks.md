@@ -60,14 +60,14 @@
 
 ## 5. Board mod (task-scope)
 
-- [ ] 5.1 Run group… menu in card detail, where Start is offered and on Ready cards with unticked tasks, listing groups with unticked tasks; runs `tuckerbox run <change> --tasks <n>`; shows command errors
-- [ ] 5.2 Show the scope on cards
-- [ ] 5.3 Test: Run the next group from a Ready card
-- [ ] 5.4 Test: Nothing left to run
-- [ ] 5.5 Test: Run group refused
+- [x] 5.1 Run group… menu in card detail, where Start is offered and on Ready cards with unticked tasks, listing groups with unticked tasks; runs `tuckerbox run <change> --tasks <n>`; shows command errors
+- [x] 5.2 Show the scope on cards
+- [x] 5.3 Test: Run the next group from a Ready card
+- [x] 5.4 Test: Nothing left to run
+- [x] 5.5 Test: Run group refused
 
 ## 6. Wrap-up
 
-- [ ] 6.1 README: `--tasks`, `next`, and that approval covers the whole change
-- [ ] 6.2 `go vet ./...`, `go test -race ./...` and `scripts/tla-check.sh` pass
+- [x] 6.1 README: `--tasks`, `next`, and that approval covers the whole change
+- [x] 6.2 `go vet ./...`, `go test -race ./...` and `scripts/tla-check.sh` pass
 - [ ] 6.3 (ship) Archive after `add-herdr-board`, once the implementation is accepted; fold the board, history and mod requirements into `board-data`, `run-history` and `herdr-board`

@@ -6,7 +6,7 @@ import { v_flex, h_flex, TextView } from "gpui-base";
 import { theme, props, closeOverlay } from "herdr";
 import { loadDetail } from "./data.js";
 import { normaliseCard, cardAt, columnName, newestFirst, eventText, fmtLocal, taskGroups, approvalBadge, isActive } from "./model.js";
-import { detailActions, invocation, actionLabel, defaultStep, rerunSteps, canEdit, EDIT_FILES, ACTIONS } from "./actions.js";
+import { detailActions, invocation, actionLabel, defaultStep, rerunSteps, runGroups, canEdit, EDIT_FILES, ACTIONS } from "./actions.js";
 import { perform, validate, watchEdits, changed } from "./perform.js";
 import { editOf, editNote } from "./edits.js";
 import { button, tiny, dot, stateChip, approvalChip, progressBar, section, closeButton, note, tone } from "./ui.js";
@@ -166,6 +166,7 @@ export class CardView extends View {
         .child(h_flex().items_center().gap(8).text_size(12)
           .child(div().font_semibold().text_color(tm.foreground).child(`Round ${r.round}`))
           .when(Boolean(r.step), (el) => el.child(div().text_color(tm.dim).child(r.step)))
+          .when(Boolean(r.scope), (el) => el.child(div().text_color(tm.dim).child(`tasks ${r.scope}`)))
           .child(div().text_color(bad ? tm.blocked : r.result ? tm.working : tm.dim).child(r.result || "in progress"))
           .child(div().flex_1())
           .when(Boolean(r.ended), (el) => el.child(div().text_size(11).text_color(tm.dim).child(fmtLocal(r.ended)))))
@@ -197,7 +198,12 @@ export class CardView extends View {
     const tm = theme();
     const list = detailActions(c, this.board);
     const steps = rerunSteps(c, this.board);
+    const groups = runGroups(c, this.board, this.detail);
     return v_flex().gap(6)
+      .when(groups.length > 0, (el) => el.child(h_flex().flex_wrap().items_center().gap(6).text_size(11).text_color(tm.dim)
+        .child(this.busy === "group" ? "Run group…  starting" : ACTIONS.group.label)
+        .children(groups.map((g) => tiny(`group-${g.number}`, `${g.number}. ${g.title} (${g.ticked}/${g.total})`,
+          (_e, cx) => this.act("group", { group: g.number }, cx), { disabled: Boolean(this.busy) })))))
       .child(h_flex().flex_wrap().gap(6).items_center().children(list.map((a) => {
         const extra = a === "rerun" || a === "follow" ? { step: a === "follow" ? c.step : this.step } : {};
         return button(`act-${a}`, this.busy === a ? `${actionLabel(a, extra)}…` : actionLabel(a, extra), (_e, cx) => this.act(a, extra, cx),
@@ -223,6 +229,7 @@ export class CardView extends View {
       .child(h_flex().pt(6).items_center().gap(10).text_size(11.5)
         .child(div().px(7).py(2).rounded(5).bg(tm.raised).text_color(tm.muted).child(col))
         .when(Boolean(c.step), (el) => el.child(div().text_color(tm.muted).child(`${c.step}${c.round ? ` · round ${c.round}` : ""}`)))
+        .when(Boolean(c.scope), (el) => el.child(div().px(6).py(1).rounded(5).bg(tm.raised).text_color(tm.muted).child(`tasks ${c.scope.spec}`)))
         .when(Boolean(c.agent), (el) => el.child(div().text_color(tm.dim).child(c.agent)))
         .when(c.tasks.total > 0, (el) => el.child(progressBar(c.tasks, 70)))
         .child(div().flex_1())

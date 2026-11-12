@@ -21,12 +21,14 @@ export const ACTIONS = {
   validate: { label: "Validate" },
   tick: { label: "Tick" },
   untick: { label: "Untick" },
+  group: { label: "Run group…" },
 };
 
 // Files `tuckerbox edit` opens; a spec delta is `spec:<capability>`.
 export const EDIT_FILES = ["proposal", "design", "model", "tasks"];
 
 const TASK_NUMBER = /^\d+\.\d+$/;
+const GROUP_NUMBER = /^\d+$/;
 const CHANGE_ID = /^[a-z0-9][a-z0-9-]*$/;
 
 // The tuckerbox command line for an action, as argv (no shell, so nothing is
@@ -41,6 +43,9 @@ export function commandLine(action, change, extra = {}) {
   };
   switch (action) {
     case "start": return ["tuckerbox", "run", change];
+    case "group":
+      if (!GROUP_NUMBER.test(String(extra.group ?? ""))) throw new Error("group needs a task group number like 2");
+      return ["tuckerbox", "run", change, "--tasks", String(extra.group)];
     case "approve": return ["tuckerbox", "approve", change];
     case "unapprove": return ["tuckerbox", "unapprove", change];
     case "stop": return ["tuckerbox", "stop", change];
@@ -103,6 +108,20 @@ export function detailActions(card, board) {
   if (card.edit_folder) out.push("proposal");
   if (card.worktree) out.push("worktree");
   return out;
+}
+
+// Run group… (add-task-scope): the task groups a card's detail offers to
+// run, each { number, title, ticked, total }. It is offered where Start is,
+// and on Ready cards whose change still has unticked tasks, and lists only
+// groups with unticked tasks (ship tasks are not counted in `groups`). Empty
+// means no Run group….
+export function runGroups(card, board, detail) {
+  if (!card || !detail) return [];
+  const where = detailActions(card, board).includes("start") || card.state === "ready";
+  if (!where) return [];
+  return (Array.isArray(detail.groups) ? detail.groups : [])
+    .filter((g) => Number.isInteger(g?.number) && Number(g.ticked) < Number(g.total))
+    .map((g) => ({ number: g.number, title: String(g.title ?? ""), ticked: Number(g.ticked), total: Number(g.total) }));
 }
 
 // The one or two buttons on the card itself: what moves it on.
