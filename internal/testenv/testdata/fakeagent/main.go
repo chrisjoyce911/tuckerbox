@@ -63,6 +63,9 @@ type action struct {
 	Ask string `json:"ask"`
 	// ExitAfter (interactive) exits after the last turn.
 	ExitAfter bool `json:"exit_after"`
+	// FileFirst (interactive) writes the result file mid-turn, then ends
+	// that turn a second later with "Done." and no result.
+	FileFirst bool `json:"file_first"`
 }
 
 // hook is how the fake agent hands a turn's final message over.
@@ -246,12 +249,15 @@ func main() {
 // interactive is the fake agent as an interactive CLI in a terminal.
 func interactive(h *hook, a action, change, step string, round int, status, summary string) {
 	in := bufio.NewScanner(os.Stdin)
-	result := func(r int) string {
+	resultJSON := func(r int) []byte {
 		data, _ := json.MarshalIndent(map[string]any{
 			"change": change, "step": step, "round": r, "status": status,
 			"summary": summary, "findings": a.Findings,
 		}, "", "  ")
-		return "Finished.\n\n```json\n" + string(data) + "\n```"
+		return data
+	}
+	result := func(r int) string {
+		return "Finished.\n\n```json\n" + string(resultJSON(r)) + "\n```"
 	}
 	if a.Ask != "" {
 		fmt.Println(a.Ask)
@@ -266,9 +272,17 @@ func interactive(h *hook, a action, change, step string, round int, status, summ
 		h.turn(result(round - 1))
 		time.Sleep(700 * time.Millisecond)
 	}
-	if status == "none" {
+	switch {
+	case status == "none":
 		h.turn("I could not finish this.")
-	} else {
+	case a.FileFirst:
+		p := os.Getenv("TUCKERBOX_RESULT")
+		must(os.WriteFile(p+".tmp", resultJSON(round), 0o644))
+		must(os.Rename(p+".tmp", p))
+		fmt.Println("fakeagent: wrote the result file")
+		time.Sleep(time.Second)
+		h.turn("Done.")
+	default:
 		h.turn(result(round))
 	}
 	if a.ExitAfter {

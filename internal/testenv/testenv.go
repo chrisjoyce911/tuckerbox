@@ -191,6 +191,9 @@ type Action struct {
 	// ExitAfter, in a terminal, exits once the result's turn has ended,
 	// instead of waiting for more input as an interactive CLI does.
 	ExitAfter bool `json:"exit_after,omitempty"`
+	// FileFirst, in a terminal, writes the result file mid-turn and ends
+	// that turn a second later with a message holding no result.
+	FileFirst bool `json:"file_first,omitempty"`
 }
 
 // Finding is a fake agent finding.

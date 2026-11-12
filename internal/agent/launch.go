@@ -60,6 +60,11 @@ type Options struct {
 	// ResultGrace is how long the agent may keep running after it wrote a
 	// valid result before it is stopped (default 2 minutes).
 	ResultGrace time.Duration
+	// TurnGrace replaces ResultGrace for a terminal agent once the turn
+	// with or after its result has ended: an interactive CLI then waits
+	// for the person and never exits by itself (default 2 seconds, and
+	// never longer than ResultGrace).
+	TurnGrace time.Duration
 	// StopGrace is how long the agent has to exit after it is asked to stop,
 	// before it is killed (default 10 seconds).
 	StopGrace time.Duration
@@ -369,6 +374,12 @@ func withDefaults(o Options) Options {
 	}
 	if o.ResultGrace <= 0 {
 		o.ResultGrace = 2 * time.Minute
+	}
+	if o.TurnGrace <= 0 {
+		o.TurnGrace = 2 * time.Second
+	}
+	if o.TurnGrace > o.ResultGrace {
+		o.TurnGrace = o.ResultGrace
 	}
 	if o.StopGrace <= 0 {
 		o.StopGrace = 10 * time.Second

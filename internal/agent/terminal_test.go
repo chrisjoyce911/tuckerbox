@@ -221,12 +221,15 @@ func mapsEqual(a, b map[string]string) bool {
 
 // Scenario: Turn ends with a result. The build agent's turn ends with a
 // valid result: it is accepted, the agent's program is ended after the
-// result grace, and the terminal's history stays readable.
+// result grace, and the terminal's history stays readable. The turn is
+// over, so the grace is the short turn grace: an interactive CLI waits for
+// the person and never exits by itself.
 func TestTurnEndsWithResult(t *testing.T) {
 	f := newTermFixture(t)
 	s := f.step("build", "builder", 2, interactiveFake())
 	opts := termOpts
-	opts.ResultGrace = 700 * time.Millisecond
+	opts.ResultGrace = time.Minute
+	opts.TurnGrace = 700 * time.Millisecond
 	start := time.Now()
 	o := f.run(s, opts)
 	took := time.Since(start)
@@ -236,8 +239,8 @@ func TestTurnEndsWithResult(t *testing.T) {
 	if _, err := ReadResult(o.ResultPath, Expect{Change: s.Change, Step: "build", Round: 2}); err != nil {
 		t.Errorf("result file: %v", err)
 	}
-	if took < opts.ResultGrace {
-		t.Errorf("the agent was ended %s after the start, before the result grace of %s", took, opts.ResultGrace)
+	if took < opts.TurnGrace || took > 30*time.Second {
+		t.Errorf("the agent was ended %s after the start, want after the turn grace of %s and well before the result grace of %s", took, opts.TurnGrace, opts.ResultGrace)
 	}
 	term := f.get(s.Term.Name)
 	if term.Live() {
@@ -249,6 +252,34 @@ func TestTurnEndsWithResult(t *testing.T) {
 	}
 	log := readFile(t, o.LogPath)
 	for _, want := range []string{"started in terminal " + s.Term.Name, "accepted result from the final message", "history of terminal", "fakeagent: fix-login build round 2"} {
+		if !strings.Contains(log, want) {
+			t.Errorf("log lacks %q:\n%s", want, log)
+		}
+	}
+}
+
+// A result file written mid-turn (as Claude Code does when its brief offers
+// one) is accepted at once; the agent is ended a turn grace after that
+// turn ends, not a whole result grace later (found end to end: every
+// terminal step waited two minutes).
+func TestResultFileThenTurnEnds(t *testing.T) {
+	f := newTermFixture(t)
+	f.env.SetPlan(t, map[string]testenv.Action{"build": {FileFirst: true}})
+	s := f.step("build", "builder", 1, interactiveFake())
+	opts := termOpts
+	opts.ResultGrace = time.Minute
+	opts.TurnGrace = 300 * time.Millisecond
+	start := time.Now()
+	o := f.run(s, opts)
+	took := time.Since(start)
+	if o.Result == nil || o.Result.Round != 1 || o.Source == messageLabel {
+		t.Fatalf("outcome %+v", o)
+	}
+	if took > 30*time.Second {
+		t.Errorf("the agent was ended %s after the start, want soon after its turn ended", took)
+	}
+	log := readFile(t, o.LogPath)
+	for _, want := range []string{"accepted result: done", "the agent's turn ended after its result", "fakeagent: wrote the result file"} {
 		if !strings.Contains(log, want) {
 			t.Errorf("log lacks %q:\n%s", want, log)
 		}
