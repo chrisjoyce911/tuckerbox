@@ -1283,3 +1283,44 @@ func TestOrphanEndsWhileAdoptionTakesTheSlot(t *testing.T) {
 		t.Errorf("logs after the step lacks the orphan's session:\n%s%s", res.stdout, res.stderr)
 	}
 }
+
+// Once herdr-core has ended Claude Code's full-screen interface, nothing of
+// it is left to read (found end to end; the fake hc's kill-clears fault
+// does the same). The step log still keeps the agent's session, read just
+// before Tuckerbox ends the terminal: after a result the agent stays for,
+// and on stop after a crash.
+func TestLogsKeepASessionThatEndingClears(t *testing.T) {
+	t.Run("after a result", func(t *testing.T) {
+		f := newTermCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}})
+		f.fault("kill-clears", "yes")
+		// The agent reports and stays, as an interactive CLI does, so
+		// Tuckerbox ends its terminal.
+		f.plan(map[string]testenv.Action{"*": {Summary: "built it"}})
+		f.start("add-login")
+		f.waitState("add-login", "ready", "")
+		log := readLog(t, mustState(t, f.worktreeOf("add-login")).Log("build"))
+		for _, w := range []string{"history of terminal", "fakeagent: add-login build round 1"} {
+			if !strings.Contains(log, w) {
+				t.Errorf("build log lacks %q:\n%s", w, log)
+			}
+		}
+	})
+	t.Run("stop after a crash", func(t *testing.T) {
+		f := newTermCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}})
+		f.fault("kill-clears", "yes")
+		f.plan(map[string]testenv.Action{"build": {Ask: "Which design?"}})
+		f.start("add-login")
+		f.waitAgent("add-login", "build")
+		waitFor(t, "the build agent's question", func() bool { return f.runOf("add-login").AgentState == agent.AgentWaiting })
+		f.kill("add-login")
+		if res := f.tb("stop", "add-login"); res.code != 0 {
+			t.Fatalf("stop: exit %d\n%s%s", res.code, res.stdout, res.stderr)
+		}
+		res := f.tb("logs", "add-login", "build")
+		for _, w := range []string{"history of terminal", "fakeagent: add-login build round 1", "Which design?"} {
+			if !strings.Contains(res.stdout, w) {
+				t.Errorf("logs after the stop lacks %q:\n%s%s", w, res.stdout, res.stderr)
+			}
+		}
+	})
+}

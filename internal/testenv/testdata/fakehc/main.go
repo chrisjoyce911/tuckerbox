@@ -42,6 +42,9 @@
 //	             that launches the terminal that long later, as a server
 //	             still working on a request whose client went away would,
 //	             and never answers itself (it waits to be killed)
+//	kill-clears  "yes": kill leaves nothing to read of the terminal, as
+//	             herdr-core does once it has ended Claude Code's full-screen
+//	             interface
 package main
 
 import (
@@ -403,6 +406,9 @@ func kill(name string) {
 	}
 	if r.State == "live" {
 		end(r)
+	}
+	if fault("kill-clears") == "yes" {
+		must(os.WriteFile(path(r.Name, ".out"), nil, 0o644))
 	}
 	fmt.Printf(`{"killed":%q}`+"\n", r.Address)
 }

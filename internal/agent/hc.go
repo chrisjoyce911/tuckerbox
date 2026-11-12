@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -209,7 +210,12 @@ func (h HC) Kill(ctx context.Context, name string) error {
 
 // End kills the terminal called name and waits, up to timeout, until it
 // is no longer live.
+//
+// It first reads the terminal's text and keeps it for History: once
+// herdr-core has ended Claude Code's full-screen interface nothing of it
+// is left to read, so the step log would lose the agent's session.
 func (h HC) End(ctx context.Context, name string, timeout time.Duration) error {
+	h.snapshot(ctx, name)
 	if err := h.Kill(ctx, name); err != nil {
 		return err
 	}
@@ -244,6 +250,48 @@ const historyLines = "100000"
 // Read returns the terminal's history and screen, as text.
 func (h HC) Read(ctx context.Context, name string) ([]byte, error) {
 	return h.run(ctx, "read", "--lines", historyLines, name)
+}
+
+// endSnapshots holds, by terminal name, the text End read of a terminal
+// just before it ended it, until History takes it. Each End replaces its
+// name's snapshot, so a later terminal of the same name never gets an
+// older one's text.
+var endSnapshots sync.Map
+
+// snapshot keeps what the terminal called name shows now, for History.
+func (h HC) snapshot(ctx context.Context, name string) {
+	endSnapshots.Delete(name)
+	rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if out, err := h.Read(rctx, name); err == nil && textLen(out) > 0 {
+		endSnapshots.Store(name, out)
+	}
+}
+
+// History returns the session of the terminal called name for the step
+// log: what Read gives now, or what End read just before it ended the
+// terminal when that holds more.
+func (h HC) History(ctx context.Context, name string) ([]byte, error) {
+	out, err := h.Read(ctx, name)
+	if v, ok := endSnapshots.LoadAndDelete(name); ok {
+		if snap := v.([]byte); err != nil || textLen(snap) > textLen(out) {
+			return snap, nil
+		}
+	}
+	return out, err
+}
+
+// textLen counts the text of a read that isn't space or hc's own notes
+// ("[hc] incomplete: ...").
+func textLen(out []byte) int {
+	n := 0
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "[hc] ") {
+			continue
+		}
+		n += len(strings.Join(strings.Fields(line), ""))
+	}
+	return n
 }
 
 // Send pastes text into the terminal and presses enter.

@@ -380,6 +380,9 @@ func (t Terminal) Run(ctx context.Context, s Step, opts Options) (Outcome, error
 	tick := time.NewTicker(opts.Poll)
 	defer tick.Stop()
 	var graceC <-chan time.Time
+	// turnOver: the turn with or after the accepted result has ended, so
+	// the agent waits for the person and is ended after TurnGrace.
+	turnOver := false
 	lastLook := time.Time{}
 loop:
 	for {
@@ -395,8 +398,19 @@ loop:
 			end()
 			break loop
 		case <-tick.C:
-			if accept() {
-				graceC = time.After(opts.ResultGrace)
+			switch {
+			case accept():
+				// A result in the turn's final message means the turn is
+				// over; one in the result file may come mid-turn.
+				grace := opts.ResultGrace
+				if o.Source == messageLabel {
+					grace, turnOver = opts.TurnGrace, true
+				}
+				graceC = time.After(grace)
+			case o.Result != nil && !turnOver && mw.turnEndedSince(resultTime(o.ResultPath)):
+				turnOver = true
+				logLine(log, "step %s round %d: the agent's turn ended after its result", s.Step, s.Round)
+				graceC = time.After(opts.TurnGrace)
 			}
 			if time.Since(lastLook) < opts.TermPoll {
 				continue
@@ -593,7 +607,7 @@ func (t Terminal) prepare(s Step, o *Outcome) error {
 func (t Terminal) appendHistory(log io.Writer, s Step, name string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	out, err := t.HC.Read(ctx, name)
+	out, err := t.HC.History(ctx, name)
 	if err != nil {
 		logLine(log, "step %s round %d: reading terminal %s: %v", s.Step, s.Round, name, err)
 		return
@@ -660,6 +674,25 @@ func (m *turnWatcher) check() (r *Result, ended bool) {
 	}
 	m.accepted = &res
 	return &res, false
+}
+
+// turnEndedSince reports whether a turn ended at or after t: the turn
+// hook wrote the last-message file then. Run asks once it has a result
+// from the result file, with that file's time, so the message of an
+// earlier turn (a question before a crash) doesn't count.
+func (m *turnWatcher) turnEndedSince(t time.Time) bool {
+	fi, err := os.Stat(m.path)
+	return err == nil && !fi.ModTime().Before(t)
+}
+
+// resultTime is when the result file was written; the far future when it
+// can't be read.
+func resultTime(p string) time.Time {
+	fi, err := os.Stat(p)
+	if err != nil {
+		return time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
+	}
+	return fi.ModTime()
 }
 
 // SaveHistory appends the history of the terminal called name to the step
