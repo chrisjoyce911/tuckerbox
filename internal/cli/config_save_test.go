@@ -133,11 +133,14 @@ func TestConfigTokenInput(t *testing.T) {
 	}
 	out.Reset()
 	errout.Reset()
-	if a.Run([]string{"config", "set", "--machine", "--json", `forges."github.com".token=argument-secret`}) == 0 {
+	if a.Run([]string{"config", "set", "--machine", "--json", `forges.github.com.token=argument-secret`}) == 0 {
 		t.Fatal("argument accepted")
 	}
 	if strings.Contains(out.String()+errout.String(), "argument-secret") {
 		t.Fatal("argument leaked")
+	}
+	if !strings.Contains(errout.String(), "leave out the token value") {
+		t.Fatal(errout)
 	}
 	out.Reset()
 	if a.Run([]string{"config", "set", "--machine", "--unset", `forges."github.com".token`}) != 0 {

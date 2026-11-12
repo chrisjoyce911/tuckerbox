@@ -113,6 +113,11 @@ func configKey(s string, unset bool) (config.Key, []string, error) {
 	if err != nil {
 		return config.Key{}, nil, fmt.Errorf("invalid config key")
 	}
+	// Accept the token command's customary unquoted host spelling too;
+	// storage always quotes the complete hostname as one TOML component.
+	if len(p) > 3 && p[0] == "forges" && p[len(p)-1] == "token" {
+		p = []string{"forges", strings.Join(p[1:len(p)-1], "."), "token"}
+	}
 	canonical := config.JoinKey(p)
 	k, ok := config.LookupKey(canonical)
 	if ok {
