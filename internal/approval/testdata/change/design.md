@@ -1,0 +1,3 @@
+# Design
+
+Sessions are cookies.
