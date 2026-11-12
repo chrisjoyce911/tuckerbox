@@ -39,6 +39,9 @@ func (a App) herdrInstall(opt herdrmod.Options) int {
 	info := version.Get()
 	ctx := context.Background()
 	res, err := herdrmod.Install(ctx, a.HerdrEnv, info.Version, info.Commit)
+	for _, d := range res.Recovered {
+		fmt.Fprintln(a.Stdout, d)
+	}
 	var ce *herdrmod.CheckError
 	switch {
 	case errors.Is(err, herdrmod.ErrNoHerdr):

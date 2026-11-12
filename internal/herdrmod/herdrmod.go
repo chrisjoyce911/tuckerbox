@@ -145,6 +145,9 @@ type Result struct {
 	Updated  bool   // an earlier copy was replaced
 	Checked  bool   // herdr-app check ran and passed
 	CheckOut string // its output
+	// Recovered says what finishing an earlier install's undo did, if one
+	// was left unfinished.
+	Recovered []string
 }
 
 // CheckError is returned when herdr-app check rejects the mod; nothing was
@@ -206,6 +209,17 @@ func Install(ctx context.Context, env Env, version, commit string) (Result, erro
 		}
 	}
 
+	// From here on Herdr's files change: hold the install lock, and finish
+	// the undo of an earlier install that left its journal first.
+	unlock, err := lockHome(ctx, home)
+	if err != nil {
+		return res, err
+	}
+	defer unlock()
+	_, res.Recovered, err = recoverJournal(ctx, home, env)
+	if err != nil {
+		return res, err
+	}
 	if err := os.MkdirAll(filepath.Dir(res.Dir), 0o755); err != nil {
 		return res, err
 	}
@@ -223,10 +237,8 @@ func Install(ctx context.Context, env Env, version, commit string) (Result, erro
 		}
 		return res, err
 	}
-	if old != "" {
-		os.RemoveAll(old)
-	}
-	// The record lets tuckerbox herdr uninstall remove exactly this.
+	// The record lets tuckerbox herdr uninstall remove exactly this. If it
+	// can't be written, the earlier copy (or none) is put back.
 	err = updateRecord(home, func(r *Record) {
 		for _, m := range r.Mods {
 			if m == herdr.ModName {
@@ -235,7 +247,16 @@ func Install(ctx context.Context, env Env, version, commit string) (Result, erro
 		}
 		r.Mods = append(r.Mods, herdr.ModName)
 	})
-	return res, err
+	if err != nil {
+		if rerr := os.RemoveAll(res.Dir); rerr == nil && old != "" {
+			os.Rename(old, res.Dir)
+		}
+		return res, err
+	}
+	if old != "" {
+		os.RemoveAll(old)
+	}
+	return res, nil
 }
 
 func copyFS(dst string, src fs.FS) error {

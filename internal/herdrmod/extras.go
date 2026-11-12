@@ -77,7 +77,10 @@ func readRecord(home string) (*Record, error) {
 func writeRecord(home string, r *Record) error {
 	r.Version = 1
 	b, _ := json.MarshalIndent(r, "", "  ")
-	return writeAtomic(recordPath(home), append(b, '\n'))
+	if err := replaceFile(recordPath(home), append(b, '\n')); err != nil {
+		return fmt.Errorf("writing the install record %s: %w", recordPath(home), err)
+	}
+	return nil
 }
 
 func updateRecord(home string, f func(*Record)) error {
@@ -207,14 +210,19 @@ func actionText(v any) string {
 
 // installKeys adds the toggle binding to the person's keys.json, unless that
 // key is bound already in any section a key press can reach (not a mod:
-// section). It returns what it did in words.
-func installKeys(home string, env Env, rec *Record, key string) (string, error) {
+// section). Run again with another key, it moves the board's binding to that
+// key and keeps the record's keys.json from before the first install. It
+// returns what it did in words.
+func installKeys(home string, env Env, rec *Record, key string, t *txn) (string, error) {
 	shippedKey, action, err := ToggleBinding(env)
 	if err != nil {
 		return "", err
 	}
 	if key == "" {
 		key = shippedKey
+		if rec.Keys != nil {
+			key = rec.Keys.Key // a re-install without --key keeps the chosen key
+		}
 	}
 	path := filepath.Join(home, "keys.json")
 	before, err := os.ReadFile(path)
@@ -232,11 +240,16 @@ func installKeys(home string, env Env, rec *Record, key string) (string, error) 
 	if !ok {
 		return "", errors.New("keys.json is not a JSON object")
 	}
+	// own is the board's binding from an earlier install, still in place.
+	var own *obj
 	if rec.Keys != nil {
 		if g, ok := root.get(rec.Keys.Section); ok {
 			if s, ok := g.(*obj); ok {
 				if a, ok := s.get(rec.Keys.Key); ok && actionText(a) == rec.Keys.Action {
-					return fmt.Sprintf("%s already opens and hides the board", rec.Keys.Key), nil
+					if normKey(rec.Keys.Key) == normKey(key) {
+						return fmt.Sprintf("%s already opens and hides the board", rec.Keys.Key), nil
+					}
+					own = s
 				}
 			}
 		}
@@ -270,12 +283,24 @@ func installKeys(home string, env Env, rec *Record, key string) (string, error) 
 		root.keys = append([]string{"global"}, root.keys...)
 		root.vals["global"] = global
 	}
+	old := ""
+	if own != nil {
+		old = rec.Keys.Key
+		own.del(old)
+	}
 	global.set(key, action)
 	after := encodeOrdered(root)
-	if err := writeAtomic(path, after); err != nil {
+	if err := t.write("keys.json", after); err != nil {
 		return "", err
 	}
-	rec.Keys = &KeysRecord{Section: "global", Key: key, Action: action, Before: string(before), After: sum(after)}
+	first := string(before)
+	if rec.Keys != nil {
+		first = rec.Keys.Before // uninstall still restores the file from before the first install
+	}
+	rec.Keys = &KeysRecord{Section: "global", Key: key, Action: action, Before: first, After: sum(after)}
+	if old != "" {
+		return fmt.Sprintf("%s now opens and hides the board, instead of %s", key, old), nil
+	}
 	return fmt.Sprintf("%s now opens and hides the board (keys.json is now edited, so Herdr no longer adds new default shortcuts to it; tuckerbox herdr uninstall puts it back)", key), nil
 }
 
@@ -289,7 +314,7 @@ func uninstallKeys(home string, k *KeysRecord) (string, error) {
 		return "", err
 	}
 	if sum(cur) == k.After {
-		if err := writeAtomic(path, []byte(k.Before)); err != nil {
+		if err := replaceFile(path, []byte(k.Before)); err != nil {
 			return "", err
 		}
 		return "keys.json put back as it was before install", nil
@@ -303,7 +328,7 @@ func uninstallKeys(home string, k *KeysRecord) (string, error) {
 		if s, ok := root.vals[k.Section].(*obj); ok {
 			if a, ok := s.get(k.Key); ok && actionText(a) == k.Action {
 				s.del(k.Key)
-				if err := writeAtomic(path, encodeOrdered(root)); err != nil {
+				if err := replaceFile(path, encodeOrdered(root)); err != nil {
 					return "", err
 				}
 				return fmt.Sprintf("removed %s from keys.json (the file changed since install, so the rest stays)", k.Key), nil
@@ -395,10 +420,16 @@ func readLayout(path string) ([]byte, *obj, error) {
 // installDrawer adds the drawer to the shown layout's root floating list. A
 // shipped layout is read-only, so it is cloned first (layout.clone, which
 // also switches to the clone) and the clone gets the drawer.
-func installDrawer(ctx context.Context, home string, env Env, rec *Record) (string, error) {
+func installDrawer(home string, rec *Record, t *txn) (string, error) {
 	if rec.Drawer != nil {
-		if _, root, err := readLayout(layoutPath(home, rec.Drawer.Layout)); err == nil && hasDrawer(root) {
+		_, root, err := readLayout(layoutPath(home, rec.Drawer.Layout))
+		switch {
+		case err == nil && hasDrawer(root):
 			return fmt.Sprintf("the drawer is already in layout %s", rec.Drawer.Layout), nil
+		case err != nil && !errors.Is(err, fs.ErrNotExist):
+			// The record holds a layout it can't read, such as a clone a
+			// failed install couldn't remove: replacing that entry would lose it.
+			return "", fmt.Errorf("the install record holds layout %s, which can't be read (%v); run tuckerbox herdr uninstall first", rec.Drawer.Layout, err)
 		}
 	}
 	name := shownLayout(home)
@@ -411,19 +442,8 @@ func installDrawer(ctx context.Context, home string, env Env, rec *Record) (stri
 			}
 			as = fmt.Sprintf("%s-tuckerbox-%d", name, i)
 		}
-		if _, err := env.Do(ctx, "layout.clone", map[string]any{"name": name, "as": as}); err != nil {
-			return "", fmt.Errorf("%w to clone the shipped layout %s (%v); open Herdr and run this again", ErrHerdrNotRunning, name, err)
-		}
-		// The window writes the clone; wait for it.
-		deadline := time.Now().Add(10 * time.Second)
-		for {
-			if _, err := os.Stat(layoutPath(home, as)); err == nil {
-				break
-			}
-			if time.Now().After(deadline) {
-				return "", fmt.Errorf("Herdr didn't write layouts/%s.json", as)
-			}
-			time.Sleep(100 * time.Millisecond)
+		if err := t.clone(name, as); err != nil {
+			return "", err
 		}
 		d.Layout, d.ClonedFrom = as, name
 	}
@@ -438,7 +458,7 @@ func installDrawer(ctx context.Context, home string, env Env, rec *Record) (stri
 	f, _ := root.vals["floating"].([]any)
 	root.set("floating", append(f, drawerBlock()))
 	after := encodeOrdered(root)
-	if err := writeAtomic(path, after); err != nil {
+	if err := t.write("layouts/"+d.Layout+".json", after); err != nil {
 		return "", err
 	}
 	d.Before, d.After = string(before), sum(after)
@@ -449,9 +469,11 @@ func installDrawer(ctx context.Context, home string, env Env, rec *Record) (stri
 	return fmt.Sprintf("added the drawer to your layout %s", d.Layout), nil
 }
 
+// uninstallDrawer compares the recorded layout's hash before parsing it, so
+// a clone still as install left it (even a malformed one) is removed unread.
 func uninstallDrawer(ctx context.Context, home string, env Env, d *DrawerRecord) (string, error) {
 	path := layoutPath(home, d.Layout)
-	cur, root, err := readLayout(path)
+	cur, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return fmt.Sprintf("layout %s is gone; nothing to undo there", d.Layout), nil
 	}
@@ -468,16 +490,20 @@ func uninstallDrawer(ctx context.Context, home string, env Env, d *DrawerRecord)
 			}
 			switched = fmt.Sprintf(" and switched back to %s", d.ClonedFrom)
 		}
-		if err := os.Remove(path); err != nil {
+		if err := removeFile(path); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("removed layout %s (install's copy of %s)%s", d.Layout, d.ClonedFrom, switched), nil
 	}
 	if unchanged {
-		if err := writeAtomic(path, []byte(d.Before)); err != nil {
+		if err := replaceFile(path, []byte(d.Before)); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("layout %s put back as it was before install", d.Layout), nil
+	}
+	_, root, err := readLayout(path)
+	if err != nil {
+		return fmt.Sprintf("layout %s changed since install and can't be read now (%v); left as it is", d.Layout, err), nil
 	}
 	if !hasDrawer(root) {
 		return fmt.Sprintf("layout %s no longer has the drawer; left as it is", d.Layout), nil
@@ -497,7 +523,7 @@ func uninstallDrawer(ctx context.Context, home string, env Env, d *DrawerRecord)
 	} else {
 		root.set("floating", keep)
 	}
-	if err := writeAtomic(path, encodeOrdered(root)); err != nil {
+	if err := replaceFile(path, encodeOrdered(root)); err != nil {
 		return "", err
 	}
 	if d.ClonedFrom != "" {
@@ -515,52 +541,120 @@ type Options struct {
 	Drawer bool   // add the drawer to the shown layout
 }
 
-// InstallExtras makes the opt-in changes, after Install, and records each
-// one as it is made. It returns what it did, line by line; on an error the
-// lines say what was done before it.
+// InstallExtras makes the opt-in changes, after Install. It holds the
+// install lock throughout, first finishes the undo of an earlier install that
+// left its journal, journals each change before making it, and writes the
+// record last. When a step or the record write fails, it undoes every change
+// of this run. It returns what it did, line by line.
 func InstallExtras(ctx context.Context, env Env, opt Options) ([]string, error) {
 	env = env.withDefaults()
 	home, err := Home(env)
 	if err != nil {
 		return nil, err
 	}
-	rec, err := readRecord(home)
+	if st, err := os.Stat(home); err != nil || !st.IsDir() {
+		return nil, fmt.Errorf("%w: no Herdr app folder at %s", ErrNoHerdr, home)
+	}
+	unlock, err := lockHome(ctx, home)
 	if err != nil {
 		return nil, err
+	}
+	defer unlock()
+	_, did, err := recoverJournal(ctx, home, env)
+	if err != nil {
+		return did, err
+	}
+	rec, err := readRecord(home)
+	if err != nil {
+		return did, err
 	}
 	if rec == nil {
 		rec = &Record{}
 	}
-	var did []string
+	t := newTxn(ctx, home, env, "install")
+	var steps []string
 	var clash *KeyClash
-	if opt.Keys {
-		msg, err := installKeys(home, env, rec, opt.Key)
-		switch {
-		case errors.As(err, &clash):
-			// Reported at the end; the drawer doesn't depend on the key.
-		case err != nil:
-			return did, err
-		default:
-			did = append(did, msg)
-			if err := writeRecord(home, rec); err != nil {
-				return did, err
+	err = func() error {
+		if opt.Keys {
+			msg, err := installKeys(home, env, rec, opt.Key, t)
+			switch {
+			case errors.As(err, &clash):
+				// Reported at the end; the drawer doesn't depend on the key.
+			case err != nil:
+				return err
+			default:
+				steps = append(steps, msg)
 			}
 		}
-	}
-	if opt.Drawer {
-		msg, err := installDrawer(ctx, home, env, rec)
-		if err != nil {
-			return did, err
+		if opt.Drawer {
+			msg, err := installDrawer(home, rec, t)
+			if err != nil {
+				return err
+			}
+			steps = append(steps, msg)
 		}
-		did = append(did, msg)
-		if err := writeRecord(home, rec); err != nil {
-			return did, err
-		}
+		return writeRecord(home, rec)
+	}()
+	if err != nil {
+		return append(did, rollback(ctx, home, env, t, err)...), err
 	}
+	if err := saveJournal(home, &journal{}); err != nil {
+		return append(did, steps...), err
+	}
+	did = append(did, steps...)
 	if clash != nil {
 		return did, clash
 	}
 	return did, nil
+}
+
+// rollback undoes this run's journaled changes after cause failed, and says
+// how that went. When an undo fails, the journal keeps what is left, except a
+// clone it couldn't remove: that is written to the record as a drawer entry
+// (when the record holds no drawer and can be written), so uninstall removes it.
+func rollback(ctx context.Context, home string, env Env, t *txn, cause error) []string {
+	notes := []string{fmt.Sprintf("install failed (%v); undoing what it changed", cause)}
+	for {
+		more, failed, err := undoAll(ctx, home, env, &t.j, true)
+		notes = append(notes, more...)
+		if err == nil {
+			return append(notes, "everything this install changed is back as it was")
+		}
+		if failed != nil && failed.Clone != "" {
+			if msg, ok := recordClone(home, *failed); ok {
+				notes = append(notes, fmt.Sprintf("couldn't remove layout %s (%v); %s", failed.Clone, err, msg))
+				t.j.Entries = t.j.Entries[:len(t.j.Entries)-1]
+				if err := saveJournal(home, &t.j); err == nil {
+					continue
+				}
+			}
+		}
+		return append(notes, fmt.Sprintf("undoing failed: %v; %s keeps what is left: run tuckerbox herdr uninstall (with Herdr running) to finish the undo", err, journalPath(home)))
+	}
+}
+
+// recordClone writes a clone a failed install couldn't remove into the
+// record, as a drawer entry with an empty before and its hash as found.
+func recordClone(home string, e jentry) (string, bool) {
+	rec, err := readRecord(home)
+	if err != nil {
+		return "", false
+	}
+	if rec == nil {
+		rec = &Record{}
+	}
+	if rec.Drawer != nil {
+		return "", false
+	}
+	cur, err := os.ReadFile(layoutPath(home, e.Clone))
+	if err != nil {
+		return "", false
+	}
+	rec.Drawer = &DrawerRecord{Layout: e.Clone, ClonedFrom: e.From, Before: "", After: sum(cur)}
+	if writeRecord(home, rec) != nil {
+		return "", false
+	}
+	return "the install record keeps it, so run tuckerbox herdr uninstall (with Herdr running) to remove it", true
 }
 
 // ErrNothingInstalled is returned by Uninstall when there is no record and no mod.
@@ -579,20 +673,31 @@ func Uninstall(ctx context.Context, env Env) ([]string, error) {
 	if st, err := os.Stat(home); err != nil || !st.IsDir() {
 		return nil, fmt.Errorf("%w: no Herdr app folder at %s", ErrNoHerdr, home)
 	}
-	rec, err := readRecord(home)
+	unlock, err := lockHome(ctx, home)
 	if err != nil {
 		return nil, err
 	}
-	var did []string
+	defer unlock()
+	recovered, did, err := recoverJournal(ctx, home, env)
+	if err != nil {
+		return did, err
+	}
+	rec, err := readRecord(home)
+	if err != nil {
+		return did, err
+	}
 	if rec == nil {
 		dir := filepath.Join(home, "mods", herdr.ModName)
 		if _, err := os.Stat(filepath.Join(dir, VersionFile)); err != nil {
+			if recovered {
+				return did, nil
+			}
 			return nil, ErrNothingInstalled
 		}
 		if err := os.RemoveAll(dir); err != nil {
 			return nil, err
 		}
-		return []string{"removed " + dir + " (no install record, so nothing else was changed)"}, nil
+		return append(did, "removed "+dir+" (no install record, so nothing else was changed)"), nil
 	}
 	if rec.Drawer != nil {
 		msg, err := uninstallDrawer(ctx, home, env, rec.Drawer)
@@ -629,7 +734,7 @@ func Uninstall(ctx context.Context, env Env) ([]string, error) {
 		}
 		did = append(did, "removed "+dir)
 	}
-	if err := os.Remove(recordPath(home)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := removeFile(recordPath(home)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return did, err
 	}
 	return did, nil

@@ -62,12 +62,13 @@ func read(t *testing.T, home, rel string) string {
 	return string(b)
 }
 
-// snapshot is every file under home with its bytes.
+// snapshot is every file under home with its bytes, except the install lock,
+// which is made once and never removed (removing it would race a waiter).
 func snapshot(t *testing.T, home string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
 	filepath.WalkDir(home, func(p string, d fs.DirEntry, err error) error {
-		if err == nil && !d.IsDir() {
+		if err == nil && !d.IsDir() && d.Name() != LockFile {
 			rel, _ := filepath.Rel(home, p)
 			b, _ := os.ReadFile(p)
 			out[filepath.ToSlash(rel)] = string(b)
@@ -83,6 +84,10 @@ type fakeHerdr struct {
 	home  string
 	down  bool
 	calls []string
+	// cloneText, when set, is what layout.clone writes instead of a copy.
+	cloneText string
+	// downAfterClone stops the window right after a clone.
+	downAfterClone bool
 }
 
 func (f *fakeHerdr) do(_ context.Context, command string, args map[string]any) (string, error) {
@@ -98,8 +103,12 @@ func (f *fakeHerdr) do(_ context.Context, command string, args map[string]any) (
 	switch command {
 	case "layout.clone":
 		src, _ := os.ReadFile(layoutPath(f.home, args["name"].(string)))
+		if f.cloneText != "" {
+			src = []byte(f.cloneText)
+		}
 		os.WriteFile(layoutPath(f.home, args["as"].(string)), src, 0o644)
 		show(args["as"].(string))
+		f.down = f.downAfterClone
 	case "layout.switch":
 		show(args["name"].(string))
 	}
