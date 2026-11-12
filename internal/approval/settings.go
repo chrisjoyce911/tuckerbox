@@ -28,6 +28,10 @@ const settingsVersion = "tuckerbox-settings-v1\n"
 // approvedKeys are the step keys an approval covers.
 var approvedKeys = []string{"agent", "permissions"}
 
+// VoidingKeys returns the step keys an approval covers, in order: changing
+// one of them makes an approved change's approval stale.
+func VoidingKeys() []string { return append([]string(nil), approvedKeys...) }
+
 // SettingsLines returns the agent and permissions overrides in a
 // tuckerbox.toml's contents as sorted lines "step.<id>.<key>=<value>". nil
 // data (no sidecar) has none.

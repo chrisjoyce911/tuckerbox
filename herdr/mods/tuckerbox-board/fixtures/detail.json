@@ -81,7 +81,70 @@
         "commit": "abc123"
       },
       "ship_round": 2,
-      "max_rounds": 3
+      "max_rounds": 3,
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "codex",
+            "source": "change"
+          },
+          "model": {
+            "value": "gpt-5.5",
+            "source": "change"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          }
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "gpt-5.5",
+            "source": "change"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": [
+        "studio",
+        "mini"
+      ]
     }
   ],
   "detail": {
@@ -376,7 +439,34 @@
         "ticked": 0,
         "total": 1
       }
-    ]
+    ],
+    "choices": {
+      "agents": [
+        "claude",
+        "codex"
+      ],
+      "models": {
+        "claude": [
+          "opus",
+          "sonnet"
+        ],
+        "codex": [
+          "gpt-5.5"
+        ]
+      },
+      "efforts": [
+        "medium",
+        "high"
+      ],
+      "permissions": [
+        "edit",
+        "readonly"
+      ],
+      "voids_approval": [
+        "agent",
+        "permissions"
+      ]
+    }
   },
   "ship": "local"
 }

@@ -129,6 +129,12 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 				}
 			}
 		}
+		c.Settings, c.Machines = cardSettings(cfg, folder, r)
+		for _, s := range c.Settings {
+			if s.Started {
+				c.Agent = s.Agent.Value // what the running step started with
+			}
+		}
 		addShipping(&c, r, cfg)
 		places[id] = p
 		folders[id] = folder
@@ -181,6 +187,12 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 			return nil, &Error{"unknown_change", "no board card for change " + change}
 		}
 		doc.Detail, err = readDetail(change, folder, places[change].State, states[change])
+		if err == nil {
+			doc.Detail.Choices = noChoices()
+			if p, ok := places[change]; ok && !archivedCard(doc.Cards, change) {
+				doc.Detail.Choices, err = readChoices(p.Dir)
+			}
+		}
 		if err != nil {
 			for i := range doc.Cards {
 				if doc.Cards[i].Change == change {
@@ -190,6 +202,16 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 		}
 	}
 	return doc, nil
+}
+
+// archivedCard reports whether change's card is an archived one.
+func archivedCard(cards []Card, change string) bool {
+	for _, c := range cards {
+		if c.Change == change {
+			return c.Archived != ""
+		}
+	}
+	return false
 }
 
 // sortedColumn reports whether a column lists its cards in priority order:
@@ -266,7 +288,7 @@ func columns(cfg *config.Config) []Column {
 }
 
 func readCard(ctx context.Context, id, folder, machine string, archived bool, refs refView) (Card, error) {
-	c := Card{Change: id, Title: strings.ReplaceAll(id, "-", " "), Machine: machine, DependsOn: []Dependency{}, Approval: Approval{State: "none", Committed: archived, Published: true}}
+	c := Card{Change: id, Title: strings.ReplaceAll(id, "-", " "), Machine: machine, DependsOn: []Dependency{}, Approval: Approval{State: "none", Committed: archived, Published: true}, Settings: []StepSettings{}, Machines: []string{}}
 	var sidecar struct {
 		Title     string   `toml:"title"`
 		DependsOn []string `toml:"depends_on"`

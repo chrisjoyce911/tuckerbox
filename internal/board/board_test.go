@@ -358,8 +358,15 @@ func assertShape(t *testing.T, d *Document, fixture string) {
 	for _, k := range []string{"result", "to", "summary", "findings", "reason", "scope", "old_scope", "commit", "branch", "link", "number", "method", "ship_round", "ci", "jobs", "threads"} {
 		optional[".detail.history[]."+k] = true
 	}
+	// A card may have no machines and a step no recorded settings; the
+	// allow-list's entries depend on the repository.
+	optional[".cards[].machines[]"] = true
+	optional[".cards[].settings[].started"] = true
+	for _, k := range []string{"agents[]", "efforts[]", "permissions[]", "voids_approval[]"} {
+		optional[".detail.choices."+k] = true
+	}
 	for k, v := range want {
-		if optional[k] || strings.HasPrefix(k, ".detail.history[].findings[]") {
+		if optional[k] || strings.HasPrefix(k, ".detail.history[].findings[]") || strings.HasPrefix(k, ".detail.choices.models.") {
 			continue
 		}
 		if got[k] != v {
@@ -367,7 +374,7 @@ func assertShape(t *testing.T, d *Document, fixture string) {
 		}
 	}
 	for k, v := range got {
-		if !optional[k] && want[k] != v {
+		if !optional[k] && !strings.HasPrefix(k, ".detail.choices.models.") && want[k] != v {
 			t.Errorf("unexpected shape %s: %s", k, v)
 		}
 	}
