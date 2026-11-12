@@ -205,7 +205,8 @@ type rawStep struct {
 }
 
 type rawAgent struct {
-	Command []string `toml:"command"`
+	Command     []string `toml:"command"`
+	Interactive []string `toml:"interactive"`
 	Model   string   `toml:"model"`
 	Effort  string   `toml:"effort"`
 }

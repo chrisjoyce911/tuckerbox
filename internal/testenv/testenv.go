@@ -125,6 +125,10 @@ type Env struct {
 	StateHome string
 	// Plan is the fake agent's plan file; Record lists its starts.
 	Plan, Record string
+	// HCDir is the fake hc's directory of terminals (FAKEHC_DIR).
+	HCDir string
+	// HC is the fake hc program.
+	HC string
 }
 
 // Setup points PATH at the openspec stub and the user state and config
@@ -139,7 +143,20 @@ func (tl *Tools) Setup(t *testing.T) *Env {
 		Plan:      filepath.Join(home, "plan.json"),
 		Record:    filepath.Join(home, "record.txt"),
 	}
-	t.Setenv("PATH", tl.Bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// The fake hc comes before any real herdr-core, with its server down,
+	// so agent_backend "auto" runs agents headless unless a test sets
+	// FAKEHC_SERVER=up.
+	sep := string(os.PathListSeparator)
+	t.Setenv("PATH", tl.Bin+sep+tl.HCBin+sep+os.Getenv("PATH"))
+	t.Setenv("FAKEHC_SERVER", "down")
+	e.HCDir = filepath.Join(home, "hc")
+	e.HC = filepath.Join(tl.HCBin, exe("hc"))
+	t.Setenv("FAKEHC_DIR", e.HCDir)
+	t.Cleanup(func() {
+		cmd := exec.Command(e.HC, "killall")
+		cmd.Env = append(os.Environ(), "FAKEHC_DIR="+e.HCDir)
+		_ = cmd.Run()
+	})
 	for k, v := range NoNetwork {
 		t.Setenv(k, v)
 	}
@@ -167,6 +184,13 @@ type Action struct {
 	// Edit appends a line to this file (relative to the change folder in
 	// the worktree) before reporting.
 	Edit string `json:"edit,omitempty"`
+	// Ask, in a terminal, ends the first turn with this question and no
+	// result, then reads the person's answer from the terminal; the
+	// result's summary then quotes it ("answer: <line>").
+	Ask string `json:"ask,omitempty"`
+	// ExitAfter, in a terminal, exits once the result's turn has ended,
+	// instead of waiting for more input as an interactive CLI does.
+	ExitAfter bool `json:"exit_after,omitempty"`
 }
 
 // Finding is a fake agent finding.
@@ -223,6 +247,9 @@ type RepoOptions struct {
 	// default the scratch config sets require_approval = false, so tests
 	// of other behaviour need not approve their changes.
 	RequireApproval bool
+	// Interactive gives the fake agent an interactive command, so it runs
+	// in a terminal under the terminal backend.
+	Interactive bool
 }
 
 // Git runs git in dir and fails the test on error.
@@ -278,6 +305,13 @@ max_rounds = 3
 %s`, maxParallel, tl.FakeAgent, extra)
 }
 
+// Interactive is the fake agent's interactive command, as a config line:
+// it reports through the turn hook it is given and reads the person's
+// answers from its terminal.
+func (tl *Tools) Interactive() string {
+	return fmt.Sprintf(`interactive = ['%s', "--notify", "{turnhook}", "--", "{brief}"]`, tl.FakeAgent)
+}
+
 // NewRepo makes a git repository on branch main, with one commit holding
 // the config and the changes, in a fresh directory named "repo" (so the
 // default worktrees go to a sibling "repo-worktrees").
@@ -302,6 +336,9 @@ func (tl *Tools) NewRepo(t *testing.T, o RepoOptions) string {
 	}
 	if !o.NoConfig {
 		cfg := tl.Config(o.MaxParallel, o.Extra)
+		if o.Interactive {
+			cfg = strings.Replace(cfg, "[agents.fake]\n", "[agents.fake]\n"+tl.Interactive()+"\n", 1)
+		}
 		if !o.RequireApproval {
 			cfg = "require_approval = false\n" + cfg
 		}

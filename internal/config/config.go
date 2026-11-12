@@ -97,6 +97,15 @@ var BuiltinRoles = []string{"planner", "builder", "reviewer", "fixer"}
 //     the agent's standard output
 var Placeholders = []string{"brief", "brief_file", "workdir", "model", "effort", "lastmessage"}
 
+// InteractivePlaceholders are the names an agent's interactive command
+// may use: those of [Placeholders] and {turnhook}, which it must pass.
+// As a whole argument, {turnhook} expands to the hook's program and
+// arguments; inside an argument, to the hook as one shell command. The
+// hook takes the turn's final message as its last argument, as a Codex
+// notify payload, or on standard input, as a Claude Code Stop hook
+// payload or plain text.
+var InteractivePlaceholders = append(slices.Clone(Placeholders), "turnhook")
+
 // ShipMode says what happens when a run finishes its last step.
 type ShipMode string
 
@@ -226,6 +235,12 @@ type Agent struct {
 	// Command is the program and its arguments. Arguments may hold
 	// placeholders (see [Placeholders]); Command[0] is the program.
 	Command []string
+	// Interactive is the agent's command for the terminal backend, or
+	// nil: the agent then runs headless even when the terminal backend is
+	// in use. It takes the same placeholders and must pass {turnhook},
+	// the command the agent CLI runs at the end of each turn with its
+	// final message (see [InteractivePlaceholders]).
+	Interactive []string
 	// Model and Effort are defaults for the {model} and {effort}
 	// placeholders when a step does not set them.
 	Model, Effort string

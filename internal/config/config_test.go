@@ -637,3 +637,42 @@ func TestMachineAgentBackend(t *testing.T) {
 		t.Errorf("MachineBackend without a file: %q, %v", got, err)
 	}
 }
+
+// An agent's interactive command, for the terminal backend: it must pass
+// {turnhook} and a brief, and repository config may grant no permissions
+// in it. An agent without one has none (it runs headless).
+func TestInteractiveAgentCommand(t *testing.T) {
+	repo := strings.Replace(minimal, `agent = "codex"`, `agent = "omp"`, 1) + `
+[agents.omp]
+command = ["omp", "{brief}"]
+interactive = ["omp", "--hook", "{turnhook}", "{brief}"]
+[agents.plain]
+command = ["plain", "{brief}"]
+`
+	cfg := newFixture(t, repo, "").mustLoad()
+	if got := cfg.Agents["omp"].Interactive; len(got) != 4 || got[2] != "{turnhook}" {
+		t.Errorf("omp interactive %q", got)
+	}
+	if got := cfg.Agents["plain"].Interactive; got != nil {
+		t.Errorf("plain interactive %q, want none", got)
+	}
+
+	bad := strings.Replace(minimal, `agent = "codex"`, `agent = "a"`, 1) + `
+[agents.a]
+command = ["a", "{brief}"]
+interactive = ["a", "{brief}", "--yolo"]
+[agents.b]
+command = ["b", "{brief}"]
+interactive = ["b", "{turnhook}", "{nope}"]
+[agents.c]
+command = ["c", "{brief}"]
+interactive = []
+`
+	f := newFixture(t, bad, "")
+	ps := f.problems()
+	wantProblem(t, ps, f.repoPath(), "agents.a.interactive", "{turnhook}")
+	wantProblem(t, ps, f.repoPath(), "agents.a.interactive", "--yolo", "machine config")
+	wantProblem(t, ps, f.repoPath(), "agents.b.interactive", "{nope}")
+	wantProblem(t, ps, f.repoPath(), "agents.b.interactive", "{brief}")
+	wantProblem(t, ps, f.repoPath(), "agents.c.interactive", "empty")
+}

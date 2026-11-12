@@ -16,10 +16,15 @@ import (
 	"time"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
+	"github.com/chrisjoyce911/tuckerbox/internal/testenv"
 )
 
 // fakeAgent is the path of the test agent binary built by TestMain.
 var fakeAgent string
+
+// termTools are the testenv programs for the terminal tests (not on
+// Windows, where the fake hc has no terminals).
+var termTools *testenv.Tools
 
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "tuckerbox-fakeagent")
@@ -40,8 +45,21 @@ func TestMain(m *testing.M) {
 		os.RemoveAll(dir)
 		os.Exit(1)
 	}
+	// The terminal tests run the testenv programs: the fake hc, the
+	// plan-driven fake agent and tuckerbox itself (agent-hold, agent-turn).
+	if runtime.GOOS != "windows" {
+		termTools, err = testenv.Build(true)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.RemoveAll(dir)
+			os.Exit(1)
+		}
+	}
 	code := m.Run()
 	os.RemoveAll(dir)
+	if termTools != nil {
+		termTools.Remove()
+	}
 	os.Exit(code)
 }
 

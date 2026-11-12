@@ -7,12 +7,25 @@
 //
 // The most specific key wins; with no match it reports done. Every start
 // is appended to FAKEAGENT_RECORD as "<change> <step> <round> <pid>".
+//
+// Given a turn hook it acts as an interactive agent CLI in a terminal: it
+// reports each turn's final message through the hook rather than a result
+// file, reads the person's answers from standard input, and keeps running
+// after its last turn. It finds the hook as each CLI is given it:
+//
+//	--settings <json>        Claude Code: the Stop hook command, run by the
+//	                         shell with a payload naming a transcript
+//	-c notify=[...]          Codex: argv, run with a notify payload as the
+//	                         last argument
+//	--notify <argv...> --    a custom agent's {turnhook}, run like notify
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -45,6 +58,83 @@ type action struct {
 	Tick []string `json:"tick"`
 	// Edit appends a line to this file in the change folder.
 	Edit string `json:"edit"`
+	// Ask (interactive) ends the first turn with this question and reads
+	// the answer from standard input; the summary then quotes it.
+	Ask string `json:"ask"`
+	// ExitAfter (interactive) exits after the last turn.
+	ExitAfter bool `json:"exit_after"`
+}
+
+// hook is how the fake agent hands a turn's final message over.
+type hook struct {
+	style string // "claude", "notify"
+	shell string
+	argv  []string
+}
+
+// findHook finds a turn hook in the arguments, or returns nil.
+func findHook(args []string) *hook {
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--settings" && i+1 < len(args):
+			var v struct {
+				Hooks struct {
+					Stop []struct {
+						Hooks []struct {
+							Command string `json:"command"`
+						} `json:"hooks"`
+					} `json:"Stop"`
+				} `json:"hooks"`
+			}
+			must(json.Unmarshal([]byte(args[i+1]), &v))
+			return &hook{style: "claude", shell: v.Hooks.Stop[0].Hooks[0].Command}
+		case args[i] == "-c" && i+1 < len(args) && strings.HasPrefix(args[i+1], "notify="):
+			var argv []string
+			must(json.Unmarshal([]byte(strings.TrimPrefix(args[i+1], "notify=")), &argv))
+			return &hook{style: "notify", argv: argv}
+		case args[i] == "--notify":
+			h := &hook{style: "notify"}
+			for _, a := range args[i+1:] {
+				if a == "--" {
+					break
+				}
+				h.argv = append(h.argv, a)
+			}
+			return h
+		}
+	}
+	return nil
+}
+
+// turn ends a turn with msg as its final message.
+func (h *hook) turn(msg string) {
+	switch h.style {
+	case "claude":
+		dir, err := os.MkdirTemp("", "fakeagent-transcript")
+		must(err)
+		defer os.RemoveAll(dir)
+		tp := filepath.Join(dir, "session.jsonl")
+		var lines []string
+		for _, e := range []map[string]any{
+			{"type": "user", "message": map[string]any{"role": "user", "content": "go"}},
+			{"type": "assistant", "message": map[string]any{"id": "m1", "role": "assistant", "content": []map[string]any{{"type": "text", "text": "Working on it."}}}},
+			{"type": "assistant", "message": map[string]any{"id": "m2", "role": "assistant", "content": []map[string]any{{"type": "text", "text": msg}}}},
+		} {
+			data, _ := json.Marshal(e)
+			lines = append(lines, string(data))
+		}
+		must(os.WriteFile(tp, []byte(strings.Join(lines, "\n")+"\n"), 0o644))
+		payload, _ := json.Marshal(map[string]any{"hook_event_name": "Stop", "transcript_path": tp, "session_id": "s1"})
+		cmd := exec.Command("sh", "-c", h.shell)
+		cmd.Stdin = strings.NewReader(string(payload))
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		must(cmd.Run())
+	default:
+		payload, _ := json.Marshal(map[string]any{"type": "agent-turn-complete", "turn-id": "1", "last-assistant-message": msg})
+		cmd := exec.Command(h.argv[0], append(h.argv[1:], string(payload))...)
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		must(cmd.Run())
+	}
 }
 
 func main() {
@@ -115,6 +205,10 @@ func main() {
 	if summary == "" {
 		summary = "fake " + step + " " + status
 	}
+	if h := findHook(os.Args[1:]); h != nil {
+		interactive(h, a, change, step, round, status, summary)
+		return
+	}
 	write := func(r int) {
 		data, _ := json.Marshal(map[string]any{
 			"change": change, "step": step, "round": r, "status": status,
@@ -147,6 +241,46 @@ func main() {
 		fmt.Fprintln(os.Stderr, "fakeagent: giving up without a result")
 	}
 	os.Exit(a.Exit)
+}
+
+// interactive is the fake agent as an interactive CLI in a terminal.
+func interactive(h *hook, a action, change, step string, round int, status, summary string) {
+	in := bufio.NewScanner(os.Stdin)
+	result := func(r int) string {
+		data, _ := json.MarshalIndent(map[string]any{
+			"change": change, "step": step, "round": r, "status": status,
+			"summary": summary, "findings": a.Findings,
+		}, "", "  ")
+		return "Finished.\n\n```json\n" + string(data) + "\n```"
+	}
+	if a.Ask != "" {
+		fmt.Println(a.Ask)
+		h.turn(a.Ask)
+		if !in.Scan() {
+			os.Exit(1)
+		}
+		fmt.Println("fakeagent: the person said:", in.Text())
+		summary = "answer: " + in.Text()
+	}
+	if a.StaleFirst {
+		h.turn(result(round - 1))
+		time.Sleep(700 * time.Millisecond)
+	}
+	if status == "none" {
+		h.turn("I could not finish this.")
+	} else {
+		h.turn(result(round))
+	}
+	if a.ExitAfter {
+		os.Exit(a.Exit)
+	}
+	for in.Scan() {
+		fmt.Println("fakeagent: the person said:", in.Text())
+	}
+	// An interactive CLI waits for its next prompt until it is ended.
+	for {
+		time.Sleep(time.Hour)
+	}
 }
 
 func must(err error) {

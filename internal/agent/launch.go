@@ -45,6 +45,8 @@ type Step struct {
 	Env []string
 	// Scope is the run's task scope, or nil; it goes in the brief.
 	Scope *scope.Scope
+	// Term is what the terminal backend needs; headless ignores it.
+	Term TermInfo
 }
 
 // Options tune Run. The zero value is ready to use.
@@ -61,8 +63,18 @@ type Options struct {
 	// TailBytes is how much output is kept for a step without a result
 	// (default 4 KiB).
 	TailBytes int64
-	// OnStart is called with the agent's pid once it has started.
+	// OnStart is called with the agent's pid once it has started
+	// (headless).
 	OnStart func(pid int)
+	// OnTerminal is called with the terminal's name and address once the
+	// agent's terminal is started or adopted (terminal backend).
+	OnTerminal func(name, address string)
+	// OnAgentState is called when the agent's state changes: AgentWorking
+	// or AgentWaiting (terminal backend).
+	OnAgentState func(state string)
+	// TermPoll is how often the terminal backend asks herdr-core whether
+	// the agent's terminal still lives (default 2 seconds).
+	TermPoll time.Duration
 }
 
 // Outcome is what happened when a step's agent ran.
@@ -346,6 +358,9 @@ func withDefaults(o Options) Options {
 	}
 	if o.TailBytes <= 0 {
 		o.TailBytes = 4 << 10
+	}
+	if o.TermPoll <= 0 {
+		o.TermPoll = 2 * time.Second
 	}
 	return o
 }
