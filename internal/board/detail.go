@@ -18,29 +18,29 @@ func readDetail(id, folder string, state statedir.Dir, run *runs.Run) (*Detail, 
 	var err error
 	d.Proposal, err = readOptional(filepath.Join(folder, "proposal.md"))
 	if err != nil {
-		return nil, err
+		return d, err
 	}
 	specs, err := approval.Dir(folder).Specs()
 	if err != nil {
-		return nil, err
+		return d, err
 	}
 	for _, s := range specs {
 		text, err := readOptional(filepath.Join(folder, filepath.FromSlash(s)))
 		if err != nil {
-			return nil, err
+			return d, err
 		}
 		d.Specs = append(d.Specs, Spec{Capability: strings.TrimPrefix(path.Dir(s), "specs/"), Text: text})
 	}
 	tasks, err := readOptional(filepath.Join(folder, "tasks.md"))
 	if err != nil {
-		return nil, err
+		return d, err
 	}
 	d.Tasks = parseTasks(tasks)
 	var events []history.Event
 	if state != "" {
 		events, err = history.Read(history.File(state))
 		if err != nil {
-			return nil, err
+			return d, err
 		}
 	}
 	for _, e := range events {
@@ -75,6 +75,15 @@ func rounds(run *runs.Run, events []history.Event) []Round {
 		if e.Round <= 0 {
 			continue
 		}
+		switch e.Kind {
+		case history.StepStarted, history.StepFinished, history.Rejected, history.Blocked, history.Failed, history.Stopped:
+		default:
+			continue
+		}
+		// A pause before any step/result is not a round of work.
+		if _, ok := byNumber[e.Round]; !ok && (e.Kind == history.Stopped || e.Kind == history.Blocked || e.Kind == history.Failed) {
+			continue
+		}
 		r := ensure(e.Round)
 		switch e.Kind {
 		case history.StepStarted:
@@ -87,7 +96,7 @@ func rounds(run *runs.Run, events []history.Event) []Round {
 			}
 			r.Step, r.Summary, r.Ended = e.Step, e.Summary, timestamp(e.Time)
 			r.Findings = append([]agent.Finding{}, e.Findings...)
-		case history.Blocked, history.Failed:
+		case history.Blocked, history.Failed, history.Stopped:
 			r.Result, r.Step, r.Ended = string(e.Kind), e.Step, timestamp(e.Time)
 			if r.Summary == "" {
 				r.Summary = e.Reason
@@ -95,10 +104,10 @@ func rounds(run *runs.Run, events []history.Event) []Round {
 		}
 		byNumber[e.Round] = r
 	}
-	if run != nil && run.Round > 0 {
+	if run != nil && run.Round > 0 && (byNumber[run.Round].Round > 0 || (run.Step != "" && run.State == runs.Running)) {
 		r := ensure(run.Round)
 		switch run.State {
-		case runs.Blocked, runs.Failed:
+		case runs.Blocked, runs.Failed, runs.Stopped:
 			r.Result, r.Step, r.Ended = string(run.State), run.Step, timestamp(run.Since)
 			if r.Summary == "" {
 				r.Summary = run.Reason

@@ -21,6 +21,7 @@ import (
 	"github.com/chrisjoyce911/tuckerbox/internal/edits"
 	"github.com/chrisjoyce911/tuckerbox/internal/history"
 	"github.com/chrisjoyce911/tuckerbox/internal/runs"
+	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 )
 
 // Error provides a stable code for dashboards, including initialization errors.
@@ -57,45 +58,44 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 	if key == "" {
 		key = repo.Root
 	}
+	worktrees, err := scanWorktrees(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
 	doc := &Document{Version: Version, Repo: key, Path: repo.Root, Machine: history.Machine(), RequireApproval: cfg.RequireApproval, Columns: columns(cfg), Cards: []Card{}}
 	folders := map[string]string{}
 	states := map[string]*runs.Run{}
 	places := map[string]edits.Place{}
 	for _, id := range ids {
-		p, err := edits.LocateWith(ctx, repo.Root, id, cfg.Worktree)
-		if err != nil {
-			return nil, err
-		}
-		c, err := readCard(ctx, id, p.ChangeDir(), doc.Machine)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", id, err)
-		}
+		p, r, placeErr := locate(repo, cfg.Worktree, worktrees, id)
+		c, err := readCard(ctx, id, p.ChangeDir(), doc.Machine, false)
+		c.addError(placeErr)
+		c.addError(err)
 		c.EditFolder = p.Dir
 		c.Column = "proposed"
 		if cfg.RequireApproval && c.Approval.State == "approved" {
 			c.Column = "approved"
 		}
-		if p.State != "" {
-			r, err := runs.ReadRun(p.State.RunFile())
-			if err != nil && !errors.Is(err, runs.ErrNoRun) {
-				return nil, err
+		if r != nil {
+			effective := r.Effective(runs.Active(p.State.RunLock()))
+			r = &effective
+			states[id] = r
+			c.State, c.Reason, c.Step, c.Round = string(r.State), r.Reason, r.Step, r.Round
+			c.Since, c.Branch, c.Worktree = timestamp(r.Since), r.Branch, r.Worktree
+			if step, ok := cfg.Step(r.Step); ok {
+				c.Agent = step.Agent
 			}
-			if err == nil {
-				effective := r.Effective(runs.Active(p.State.RunLock()))
-				r = &effective
-				states[id] = r
-				c.State, c.Reason, c.Step, c.Round = string(r.State), r.Reason, r.Step, r.Round
-				c.Since, c.Branch, c.Worktree = timestamp(r.Since), r.Branch, r.Worktree
-				if step, ok := cfg.Step(r.Step); ok {
-					c.Agent = step.Agent
-				}
-				switch r.State {
-				case runs.Queued:
-					c.Column = "queued"
-				case runs.Ready:
-					c.Column = "ready"
-				default:
+			switch r.State {
+			case runs.Queued:
+				c.Column = "queued"
+			case runs.Ready:
+				c.Column = "ready"
+			default:
+				if _, ok := cfg.Step(r.Step); ok {
 					c.Column = "step:" + r.Step
+				} else {
+					c.Column = "queued"
+					c.addError(fmt.Errorf("run step %q is absent from the workflow", r.Step))
 				}
 			}
 		}
@@ -119,10 +119,8 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 		if _, ok := folders[a.id]; ok {
 			continue
 		}
-		c, err := readCard(ctx, a.id, a.folder, doc.Machine)
-		if err != nil {
-			return nil, err
-		}
+		c, err := readCard(ctx, a.id, a.folder, doc.Machine, true)
+		c.addError(err)
 		c.Column, c.Archived = "done", a.date
 		folders[a.id] = a.folder
 		doc.Cards = append(doc.Cards, c)
@@ -143,7 +141,11 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 		}
 		doc.Detail, err = readDetail(change, folder, places[change].State, states[change])
 		if err != nil {
-			return nil, err
+			for i := range doc.Cards {
+				if doc.Cards[i].Change == change {
+					doc.Cards[i].addError(err)
+				}
+			}
 		}
 	}
 	return doc, nil
@@ -162,8 +164,8 @@ func columns(cfg *config.Config) []Column {
 	return append(out, Column{ID: "ready", Kind: "ready", Name: "Ready"}, Column{ID: "done", Kind: "done", Name: "Done"})
 }
 
-func readCard(ctx context.Context, id, folder, machine string) (Card, error) {
-	c := Card{Change: id, Title: strings.ReplaceAll(id, "-", " "), Machine: machine, DependsOn: []Dependency{}}
+func readCard(ctx context.Context, id, folder, machine string, archived bool) (Card, error) {
+	c := Card{Change: id, Title: strings.ReplaceAll(id, "-", " "), Machine: machine, DependsOn: []Dependency{}, Approval: Approval{State: "none", Committed: archived}}
 	var sidecar struct {
 		Title     string   `toml:"title"`
 		DependsOn []string `toml:"depends_on"`
@@ -194,6 +196,9 @@ func readCard(ctx context.Context, id, folder, machine string) (Card, error) {
 		if task.Checked {
 			c.Tasks.Done++
 		}
+	}
+	if archived {
+		return c, nil
 	}
 	st, err := approval.Judge(approval.Dir(folder))
 	if err != nil {
@@ -252,13 +257,11 @@ func readOptional(p string) (string, error) {
 	return string(b), err
 }
 
-var brisbane = time.FixedZone("AEST", 10*60*60)
-
 func timestamp(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	return t.In(brisbane).Format(time.RFC3339)
+	return t.Local().Format(time.RFC3339)
 }
 
 type archive struct{ id, date, folder string }
@@ -288,4 +291,85 @@ func archiveFolders(root string) ([]archive, error) {
 		return out[i].date > out[j].date
 	})
 	return out, nil
+}
+
+// scanWorktrees resolves each state directory once per poll, rather than once
+// per card. Retain broken registrations so their own card can explain them.
+type worktree struct {
+	path  string
+	state statedir.Dir
+	run   *runs.Run
+	err   error
+}
+
+func scanWorktrees(ctx context.Context, repo runs.Repo) ([]worktree, error) {
+	paths, err := repo.Worktrees(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]worktree, 0, len(paths))
+	for _, p := range paths {
+		w := worktree{path: p}
+		w.state, w.err = statedir.Resolve(ctx, p)
+		if w.err == nil {
+			w.run, w.err = runs.ReadRun(w.state.RunFile())
+			if errors.Is(w.err, runs.ErrNoRun) {
+				w.err = nil
+			}
+		}
+		out = append(out, w)
+	}
+	return out, nil
+}
+func locate(repo runs.Repo, cfg config.Worktree, ws []worktree, id string) (edits.Place, *runs.Run, error) {
+	p := edits.Place{Change: id, Dir: repo.Root}
+	var selected *worktree
+	for i := range ws {
+		if ws[i].run != nil && ws[i].run.Change == id {
+			selected = &ws[i]
+			break
+		}
+	}
+	if selected == nil {
+		expected := repo.WorktreePath(cfg, id)
+		for i := 1; i < len(ws); i++ {
+			if samePath(ws[i].path, expected) {
+				selected = &ws[i]
+				break
+			}
+		}
+	}
+	var r *runs.Run
+	if selected != nil {
+		p.Dir, p.State, p.Worktree = selected.path, selected.state, true
+		r = selected.run
+		if selected.err != nil {
+			return p, r, selected.err
+		}
+	}
+	fi, err := os.Stat(p.ChangeDir())
+	if err != nil {
+		return p, r, err
+	}
+	if !fi.IsDir() {
+		return p, r, fmt.Errorf("%s is not a change folder", p.ChangeDir())
+	}
+	return p, r, nil
+}
+func samePath(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	fa, ea := os.Stat(a)
+	fb, eb := os.Stat(b)
+	return ea == nil && eb == nil && os.SameFile(fa, fb)
+}
+func (c *Card) addError(err error) {
+	if err == nil {
+		return
+	}
+	if c.Error != "" {
+		c.Error += "; "
+	}
+	c.Error += err.Error()
 }

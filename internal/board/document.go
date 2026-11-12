@@ -37,6 +37,7 @@ type Dependency struct {
 	Column string `json:"column"`
 }
 type Card struct {
+	Error      string       `json:"error,omitempty"`
 	Change     string       `json:"change"`
 	Title      string       `json:"title"`
 	Column     string       `json:"column"`

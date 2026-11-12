@@ -86,3 +86,28 @@ func TestBoardJSONDoesNotWriteRepoFiles(t *testing.T) {
 		t.Fatal("board created state")
 	}
 }
+
+func TestBoardCLIKeepsBrokenCard(t *testing.T) {
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"good", "broken"}})
+	testenv.WriteFile(t, filepath.Join(f.repo, "openspec", "changes", "broken", "tuckerbox.toml"), "title = [\n")
+	res := f.tb("board", "--change", "broken", "--json")
+	if res.code != 0 {
+		t.Fatalf("%d %s", res.code, res.stderr)
+	}
+	var doc board.Document
+	if err := json.Unmarshal([]byte(res.stdout), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Cards) != 2 || doc.Detail == nil {
+		t.Fatal(doc)
+	}
+	for _, c := range doc.Cards {
+		if (c.Change == "broken") != (c.Error != "") {
+			t.Fatal(c)
+		}
+	}
+	text := f.tb("board")
+	if text.code != 0 || !strings.Contains(text.stdout, "ERROR") {
+		t.Fatal(text)
+	}
+}
