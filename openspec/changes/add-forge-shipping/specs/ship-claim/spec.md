@@ -21,7 +21,11 @@ The merge request body SHALL carry a hidden marker naming the change, the machin
 - **THEN** its body has the marker with `change=add-login` and `machine=studio`, and the rendered page does not show it
 
 ### Requirement: Losing the claim race
-When a lease push is refused, the branch tip is not the run's last push, or opening the merge request finds an open one whose marker names another machine or none, the run SHALL become `blocked` with reason `claimed by <machine>` or `branch changed on the forge`, and the link. It SHALL push nothing more. Model: `formal/ship.tla`, `NoLostPush`.
+When a lease push is refused, the branch tip is not the run's last push, or opening the merge request finds an open one whose marker names another machine or none, the run SHALL become `blocked` with reason `claimed by <machine>` or `branch changed on the forge`, and the link when a merge request exists. It SHALL push nothing more. Model: `formal/ship.tla`, `NoLostPush`.
+
+#### Scenario: Winning push precedes its merge request
+- **WHEN** the losing run sees an existing branch before the winning merge request is visible
+- **THEN** it is blocked with a branch-race reason (`remote branch exists` or `branch changed on the forge`), infers no owner without a marker, and pushes nothing more
 
 #### Scenario: Merge request already open
 - **WHEN** a run tries to open the merge request for `add-login` and the forge says one is open with `machine=studio` in its marker

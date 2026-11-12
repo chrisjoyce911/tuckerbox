@@ -104,8 +104,10 @@ type Engine struct {
 	Forge        func(context.Context) (forge.Client, func(string) string, error)
 	ShipSleep    func(context.Context, time.Duration) error
 	workflowSlot *Slot
-	Repo         Repo
-	Config       *config.Config
+	// DependencyRefresh controls base-ref refresh during shipping dependency waits.
+	DependencyRefresh time.Duration
+	Repo              Repo
+	Config            *config.Config
 	// StateHome is the user state directory holding the machine index; ""
 	// leaves the index alone.
 	StateHome string
@@ -320,7 +322,7 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 
 	dw, fail := e.newDepWait(ws, rs)
 	if fail != "" {
-		return e.finish(ws, rs, Failed, fail)
+		return e.finish(ws, rs, dw.failureState(), fail)
 	}
 	var slot *Slot
 	for slot == nil {
@@ -331,7 +333,7 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 		} else if err != nil {
 			return rs, err
 		} else if fail != "" {
-			return e.finish(ws, rs, Failed, fail)
+			return e.finish(ws, rs, dw.failureState(), fail)
 		}
 
 		// TakeSlot: wait in admission order for one of max_parallel slots.
@@ -360,7 +362,7 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 			return rs, err
 		case fail != "":
 			s.Release()
-			return e.finish(ws, rs, Failed, fail)
+			return e.finish(ws, rs, dw.failureState(), fail)
 		case !met:
 			s.Release()
 			e.logf(req.Change, "a dependency is no longer ready; gave the slot back")

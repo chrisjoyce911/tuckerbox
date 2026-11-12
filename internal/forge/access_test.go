@@ -37,7 +37,10 @@ func TestDetect(t *testing.T) {
 			}
 		})
 	}
-	for _, api := range []string{"https://evil.example/api", "http://git.example.org/api", "https://user:secret@git.example.org/api", "https://git.example.org:444/api", "https://git.example.org/api?token=secret", "https://git.example.org/api#x"} {
+	if got, err := DetectKey("git.example.org/team/app", Settings{Kind: GitLab, APIURL: "https://git.example.org:8443/api/v4"}, ""); err != nil || got.APIURL != "https://git.example.org:8443/api/v4" {
+		t.Fatal(got, err)
+	}
+	for _, api := range []string{"https://evil.example/api", "http://git.example.org/api", "https://user:secret@git.example.org/api", "https://git.example.org/api?token=secret", "https://git.example.org/api#x"} {
 		_, err := DetectKey("git.example.org/team/app", Settings{Kind: GitLab, APIURL: api}, "")
 		if err == nil || strings.Contains(err.Error(), "secret") {
 			t.Fatalf("%s: %v", api, err)

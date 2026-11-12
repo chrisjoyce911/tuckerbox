@@ -81,7 +81,7 @@ func DetectKey(key string, repo Settings, machineKind Kind) (Target, error) {
 	}
 	if repo.APIURL != "" {
 		u, err := url.Parse(repo.APIURL)
-		if err != nil || u.Scheme != "https" || !strings.EqualFold(u.Hostname(), t.Host) || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Port() != "" && u.Port() != "443") {
+		if err != nil || u.Scheme != "https" || !strings.EqualFold(u.Hostname(), t.Host) || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 			return Target{}, fmt.Errorf("[forge] api_url must be HTTPS on the remote's host, without credentials, query or fragment")
 		}
 		t.APIURL = strings.TrimRight(u.String(), "/")

@@ -157,6 +157,9 @@ func (e *Engine) Run(ctx context.Context, resume bool) Outcome {
 	}
 	if !r.ArchiveDone {
 		if e.Config.Shipping.Archive {
+			if err := TickShipTasks(e.Git.Worktree, e.Identity.Change); err != nil {
+				return e.blocked(err)
+			}
 			archive := e.Archive
 			if archive == nil {
 				archive = e.archive

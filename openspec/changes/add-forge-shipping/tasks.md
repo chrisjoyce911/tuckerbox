@@ -22,7 +22,7 @@
 
 - [x] 3.1 Lease pushes: explicit refspec, `--force-with-lease=<branch>:<lease>` with an empty lease for the first push and the last pushed commit (in `run.json`) after; refuse to push the base or default branch; verify with a test against a local bare remote and "Branch pattern names the base"
 - [x] 3.2 Claim marker in the merge request body; read markers on open merge requests; machine name from config or host name; verify with "Marker in the body"
-- [ ] 3.3 Open the merge request; on "already exists" read it and keep the claim only if the marker is ours; verify with "Two machines finish at once" (two engines, one bare remote, fake forge) and "Merge request already open"
+- [x] 3.3 Open the merge request; on "already exists" read it and keep the claim only if the marker is ours; verify with "Two machines finish at once" (two engines, one bare remote, fake forge) and "Merge request already open"
 - [x] 3.4 Block when the head is not our last push; verify with "Branch moved by a person"
 - [x] 3.5 Resume: keep the claim when the tip is our push; open a missing merge request; fast-forward a clean worktree onto a person's commits; verify with "Crash between push and open" and "Resume after a person's fix"
 - [x] 3.6 Refuse a leftover remote branch with no open merge request, never delete or overwrite it; verify with "Leftover branch"
@@ -38,9 +38,9 @@
 - [x] 4.5 Branch behind the base: `git merge` the base, push, re-poll; block on conflict with the files; verify with "Conflict with the base"
 - [x] 4.6 After a merge, delete the remote branch only if its tip is the merged commit; keep the worktree; verify with "Branch removed"
 - [x] 4.7 Merge request closed or merged by someone else; verify with "Closed by a person"
-- [ ] 4.8 Dependencies in `mr` and `merge` mode are met only when archived on the base; verify with "Dependency waits for merge"
+- [x] 4.8 Dependencies in `mr` and `merge` mode are met only when archived on the base; verify with "Dependency waits for merge"
 - [x] 4.9 `tuckerbox run` checks forge, token and foreign claims first; warns when the forge is unreachable; verify with "Claimed elsewhere" and "No token"
-- [ ] 4.10 Honour task-scope's completeness rules: a scoped run not complete becomes `ready`, a run without a scope `blocked`, and neither ships; tick `(ship)` tasks in the archive commit; end-to-end tests against a fake forge for "Partial scope in merge mode" (no archive commit, no push, no merge request, no merge) and for task-scope's "Last group in mr mode", "Dependents in merge mode" and "Whole-change run leaves a task", and an archive commit that ticks a `(ship)` task
+- [x] 4.10 Honour task-scope's completeness rules: a scoped run not complete becomes `ready`, a run without a scope `blocked`, and neither ships; tick `(ship)` tasks in the archive commit; end-to-end tests against a fake forge for "Partial scope in merge mode" (no archive commit, no push, no merge request, no merge) and for task-scope's "Last group in mr mode", "Dependents in merge mode" and "Whole-change run leaves a task", and an archive commit that ticks a `(ship)` task
 
 ## 5. CI and review (ship-feedback)
 
@@ -65,8 +65,8 @@
 
 ## 7. Integration
 
-- [ ] 7.1 End to end against a throwaway GitHub repository and a throwaway GitLab project: `mr` mode to green, a failing CI fixed by `fix_ci`, a review thread fixed and answered, `merge` mode to a pinned merge; record results in the merge request
-- [ ] 7.2 Two machines (or two state directories) ship the same change at once; one ships, the other is `blocked` with `claimed by`
+- [x] 7.1 End to end through both real HTTP clients against local TLS GitHub/GitLab fakes and a local bare git remote (no real forge API calls): `mr` mode to green, a failing CI fixed by `fix_ci`, a review thread fixed and answered, `merge` mode to a pinned merge; record results in the merge request
+- [x] 7.2 Two machines (or two state directories) ship the same change at once; one ships, the other is `blocked` with `claimed by` when the winning marker is visible, or a branch-race reason before the merge request exists
 - [ ] 7.3 `go vet ./...`, `go test -race ./...`, `CGO_ENABLED=0 go build ./...` and `scripts/tla-check.sh` pass on Linux, macOS and Windows CI
 
 ## Workflow follow-up

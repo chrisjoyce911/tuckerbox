@@ -149,3 +149,15 @@ func TestCheckAndUnticked(t *testing.T) {
 		t.Errorf("complete change has unticked %v (ship tasks don't count)", got)
 	}
 }
+
+func TestTickShipPreservesFencesAndLineEndings(t *testing.T) {
+	text := "## 1. Build\r\n- [x] 1.1 done\r\n- [ ] 1.2 ordinary\r\n- [ ] 1.3 (ship) archive\r\n```md\r\n- [ ] 1.3 (ship) example\r\n```\r\n"
+	got, err := TickShip(text)
+	want := strings.Replace(text, "- [ ] 1.3 (ship) archive", "- [x] 1.3 (ship) archive", 1)
+	if err != nil || got != want {
+		t.Fatal(got, err)
+	}
+	if _, err := TickShip("- [ ] 1.1 (ship) first\n- [ ] 1.1 ordinary duplicate\n"); err == nil {
+		t.Fatal("ambiguous task number accepted")
+	}
+}
