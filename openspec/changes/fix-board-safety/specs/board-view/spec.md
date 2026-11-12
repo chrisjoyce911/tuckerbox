@@ -33,11 +33,15 @@ A board's `machine` prop SHALL count whenever the key is present: a name means t
 - **THEN** the board reads `/srv/shop` on `vps`
 
 ### Requirement: Stale reads are dropped
-The board window and the drawer SHALL tie each read to the folders and machine it started from. A read that finishes after those changed SHALL be discarded, and a read for the current folders and machine SHALL start at once. A change during a read SHALL NOT wait for the next poll.
+The board window and the drawer SHALL tie each read to the folders and machine it started from. When those change, the view SHALL stop showing the old result at once and start a read for the new ones, even while another read runs. A read that finishes for folders or a machine no longer current SHALL be discarded. Model: `formal/boardview.tla`, `ShownIsCurrent` and `Settles`.
 
 #### Scenario: Drawer moves to a space without a config
 - **WHEN** the drawer is reading repository A's board and the person switches to space B, which has no Tuckerbox config
 - **THEN** A's counts are never shown in B, and the drawer draws nothing in B once the current read finishes
+
+#### Scenario: Back to the first space
+- **WHEN** the drawer is reading A, the person switches to B and back to A, and B's read finishes after A's
+- **THEN** the drawer shows A's counts and B's result is discarded
 
 #### Scenario: Board window moves to another repository
 - **WHEN** the board window is reading repository A and the shown space changes to repository C
@@ -55,19 +59,23 @@ Cards in Done SHALL show no approval badge on the board or in card detail, whate
 - **THEN** it still shows the `not approved` badge
 
 ### Requirement: Columns scroll sideways
-In the board window and in a docked board pane, every column SHALL keep a fixed width of at least 236 px. When the columns don't fit, the column row SHALL scroll horizontally, with a visible scrollbar, by trackpad swipe, by shift with the mouse wheel, and by dragging the scrollbar. It SHALL NOT squeeze, wrap or hide columns. The header SHALL stay in place.
+In the board window and a docked board pane, every column SHALL keep a fixed width of 236 px. When the columns don't fit, the row SHALL scroll sideways with Herdr's own scrolling: a visible scrollbar that can be dragged, and trackpad swipes. Shift with the mouse wheel SHALL scroll it where the operating system turns that into sideways scrolling. Nothing is promised for a plain vertical wheel. Columns SHALL NOT be squeezed, wrapped or hidden.
 
 #### Scenario: Narrow docked pane
 - **WHEN** the board is docked in a pane 500 px wide and has five columns
-- **THEN** the first two columns show at full width, a horizontal scrollbar shows, and scrolling right reaches Ready and Done
-
-#### Scenario: Shift and the mouse wheel
-- **WHEN** the person turns the mouse wheel with shift held over the columns of a board that doesn't fit
-- **THEN** the columns scroll sideways, not up or down
+- **THEN** the first two columns show at full width, a horizontal scrollbar shows, and dragging it or swiping reaches Ready and Done
 
 #### Scenario: Wide window
 - **WHEN** every column fits in the board window
 - **THEN** no horizontal scrollbar shows and nothing scrolls sideways
+
+#### Scenario: Shift and the wheel turned sideways
+- **WHEN** the operating system delivers shift with the mouse wheel as a sideways movement over a row that doesn't fit
+- **THEN** the row scrolls sideways
+
+#### Scenario: Plain wheel over a column
+- **WHEN** the person turns the mouse wheel without shift over a column whose list is longer than the column
+- **THEN** that column's list scrolls up or down, and the row does not move sideways
 
 ### Requirement: Titles of this repository's changes
 A card's title SHALL come from `title` in the change's `tuckerbox.toml`, else the change id with dashes as spaces. The proposal's first heading SHALL NOT be used. Every active change in this repository SHALL have a `tuckerbox.toml` with a non-empty `title`, and a test SHALL fail when one does not.
