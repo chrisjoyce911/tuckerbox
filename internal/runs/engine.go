@@ -114,8 +114,10 @@ type Engine struct {
 	// Poll is how often a queued run retries for a slot and a run checks
 	// for a stop request (default 250ms).
 	Poll time.Duration
-	// Agent tunes agent.Run.
+	// Agent tunes the backend's Run.
 	Agent agent.Options
+	// Backend runs each step's agent; nil means agent.Headless.
+	Backend agent.Backend
 	// OnLocked is called once the change lock is held, run.json exists and
 	// the run has joined the slot queue, or has started waiting on its
 	// dependencies (it joins the queue once they are met). tuckerbox run starts changes one
@@ -178,6 +180,14 @@ func StopFile(d statedir.Dir) string { return filepath.Join(string(d), "stop") }
 
 // EngineLog is the engine's own log in a state directory.
 func EngineLog(d statedir.Dir) string { return filepath.Join(string(d), "run.log") }
+
+// backend is the backend that runs step agents: e.Backend, or headless.
+func (e *Engine) backend() agent.Backend {
+	if e.Backend != nil {
+		return e.Backend
+	}
+	return agent.Headless{}
+}
 
 func (e *Engine) now() time.Time {
 	if e.Now != nil {
@@ -532,13 +542,14 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 			model = firstNonEmpty(model, a.Model)
 			effort = firstNonEmpty(effort, a.Effort)
 		}
-		e.logf(rs.Change, "step %s round %d: starting agent %s", st.ID, rs.Round, st.Agent)
+		backend := e.backend()
+		e.logf(rs.Change, "step %s round %d: starting agent %s (%s)", st.ID, rs.Round, st.Agent, backend.Name())
 		opts := e.Agent
 		opts.OnStart = func(pid int) {
 			rs.AgentPid = pid
 			_ = e.save(ws, rs)
 		}
-		out, err := agent.Run(ctx, agent.Step{
+		out, err := backend.Run(ctx, agent.Step{
 			Change: rs.Change, Step: st.ID, Role: st.Role, Round: rs.Round,
 			Agent: tmpl, Model: model, Effort: effort,
 			Permissions: e.Config.PermissionArgs(st),

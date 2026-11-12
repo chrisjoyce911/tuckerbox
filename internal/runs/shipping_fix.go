@@ -49,7 +49,7 @@ func (e *Engine) shippingFix(ctx context.Context, ws Workspace, rs *Run, stepID 
 	}
 	opts := e.Agent
 	opts.OnStart = func(pid int) { rs.AgentPid = pid; _ = e.save(ws, rs) }
-	out, err := agent.Run(ctx, agent.Step{Change: rs.Change, Step: stepID, Role: step.Role, Round: rs.Round, Agent: template, Model: model, Effort: effort, Permissions: e.Config.PermissionArgs(step), Worktree: ws.Path, State: ws.State, Base: rs.Base, ShippingFeedback: true, Earlier: []agent.Result{{Change: rs.Change, Step: "shipping", Round: rs.Round - 1, Status: agent.Rejected, Summary: "Forge findings to fix", Findings: findings}}}, opts)
+	out, err := e.backend().Run(ctx, agent.Step{Change: rs.Change, Step: stepID, Role: step.Role, Round: rs.Round, Agent: template, Model: model, Effort: effort, Permissions: e.Config.PermissionArgs(step), Worktree: ws.Path, State: ws.State, Base: rs.Base, ShippingFeedback: true, Earlier: []agent.Result{{Change: rs.Change, Step: "shipping", Round: rs.Round - 1, Status: agent.Rejected, Summary: "Forge findings to fix", Findings: findings}}}, opts)
 	rs.AgentPid = 0
 	if err != nil {
 		return nil, err

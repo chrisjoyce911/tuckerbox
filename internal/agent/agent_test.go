@@ -68,13 +68,17 @@ func newStep(t *testing.T, step, role string, round int, agent Template) Step {
 	}
 }
 
+// headless is the backend the tests run steps through (Scenario: Headless
+// fallback): the agent runs as a child process, as before.
+var headless Backend = Headless{}
+
 var fast = Options{Poll: 50 * time.Millisecond, StopGrace: 2 * time.Second}
 
 func run(t *testing.T, s Step, opts Options) Outcome {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	o, err := Run(ctx, s, opts)
+	o, err := headless.Run(ctx, s, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +258,7 @@ func TestExitWithoutResult(t *testing.T) {
 
 func TestAgentNotFound(t *testing.T) {
 	s := newStep(t, "build", "builder", 1, Template{Name: "nope", Command: []string{filepath.Join(t.TempDir(), "no-such-agent")}})
-	if _, err := Run(context.Background(), s, fast); err == nil {
+	if _, err := headless.Run(context.Background(), s, fast); err == nil {
 		t.Fatal("want an error for a missing agent program")
 	}
 }
@@ -287,7 +291,7 @@ func TestFollowRunningStep(t *testing.T) {
 	running := true
 	go func() {
 		defer finished.Done()
-		o, err := Run(context.Background(), s, fast)
+		o, err := headless.Run(context.Background(), s, fast)
 		if err != nil || o.Status() != Done {
 			t.Errorf("run: %v %s", err, o.FailureReason())
 		}
@@ -335,7 +339,7 @@ func TestStopEndsAgent(t *testing.T) {
 	opts.OnStart = func(p int) { pid = p }
 	time.AfterFunc(300*time.Millisecond, cancel)
 	start := time.Now()
-	o, err := Run(ctx, s, opts)
+	o, err := headless.Run(ctx, s, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +395,7 @@ func TestMissingLog(t *testing.T) {
 
 func TestBadStepID(t *testing.T) {
 	s := newStep(t, "../escape", "builder", 1, fake("done"))
-	if _, err := Run(context.Background(), s, fast); err == nil {
+	if _, err := headless.Run(context.Background(), s, fast); err == nil {
 		t.Fatal("want an error for a step id with a path in it")
 	}
 }
