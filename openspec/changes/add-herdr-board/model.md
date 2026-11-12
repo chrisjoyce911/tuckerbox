@@ -21,4 +21,10 @@ What the lock can't cover is a person's editor that keeps running after `tuckerb
 
 ### Approval
 
-Approval is a pure function of file contents: the state is whatever the files hash to. It has no stored flag to keep in step with anything, so a stale approval can't be mistaken for a current one, whatever order edits, pulls and approvals happen in. The run gate reads the files and the hash in one place (the worktree, or one base-branch revision), so there is nothing to interleave.
+Approval is a pure function of file contents: the state is whatever the files hash to. It has no stored flag to keep in step with anything, so a stale approval can't be mistaken for a current one, whatever order edits, pulls and approvals happen in. The run gate reads the files and the hash in one place, so the only interleaving is with whoever writes those files.
+
+- **A commit:** before a new worktree exists, the gate judges one commit (the change's branch, or the base), and the worktree is made at that commit. A commit can't change, so nothing interleaves with the check.
+- **A worktree:** the engine judges the files again while it holds the change lock, before it writes run state. `approve`, `unapprove`, `edit` and `tasks` write only while holding that lock. In `formal/runs.tla` the check is part of the `Pick` step, and an approval writer is another member of `Procs` holding `lock[c]`. `OneRunPerChange` already rules out a write between the check and the start.
+- **The broken form:** checking approval and then taking the lock is the check-then-set race that `formal/runs_broken_lock.tla` shows TLC rejecting. That's why `tuckerbox run`'s early check only gives a clearer message and the engine's check under the lock decides.
+
+So no new model is needed.
