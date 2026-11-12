@@ -243,3 +243,30 @@ func TestShippingWaitFreesSlotAndKeepsChangeLock(t *testing.T) {
 		t.Fatal(r, err)
 	}
 }
+
+func TestResumeAfterHumanPushPreservesUncommittedWork(t *testing.T) {
+	f, e, _ := shippingSetup(t, config.ShipMR, false, "add-login")
+	r, err := e.Run(context.Background(), Request{Change: "add-login"})
+	if err != nil || r.State != Ready {
+		t.Fatal(r, err)
+	}
+	person := filepath.Join(t.TempDir(), "person")
+	remote := testenv.Git(t, f.dir, "remote", "get-url", "origin")
+	testenv.Git(t, f.dir, "clone", "--branch", "add-login", remote, person)
+	testenv.WriteFile(t, filepath.Join(person, "human.txt"), "human fix\n")
+	testenv.Git(t, person, "add", ".")
+	testenv.Git(t, person, "-c", "user.name=Person", "-c", "user.email=person@example.org", "commit", "-m", "human fix")
+	testenv.Git(t, person, "push", "origin", "add-login")
+	before := testenv.Git(t, r.Worktree, "rev-parse", "HEAD")
+	testenv.WriteFile(t, filepath.Join(r.Worktree, "uncommitted.txt"), "keep uncommitted\n")
+	r, err = e.Run(context.Background(), Request{Change: "add-login", Mode: Resume, Worktree: r.Worktree})
+	if err != nil || r.State != Blocked || !strings.Contains(r.Reason, "not clean") {
+		t.Fatal(r, err)
+	}
+	if head := testenv.Git(t, r.Worktree, "rev-parse", "HEAD"); head != before {
+		t.Fatal("resume committed dirty work", head, before)
+	}
+	if status := testenv.Git(t, r.Worktree, "status", "--porcelain"); !strings.Contains(status, "?? uncommitted.txt") {
+		t.Fatal(status)
+	}
+}

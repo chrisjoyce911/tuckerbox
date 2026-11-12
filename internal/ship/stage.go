@@ -160,8 +160,10 @@ func (e *Engine) Run(ctx context.Context, resume bool) Outcome {
 			return e.blocked(err)
 		}
 	}
-	if _, err := e.Commit(ctx, e.Identity.Change+": work from tuckerbox run"); err != nil {
-		return e.blocked(err)
+	if !resume {
+		if _, err := e.Commit(ctx, e.Identity.Change+": work from tuckerbox run"); err != nil {
+			return e.blocked(err)
+		}
 	}
 	if e.Request.Title == "" {
 		request, err := ProposalRequest(e.Git.Worktree, e.Identity.Change, e.Config.ForgeTarget, e.Git.Branch, strings.TrimPrefix(e.Git.Base, e.Git.remote()+"/"), e.Config.Shipping.Labels, e.Identity)
