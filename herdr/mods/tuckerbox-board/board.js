@@ -2,10 +2,10 @@
 // stage (derived by tuckerbox, never stored here) holding the change cards.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { theme, props, openOverlay, closeOverlay, spaces, panes, focused } from "herdr";
-import { MOD, loadBoard, where } from "./data.js";
-import { group, counts, columnName, due, isShown, ago, needsYou } from "./model.js";
-import { cardActions, invocation, actionLabel, defaultStep, ACTIONS } from "./actions.js";
+import { theme, props, openOverlay, closeOverlay, spaces, panes, focused, run, notify } from "herdr";
+import { MOD, loadBoard, locate, candidates, fixturesFolder } from "./data.js";
+import { group, counts, columnName, due, isShown, ago, needsYou, candidatesKey, openGate, NO_CONFIG } from "./model.js";
+import { cardActions, invocation, actionLabel, defaultStep, ACTIONS, dockCall, undockCalls } from "./actions.js";
 import { perform, watchEdits, changed } from "./perform.js";
 import { editOf, editNote } from "./edits.js";
 import { button, tiny, dot, stateChip, approvalChip, progressBar, note, closeButton, SPINNER } from "./ui.js";
@@ -29,6 +29,9 @@ export class BoardView extends View {
       if (validating.length) cx.spawn(async (cx) => { await Promise.all(validating); cx.notify(); });
       // An action in this or another copy changed something: read again now.
       if (changed() !== this.seen) { this.seen = changed(); this.last = 0; }
+      // The space or its folders changed (a window follows the shown space): look again now.
+      const key = candidatesKey(candidates(this.self()));
+      if (key !== this.where) { this.where = key; this.last = 0; }
       if (due(this.last, Date.now(), this.shown())) this.refresh(cx);
     });
   }
@@ -51,15 +54,29 @@ export class BoardView extends View {
   refresh(cx) {
     if (this.loading) return;
     this.loading = true;
-    const at = where(this.self());
+    const self = this.self();
     cx.spawn(async (cx) => {
-      let b;
-      try { b = await loadBoard(at); } catch (e) { b = { error: { code: "failed", message: String(e?.message ?? e) } }; }
+      let b, at;
+      try {
+        // The fixtures need no repository; otherwise find this space's (herdr-board: Which repository).
+        at = (await fixturesFolder()) ? { found: true, root: "", cwd: "", on: null, space: null } : await locate(self);
+        b = at.found ? await loadBoard(at) : { error: { code: "no_config", message: "" } };
+      } catch (e) { b = { error: { code: "failed", message: String(e?.message ?? e) } }; }
       this.loading = false;
       this.last = Date.now();
-      this.at = at;
-      // Keep the last good board on screen when a later read fails.
-      if (b.error && this.board && !this.board.error) this.readError = b.error.message;
+      const same = at && this.at && at.root === this.at.root && at.on === this.at.on;
+      this.at = at ?? this.at;
+      if (b.error?.code === "not_a_repository") b = { error: { code: "no_config", message: b.error.message } };
+      const gate = openGate({ overlay: props()?.overlay, everFound: this.everFound, found: !b.error || b.error.code !== "no_config" });
+      if (gate === "close") {
+        // Opened (key, drawer, mod.open) where there is no Tuckerbox config: no board.
+        closeOverlay(props().overlay);
+        notify({ title: NO_CONFIG, level: "info", timeout: 3000 });
+        return;
+      }
+      if (gate === "board") this.everFound = true;
+      // Keep the last good board of the same repository on screen when a later read fails.
+      if (b.error && b.error.code !== "no_config" && same && this.board && !this.board.error) this.readError = b.error.message;
       else { this.board = b; this.readError = null; }
       cx.notify();
     });
@@ -70,7 +87,6 @@ export class BoardView extends View {
     let inv;
     try { inv = invocation(action, card ?? { change: "", path: this.at?.cwd ?? "", on: this.at?.on ?? null }, extra); }
     catch (e) { this.notice = { text: String(e?.message ?? e), kind: "error" }; cx.notify(); return; }
-    if (action === "init") { inv.cwd = this.at?.cwd ?? ""; inv.on = this.at?.on ?? null; }
     inv.card = card;
     inv.board = this.boardProps();
     this.busy = `${action}-${card?.change ?? ""}`;
@@ -87,6 +103,26 @@ export class BoardView extends View {
   boardProps() {
     const b = this.board ?? {};
     return { repo: b.repo, path: b.path, require_approval: b.require_approval, columns: b.columns, steps: b.steps, on: b.on, fixtures: Boolean(b.fixtures) };
+  }
+
+  // Dock: this window becomes a pane beside the shown space's terminals,
+  // pinned to the repository it shows; the window closes.
+  dock(cx) {
+    try {
+      const call = dockCall({ root: this.at?.root, on: this.at?.on ?? null, space: this.at?.space ?? focused()?.space,
+        spaces: spaces(), panes: panes(), focused: focused(), mod: MOD });
+      run(call.command, call.args);
+      if (props()?.overlay) closeOverlay(props().overlay);
+    } catch (e) { this.notice = { text: String(e?.message ?? e), kind: "error" }; cx.notify(); }
+  }
+
+  // Undock: back to the window, and this pane goes. Close: only the pane goes.
+  undock(cx, keepWindow) {
+    try {
+      const u = undockCalls(this.self(), MOD);
+      if (keepWindow) openOverlay(u.overlay);
+      run(u.close.command, u.close.args);
+    } catch (e) { this.notice = { text: String(e?.message ?? e), kind: "error" }; cx.notify(); }
   }
 
   openCard(card) {
@@ -176,6 +212,11 @@ export class BoardView extends View {
       .when(Boolean(this.readError), (el) => el.child(div().text_size(11).text_color(tm.blocked).truncate().max_w(260).tooltip(this.readError).child("last read failed")))
       .child(div().flex_1())
       .when(Boolean(b?.machine), (el) => el.child(div().text_size(11).text_color(tm.dim).child(b.machine)))
+      // Dock only with a board to show: no Tuckerbox config, no Dock.
+      .when(Boolean(overlay && b && !b.fixtures), (el) => el.child(tiny("dock", "Dock ⇥", (_e, cx) => this.dock(cx), { tooltip: "Show the board as a pane beside the terminals" })))
+      .when(Boolean(!overlay && this.self()), (el) => el
+        .child(tiny("undock", "Undock", (_e, cx) => this.undock(cx, true), { tooltip: "Back to the board window" }))
+        .child(closeButton("close-pane", (_e, cx) => this.undock(cx, false))))
       .when(Boolean(overlay), (el) => el.child(closeButton("close", () => closeOverlay(overlay))));
   }
 
@@ -190,10 +231,9 @@ export class BoardView extends View {
 
   body() {
     const b = this.board;
-    if (!b) return this.empty("Reading the board", "Running tuckerbox board --json in this space's folder.");
-    if (b.error?.code === "not_a_repository") {
-      return this.empty("Not a Tuckerbox repository", `${this.at?.cwd || "This space's folder"} has no Tuckerbox config. ${b.error.message}`.trim(),
-        button("init", "Run tuckerbox init here", (_e, cx) => this.act("init", null, {}, cx), { primary: true }));
+    if (!b) return this.empty("Reading the board", "Looking for a Tuckerbox repository in this space.");
+    if (b.error?.code === "no_config") {
+      return this.empty(NO_CONFIG, "The board shows a git repository with .tuckerbox/config.toml, found from this space's terminals.");
     }
     if (b.error) {
       return this.empty("Can't read the board", b.error.message,

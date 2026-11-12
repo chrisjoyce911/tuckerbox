@@ -278,22 +278,61 @@ export function boardSpace({ props, spaces, panes, self }) {
   return all.find((s) => s.active) ?? null;
 }
 
-// Where the board reads: a `folder` prop, else the focused pane's live folder
-// when that pane is in the board's own space, else the first terminal with a
-// folder in that space, else the space's folder. `on` is that space's machine,
-// so the folder and the machine always come from the same space.
-export function resolveWhere({ props, spaces, panes, focused, self }) {
+// The folders to look in for the board's repository, in order (herdr-board:
+// Which repository): a `folder` prop alone (a docked pane); else the focused
+// pane's live folder when that pane is in the board's own space; else every
+// other pane of that space with a folder, the shown tab's first; else the
+// space's folder. `on` is the `machine` prop (a docked pane), else that
+// space's machine, so folders and the machine always come from the same space.
+export function repoCandidates({ props, spaces, panes, focused, self }) {
   const p = props ?? {};
   const space = boardSpace({ props: p, spaces, panes, self });
-  const on = p.on ?? space?.machine ?? null;
+  const on = p.machine ?? p.on ?? space?.machine ?? null;
   const id = space?.id ?? null;
-  if (typeof p.folder === "string" && p.folder) return { cwd: p.folder, on, space: id };
-  if (!space) return { cwd: "", on, space: null };
-  const tabs = new Set(list(space.tabs).map((t) => t.id));
-  const inSpace = list(panes).filter((x) => tabs.has(x.tab) && x.cwd);
-  const pane = inSpace.find((x) => x.pane === focused?.pane) ?? inSpace.find((x) => tabs.has(x.tab) && list(space.tabs).find((t) => t.id === x.tab)?.active) ?? inSpace[0];
-  return { cwd: pane?.cwd || space.folder || "", on, space: id };
+  if (typeof p.folder === "string" && p.folder) return { cwds: [p.folder], on, space: id, pinned: true };
+  if (!space) return { cwds: [], on, space: null, pinned: false };
+  const tabs = list(space.tabs);
+  const ids = new Set(tabs.map((t) => t.id));
+  const active = new Set(tabs.filter((t) => t.active).map((t) => t.id));
+  const inSpace = list(panes).filter((x) => ids.has(x.tab) && x.cwd);
+  const ordered = [
+    ...inSpace.filter((x) => x.pane === focused?.pane),
+    ...inSpace.filter((x) => x.pane !== focused?.pane && active.has(x.tab)),
+    ...inSpace.filter((x) => x.pane !== focused?.pane && !active.has(x.tab)),
+  ].map((x) => x.cwd);
+  if (space.folder) ordered.push(space.folder);
+  return { cwds: [...new Set(ordered)], on, space: id, pinned: false };
 }
+
+// The repository from what each candidate folder turned out to be: `probes`
+// lines up with `cands.cwds`, each { root, config } (root: the git checkout
+// the folder is in, config: it has .tuckerbox/config.toml) or null when it
+// couldn't be looked at. The first folder in a repository with a Tuckerbox
+// config wins; a repository without one never counts. Without one,
+// found is false and the board, drawer and Dock show nothing for this space.
+export function pickRepo(cands, probes) {
+  const i = list(cands?.cwds).findIndex((_c, k) => probes?.[k]?.config && probes[k].root);
+  const base = { on: cands?.on ?? null, space: cands?.space ?? null };
+  if (i < 0) return { ...base, found: false, root: "", cwd: "" };
+  return { ...base, found: true, root: probes[i].root, cwd: probes[i].root };
+}
+
+// A key that changes when the candidate folders do: cheap to compute every
+// second, so a board or drawer follows a space switch without waiting a poll.
+export function candidatesKey(c) {
+  return JSON.stringify([c?.space ?? null, c?.on ?? null, list(c?.cwds)]);
+}
+
+// What a board window shows after locating (herdr-board: Opening the board):
+// an open from a key, the drawer or mod.open in a space with no Tuckerbox
+// config closes at once ("close": the window goes, a short toast says why);
+// once it has shown a board, a later space without one shows "message".
+export function openGate({ overlay, everFound, found }) {
+  if (found) return "board";
+  return overlay && !everFound ? "close" : "message";
+}
+
+export const NO_CONFIG = "No Tuckerbox config in this space";
 
 // Whether this copy is on screen. A window or dialog is shown while open. A
 // pane is shown when its space and its tab are the shown ones, and no other
@@ -322,4 +361,17 @@ export function dirFromStack(stack, file) {
   const m = new RegExp(`(?:\\(|at |^)\\s*((?:file://)?[^()\\n]*?)[\\\\/]${name}(?:\\?[^:)\\s]*)?:\\d+:\\d+`, "m").exec(String(stack));
   if (!m) return null;
   return m[1].replace(/^file:\/\//, "").trim() || null;
+}
+
+// The drawer reads the counts this often (herdr-board: The drawer).
+export const DRAWER_POLL_MS = 30000;
+
+// The drawer's rows, edge side first: the repository, then running and
+// needs-you counts (each only when there are some), or the read's error.
+export function drawerRows(n, repo) {
+  const rows = [{ kind: "repo", count: null, text: repo || "Tuckerbox", tone: "foreground" }];
+  if (n?.error) return [...rows, { kind: "error", count: null, text: "can't read the board", tone: "blocked" }];
+  if (n?.running) rows.push({ kind: "running", count: n.running, text: "running", tone: "working" });
+  if (n?.needs) rows.push({ kind: "needs", count: n.needs, text: n.needs === 1 ? "needs you" : "need you", tone: "blocked" });
+  return rows;
 }

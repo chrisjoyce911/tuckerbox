@@ -2,7 +2,7 @@
 // the dev flag, the fixtures next to this file. The board reads nothing else
 // (design: the mod calls the CLI, never the files).
 import { exec, readTextFile, appHome, props, spaces, panes, focused } from "herdr";
-import { parseBoard, normaliseBoard, dirFromStack, resolveWhere } from "./model.js";
+import { parseBoard, normaliseBoard, dirFromStack, repoCandidates, pickRepo } from "./model.js";
 
 export const MOD = "tuckerbox-board";
 
@@ -34,9 +34,45 @@ async function readFixture(folder, name) {
   }
 }
 
-// Where the board reads, for this copy (`self`: its pane id, if known).
-export function where(self = null) {
-  return resolveWhere({ props: props() ?? {}, spaces: spaces(), panes: panes(), focused: focused(), self: self ?? props()?.pane ?? null });
+// The folders this copy looks in for its repository (`self`: its pane id, if known).
+export function candidates(self = null) {
+  return repoCandidates({ props: props() ?? {}, spaces: spaces(), panes: panes(), focused: focused(), self: self ?? props()?.pane ?? null });
+}
+
+// What a folder is, on a machine: the git checkout it is in and whether that
+// has .tuckerbox/config.toml. Kept a while, shared by every copy (the board,
+// the drawer), so locating every second costs nothing between looks.
+const PROBE_MS = { yes: 30000, no: 10000 };
+const probes = new Map(); // `${on}\0${cwd}` -> { at, ttl, result: Promise }
+
+async function look(cwd, on) {
+  try {
+    const r = await exec("git", ["rev-parse", "--show-toplevel"], { cwd, on, timeout: 5000 });
+    if ((r.code ?? 1) !== 0) return { root: null, config: false };
+    const root = String(r.stdout ?? "").trim();
+    if (!root) return { root: null, config: false };
+    const text = await readTextFile(`${root}/.tuckerbox/config.toml`, { on });
+    return { root, config: text != null };
+  } catch {
+    return null; // no git there, the folder is gone, or the machine is unreachable
+  }
+}
+
+export function probe(cwd, on, now = Date.now()) {
+  const key = `${on ?? ""}\0${cwd}`;
+  const hit = probes.get(key);
+  if (hit && now - hit.at < hit.ttl) return hit.result;
+  const entry = { at: now, ttl: PROBE_MS.no, result: null };
+  entry.result = look(cwd, on).then((r) => { entry.ttl = r?.config ? PROBE_MS.yes : PROBE_MS.no; return r; });
+  probes.set(key, entry);
+  return entry.result;
+}
+
+// Where the board reads, for this copy: { found, root, cwd, on, space }.
+export async function locate(self = null) {
+  const c = candidates(self);
+  const found = await Promise.all(c.cwds.map((cwd) => probe(cwd, c.on)));
+  return pickRepo(c, found);
 }
 
 async function tuckerbox(args, { cwd, on }) {
