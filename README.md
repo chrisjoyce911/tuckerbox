@@ -188,6 +188,8 @@ rounds, history and the actions its state allows.
 
 <img src="docs/herdr-card-detail.png" alt="Card detail for add-login-page: blocked in review round 3, approved, its proposal, tasks 3 of 5 ticked, and Resume, Re-run review and Unapprove buttons" width="453">
 
+Settings, in the board header, shows the repository's and this machine's configuration in place of the columns: each value with where it comes from (`repo`, `machine` or `default`), grouped as Workflow, Runs, Board, Autopilot and Change overrides, and, under "This machine only", Permission profiles, Forge tokens, Editor and Machines. Edits collect as pending, are checked with `tuckerbox config set --dry-run` as you make them, and are saved together by one `tuckerbox config set --if-match`; the view says before Save whether it goes to a pull request or the checkout, and why. A forge token is entered only at the prompt Set token opens in a pane. The view writes no file itself (see `herdr/mods/tuckerbox-board/README.md`, Settings).
+
 Agents report by ending with a small JSON result as their final message; Tuckerbox records it in the step's result file, so an agent needs no write access outside its worktree and a reviewer can run read-only (for Codex, `--sandbox read-only` in a machine profile). Tuckerbox reads Claude's final message from its stream-json output and Codex's from the file it writes with `-o`. A custom agent can pass `{lastmessage}`, a file its CLI writes the final message to; otherwise its standard output is read:
 
 ```toml

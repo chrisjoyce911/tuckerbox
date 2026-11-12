@@ -2,6 +2,7 @@
 // the dev flag, the fixtures next to this file. The board reads nothing else
 // (design: the mod calls the CLI, never the files).
 import { exec, readTextFile, appHome, props, spaces, panes, focused, machines } from "herdr";
+import { normaliseConfig, parseShow, showArgv } from "./config.js";
 import { parseBoard, normaliseBoard, dirFromStack, repoCandidates, pickRepo, otherMachines, sharedRepo, mergeBoards, mainWorktreeOf, execFailure } from "./model.js";
 
 export const MOD = "tuckerbox-board";
@@ -126,4 +127,28 @@ export async function loadAll(at) {
       : { error: { code: "unreachable", message: "offline" } },
   })));
   return mergeBoards(own, others);
+}
+
+// The Settings view's reads and saves: `tuckerbox config` on the board's
+// machine, in the repository's main checkout (settings-view). With the dev
+// fixtures it reads fixtures/config.json and runs nothing.
+export async function loadConfig(at) {
+  const fx = await fixturesFolder();
+  if (fx) {
+    const text = await readTextFile(`${fx}/config.json`);
+    if (text == null) return { error: { code: "failed", message: `fixture ${fx}/config.json not found` } };
+    try { return { ...normaliseConfig(JSON.parse(text)), fixtures: true }; } catch (e) { return { error: { code: "failed", message: `fixture config.json: ${e?.message ?? e}` } }; }
+  }
+  const r = await configExec(showArgv(), at);
+  return parseShow(r.stdout, r.stderr, r.code);
+}
+
+// Runs a `tuckerbox config` argv; resolves with { code, stdout, stderr }.
+export async function configExec(argv, at, timeout = 120000) {
+  try {
+    const r = await exec("tuckerbox", argv.slice(1), { cwd: at?.root || at?.cwd || undefined, on: at?.on ?? null, timeout });
+    return { code: r.code ?? 0, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+  } catch (e) {
+    return { code: -1, stdout: "", stderr: String(e?.message ?? e) };
+  }
 }

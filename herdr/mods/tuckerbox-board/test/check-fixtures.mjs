@@ -112,6 +112,39 @@ views.compact = {
   want: ["Tuckerbox", "Proposed", "Approved", "In progress", "Ready", "Done", "review", "review limit reached"],
 };
 
+// settings-view: the Settings view in place of the columns, from
+// fixtures/config.json, with a pending edit, an open picker and a text field.
+views.settings = {
+  main: `import { View } from "gpui-kit";
+import { TextareaState } from "gpui-base";
+import { BoardView } from "./board.js";
+import { SettingsView } from "./settings-view.js";
+import { normaliseBoard } from "./model.js";
+import { normaliseConfig } from "./config.js";
+import doc from "./fixture.js";
+import board from "./board-fixture.js";
+export default class Main extends View {
+  init(p, cx) {
+    const b = normaliseBoard(board);
+    this.v = new BoardView({ board: b }); this.v.init({ board: b }, cx);
+    const s = new SettingsView(this.v);
+    s.config = normaliseConfig(doc); s.at = { root: "/work/shop", on: null };
+    s.pending.repo.set("max_parallel", "3");
+    s.checks.repo = { ok: true, target: "pr", reason: "token for github.com on this machine", problems: [], changes: [], error: null };
+    s.picking = { section: "repo", key: "ship" };
+    s.editing = { section: "machine", key: "editor", box: TextareaState.new({ value: "nvim", rows: 1 }), error: "" };
+    this.v.settings = s;
+  }
+  render(cx) { return this.v.render(cx); }
+}`,
+  fixture: readFileSync(join(mod, "fixtures", "config.json"), "utf8"),
+  extra: { "board-fixture.js": `export default ${board};\n` },
+  want: ["Settings", "Repository", "This machine only (studio)", "WORKFLOW", "plan", "review", "on_reject", "RUNS",
+    "max_parallel", "machine config sets 4", "→ 3", "Saves as a pull request: token for github.com on this machine", "Save 1 edit",
+    "PERMISSION PROFILES", "FORGE TOKENS", "github.com", "from the credentials file", "not set", "Set token", "merge", "Apply", "+ Add step"],
+  absent: ["columns-area"],
+};
+
 let failed = 0;
 for (const [name, v] of Object.entries(views)) {
   const dir = mkdtempSync(join(tmpdir(), `tuckerbox-board-${name}-`));
@@ -119,6 +152,7 @@ for (const [name, v] of Object.entries(views)) {
     cpSync(mod, dir, { recursive: true, filter: (src) => !src.includes(`${join(mod, "test")}`) });
     writeFileSync(join(dir, "fixture.js"), `export default ${v.fixture};\n`);
     writeFileSync(join(dir, "main.js"), v.main);
+    for (const [f, body] of Object.entries(v.extra ?? {})) writeFileSync(join(dir, f), body);
     let out;
     try { out = execFileSync("herdr-app", ["check", dir, "--print-spec"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); }
     catch (e) { console.error(`${name}: herdr-app check failed\n${e.stdout ?? ""}${e.stderr ?? ""}`); failed++; continue; }
