@@ -128,6 +128,7 @@ export function defaultStep(card, board) {
 }
 
 export function rerunSteps(_card, board) {
+  if (board?.steps?.length) return board.steps;
   return (board?.columns ?? []).filter((c) => c.kind === "step" && c.step).map((c) => c.step);
 }
 

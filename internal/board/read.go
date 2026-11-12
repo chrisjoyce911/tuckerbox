@@ -63,6 +63,10 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 		return nil, err
 	}
 	doc := &Document{Version: Version, Repo: key, Path: repo.Root, Machine: history.Machine(), RequireApproval: cfg.RequireApproval, Columns: columns(cfg), Cards: []Card{}}
+	doc.Steps = make([]string, 0, len(cfg.Steps))
+	for _, step := range cfg.Steps {
+		doc.Steps = append(doc.Steps, step.ID)
+	}
 	folders := map[string]string{}
 	states := map[string]*runs.Run{}
 	places := map[string]edits.Place{}
@@ -96,6 +100,15 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 				} else {
 					c.Column = "queued"
 					c.addError(fmt.Errorf("run step %q is absent from the workflow", r.Step))
+				}
+			}
+			if r.State != runs.Ready {
+				c.Badge = r.Step
+				if c.Column == "queued" {
+					c.Badge = "queued"
+				}
+				if cfg.BoardColumns != config.BoardSteps {
+					c.Column = "in_progress"
 				}
 			}
 		}
@@ -156,10 +169,14 @@ func columns(cfg *config.Config) []Column {
 	if cfg.RequireApproval {
 		out = append(out, Column{ID: "approved", Kind: "approved", Name: "Approved"})
 	}
-	out = append(out, Column{ID: "queued", Kind: "queued", Name: "Queued"})
-	for _, s := range cfg.Steps {
-		r, n := utf8.DecodeRuneInString(s.ID)
-		out = append(out, Column{ID: "step:" + s.ID, Kind: "step", Step: s.ID, Name: string(unicode.ToUpper(r)) + s.ID[n:]})
+	if cfg.BoardColumns == config.BoardSteps {
+		out = append(out, Column{ID: "queued", Kind: "queued", Name: "Queued"})
+		for _, s := range cfg.Steps {
+			r, n := utf8.DecodeRuneInString(s.ID)
+			out = append(out, Column{ID: "step:" + s.ID, Kind: "step", Step: s.ID, Name: string(unicode.ToUpper(r)) + s.ID[n:]})
+		}
+	} else {
+		out = append(out, Column{ID: "in_progress", Kind: "in_progress", Name: "In progress"})
 	}
 	return append(out, Column{ID: "ready", Kind: "ready", Name: "Ready"}, Column{ID: "done", Kind: "done", Name: "Done"})
 }

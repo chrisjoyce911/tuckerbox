@@ -26,6 +26,11 @@ max_parallel = 1
 # change's branch and pushes nothing.
 ship = "local"
 
+# Board layout: "compact" (default) groups queued runs and workflow steps.
+# Use "steps" for a Queued column and one column per workflow step.
+# [board]
+# columns = "compact"
+
 [workflow]
 # The steps, in run order. Each needs a [steps.<id>] table below.
 steps = ["plan", "build", "review"]

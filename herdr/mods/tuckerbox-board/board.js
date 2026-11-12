@@ -86,7 +86,7 @@ export class BoardView extends View {
 
   boardProps() {
     const b = this.board ?? {};
-    return { repo: b.repo, path: b.path, require_approval: b.require_approval, columns: b.columns, on: b.on, fixtures: Boolean(b.fixtures) };
+    return { repo: b.repo, path: b.path, require_approval: b.require_approval, columns: b.columns, steps: b.steps, on: b.on, fixtures: Boolean(b.fixtures) };
   }
 
   openCard(card) {
@@ -123,8 +123,8 @@ export class BoardView extends View {
         .when(!c.approval.committed && c.approval.state !== "none", (el) => el.child(div().text_size(10.5).text_color(tm.blocked).child("not committed")))
         .child(div().flex_1())
         .when(c.tasks.total > 0, (el) => el.child(progressBar(c.tasks, 46))))
-      .when(Boolean(c.step || c.agent), (el) => el.child(h_flex().items_center().gap(6).text_size(10.5).text_color(tm.dim)
-        .when(Boolean(c.step), (el) => el.child(div().text_color(tm.muted).child(c.step)))
+      .when(Boolean(c.badge || c.step || c.agent), (el) => el.child(h_flex().items_center().gap(6).text_size(10.5).text_color(tm.dim)
+        .when(Boolean(c.badge || c.step), (el) => el.child(div().px(5).rounded(4).bg(tm.raised).text_color(tm.muted).child(c.badge || c.step)))
         .when(c.round > 1, (el) => el.child(div().child(`round ${c.round}`)))
         .when(Boolean(c.agent), (el) => el.child(div().child("·")).child(div().child(c.agent)))
         .child(div().flex_1())

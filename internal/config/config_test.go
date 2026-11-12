@@ -549,3 +549,60 @@ func TestRequireApprovalMachineOnlyRefused(t *testing.T) {
 	f := newFixture(t, minimal, "require_approval = false\n")
 	wantProblem(t, f.problems(), f.machine, "require_approval", "belongs in repository config")
 }
+
+func TestBoardColumns(t *testing.T) {
+	for _, tc := range []struct {
+		name, repo, machine string
+		want                BoardColumns
+	}{
+		{"default", "", "", BoardCompact},
+		{"repo steps", "steps", "", BoardSteps},
+		{"repo compact", "compact", "", BoardCompact},
+		{"machine default", "", "steps", BoardSteps},
+		{"repo override", "compact", "steps", BoardCompact},
+		{"reverse override", "steps", "compact", BoardSteps},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, machine := minimal, ""
+			if tc.repo != "" {
+				repo += "\n[board]\ncolumns = '" + tc.repo + "'\n"
+			}
+			if tc.machine != "" {
+				machine = "[board]\ncolumns = '" + tc.machine + "'\n"
+			}
+			if got := newFixture(t, repo, machine).mustLoad().BoardColumns; got != tc.want {
+				t.Fatalf("%s != %s", got, tc.want)
+			}
+		})
+	}
+	for _, machine := range []bool{false, true} {
+		for _, value := range []string{"wide", "", "Compact"} {
+			repo, mc := minimal, ""
+			setting := "\n[board]\ncolumns = '" + value + "'\n"
+			if machine {
+				mc = setting
+			} else {
+				repo += setting
+			}
+			f := newFixture(t, repo, mc)
+			_, err := f.load()
+			var ps Problems
+			if !errors.As(err, &ps) {
+				t.Fatalf("expected config problems, got %v", err)
+			}
+			wantFile := filepath.Join(f.root, RepoFile)
+			if machine {
+				wantFile = f.machine
+			}
+			found := false
+			for _, p := range ps {
+				if p.File == wantFile && p.Key == "board.columns" && strings.Contains(p.Message, "unknown board layout") {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatal(ps)
+			}
+		}
+	}
+}

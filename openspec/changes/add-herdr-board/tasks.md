@@ -41,7 +41,7 @@
 - [x] 5.4 Normalised remote URL as the repository key
 - [x] 5.5 Tests for each board-data scenario; JSON schema snapshot test
 
-- [ ] 5.6 Default compact board columns with repo/machine `board.columns`, steps opt-in, validation, card badges, mod rendering and tests for both layouts
+- [x] 5.6 Default compact board columns with repo/machine `board.columns`, steps opt-in, validation, card badges, mod rendering and tests for both layouts
 
 ## 6. Herdr mod (herdr-board)
 

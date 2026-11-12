@@ -82,6 +82,14 @@ func resolve(root, remote string, m, r *file) (*Config, Problems) {
 	}
 	cfg.RequireApproval = rr.RequireApproval == nil || *rr.RequireApproval
 
+	cfg.BoardColumns = BoardCompact
+	if v, from, ok := pick(rr.Board.Columns, mr.Board.Columns, r.path, m.path); ok {
+		cfg.BoardColumns = BoardColumns(v)
+		if cfg.BoardColumns != BoardCompact && cfg.BoardColumns != BoardSteps {
+			add(from, "board.columns", "unknown board layout %q; use \"compact\" or \"steps\"", v)
+		}
+	}
+
 	// Worktree settings.
 	cfg.Worktree.Base, _, _ = pick(rr.Worktree.Base, mr.Worktree.Base, r.path, m.path)
 	for _, w := range []struct {

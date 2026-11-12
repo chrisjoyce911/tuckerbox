@@ -143,7 +143,12 @@ type rawFile struct {
 	Steps           map[string]rawStep    `toml:"steps"`
 	Agents          map[string]rawAgent   `toml:"agents"`
 	Permissions     map[string]rawProfile `toml:"permissions"`
+	Board           rawBoard              `toml:"board"`
 	Worktree        rawWorktree           `toml:"worktree"`
+}
+
+type rawBoard struct {
+	Columns *string `toml:"columns"`
 }
 
 type rawWorkflow struct {
