@@ -7,6 +7,7 @@ import (
 
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/doctor"
+	"github.com/chrisjoyce911/tuckerbox/internal/herdrmod"
 	"github.com/chrisjoyce911/tuckerbox/internal/version"
 )
 
@@ -31,6 +32,7 @@ Commands:
   tasks <change> tick|untick <n.m>  Tick or untick one task in tasks.md
   approve <change>          Approve a change's text so runs may start it
   unapprove <change>        Withdraw a change's approval
+  herdr install             Install or update the board mod in the Herdr app
   version [--json]          Print the version, commit, Go version and platform
   doctor                    Check that git, openspec and the agent CLIs are installed
   check                     Validate .tuckerbox/config.toml with machine config
@@ -50,6 +52,9 @@ type App struct {
 	// Executable is the tuckerbox binary that detached runs re-execute;
 	// nil means os.Executable.
 	Executable func() (string, error)
+	// HerdrEnv finds the Herdr app and checks the board mod (herdr install,
+	// doctor); zero fields use the real environment.
+	HerdrEnv herdrmod.Env
 }
 
 // Run runs the command in args (without the program name) and returns the
@@ -74,6 +79,9 @@ func (a App) Run(args []string) int {
 		if err := doctor.Write(a.Stdout, results); err != nil {
 			fmt.Fprintln(a.Stderr, "tuckerbox:", err)
 			return 1
+		}
+		if line := a.herdrDoctorLine(); line != "" {
+			fmt.Fprintln(a.Stdout, line)
 		}
 		if !doctor.OK(results) {
 			return 1
@@ -115,6 +123,8 @@ func (a App) Run(args []string) int {
 		return a.approve(rest)
 	case "unapprove":
 		return a.unapprove(rest)
+	case "herdr":
+		return a.herdr(rest)
 	default:
 		fmt.Fprintf(a.Stderr, "tuckerbox: unknown command %q\n\n%s", cmd, usage)
 		return 2
