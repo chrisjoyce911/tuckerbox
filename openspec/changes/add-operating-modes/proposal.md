@@ -33,8 +33,11 @@ at once. That needs a claim that survives crashes and is safe under races.
     it, so it doesn't expire. A claim not renewed for `[fleet] lease`
     (10 minutes) expires. A person may then take the change over with
     `tuckerbox run --take-over`.
-  - The ship stage's first push carries a lease on the fleet ref in the same
-    atomic push, so a machine whose claim was taken over can't ship.
+  - Every push of the change's branch carries a lease on the fleet ref in
+    the same atomic push. A take-over of a pushed branch moves its tip with
+    a take-over commit, so the old holder's fix pushes and pinned merge are
+    refused. The new holder rewrites the merge request's marker by epoch
+    and carries on shipping.
   - `[fleet] max_runs` limits claims across all machines.
   - `tuckerbox dispatch` places approved, unclaimed changes in one pass: by
     the change's preferred machines (`add-change-settings`), free capacity,
@@ -49,7 +52,8 @@ at once. That needs a claim that survives crashes and is safe under races.
     and a draft merge request with the claim marker. It is marked ready at
     the ship stage.
   - Cards show who holds each change (forge login and machine).
-  - `[team] approvers` lists the forge logins whose approval counts.
+  - `[team] approvers` lists the forge logins whose approval counts, read
+    only from a base branch the forge confirms is protected.
   - Requires `ship = "mr"` or `"merge"`.
 - **Board:** the mode, claim state (active, parked, expired, ready), holder
   and owner on cards; Dispatch and Take over actions.
@@ -62,7 +66,8 @@ at once. That needs a claim that survives crashes and is safe under races.
 - `machine-inventory`: the machine list, capacity, `tuckerbox machine`,
   sign-in checks, reaching other machines and `status --all-machines`.
 - `fleet-claims`: the fleet ref, claiming, renewing, parking, expiry,
-  take-over, the fenced first push and the fleet limit.
+  take-over (also of a branch being shipped), fenced pushes and merges,
+  and the fleet limit.
 - `fleet-placement`: `tuckerbox dispatch`: choosing changes and machines and
   starting runs remotely.
 - `team-claims`: the early forge claim, owners on cards and approvers.

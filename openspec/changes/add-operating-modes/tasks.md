@@ -25,8 +25,11 @@
 - [ ] 2.8 Test "Machine not in the fleet"
 - [ ] 2.9 Test "Codex signed out"
 - [ ] 2.10 Test "No checkout"
-- [ ] 2.11 `tuckerbox status --all-machines [--json]` with a `machine` field per run, version unchanged; update the status JSON snapshot
-- [ ] 2.12 Test "Runs on two machines"
+- [ ] 2.11 Machine-wide fleet slots: `run --dispatched` takes one of `fleet_capacity` OS file locks under the machine state directory before claiming, holds it while queued, running or shipping, frees it on end, stop or block; `resume` of a dispatched run takes one again; refuse with `<machine> is full`
+- [ ] 2.12 Test "Two repositories, one place" (two processes from two repositories, `fleet_capacity = 1`; one claims, the other refuses and claims nothing)
+- [ ] 2.13 Test "Person's own run" (no fleet slot taken)
+- [ ] 2.14 `tuckerbox status --all-machines [--json]` with a `machine` field per run, version unchanged; update the status JSON snapshot
+- [ ] 2.15 Test "Runs on two machines"
 
 ## 3. Fleet claims (fleet-claims)
 
@@ -43,17 +46,31 @@
 - [ ] 3.11 Test "Blocked overnight"
 - [ ] 3.12 Expiry from `renewed_at`, `lease` and a 1-minute skew allowance; never removed automatically
 - [ ] 3.13 Test "Machine crashed"
-- [ ] 3.14 `tuckerbox run --take-over [--force]`: next epoch, start from the remote branch else the base, leave the old worktree alone
-- [ ] 3.15 Test "Take over after a crash"
+- [ ] 3.14 `tuckerbox run --take-over [--force]` without a remote branch: next epoch, start at the first step from the base, leave the old worktree alone
+- [ ] 3.15 Test "Take over before shipping"
 - [ ] 3.16 Test "Parked without force"
-- [ ] 3.17 Fenced first push in the ship stage: `git push --atomic` with leases on the branch and the fleet ref (a renewal commit); block on refusal
-- [ ] 3.18 Test "Old holder wakes up"
-- [ ] 3.19 `ready` claims on ready runs; remove on merged; drop claims of archived changes on any write
-- [ ] 3.20 Test "Ready on one machine"
-- [ ] 3.21 `tuckerbox claim show [--json]` and `claim release [--force]`; `doctor` in a fleet repository reports whether the fleet ref can be fetched
-- [ ] 3.22 Test "Release another machine's claim"
-- [ ] 3.23 Run TLC on `formal/fleet.tla` and its broken variants (`scripts/tla-check.sh` locally, the `tla` job in CI): the model passes, both variants are rejected
-- [ ] 3.24 Code review against model.md's mapping table: every fleet ref write is a lease push; the ship stage's first push in fleet mode is atomic with the fleet ref
+- [ ] 3.17 Take-over with a remote branch: one atomic push of the fleet claim and an empty `Take over <change> from <machine>` commit, leasing both refs at what was fetched; refetch on refusal
+- [ ] 3.18 Test "Branch moved during take-over"
+- [ ] 3.19 Every branch push in fleet mode (first and fix rounds) is `git push --atomic` with leases on the branch and the fleet ref (a renewal commit); block on refusal
+- [ ] 3.20 Test "Old holder wakes before its first push"
+- [ ] 3.21 Test "Old holder pushes a CI fix after take-over"
+- [ ] 3.22 Renew just before a merge and don't merge without the claim; the merge stays pinned to the commit seen green
+- [ ] 3.23 Test "Old holder merges after take-over" (fake forge that refuses a pinned merge when the tip moved)
+- [ ] 3.24 Marker `epoch=<n>` in fleet mode; a run whose fleet epoch is higher than the marker's, and whose push last moved the branch, rewrites the marker; `run`'s early claim check and ship-claim's refusals defer to the fleet claim in fleet mode
+- [ ] 3.25 Test "Marker of the old holder"
+- [ ] 3.26 Test "Crash before the marker is rewritten"
+- [ ] 3.27 After a take-over of a pushed branch, make the worktree from the take-over commit and continue in the ship stage: no step re-runs, no second archive, open a merge request if none is open
+- [ ] 3.28 Test "Take-over while waiting for CI" (end to end: two state directories, one bare remote, fake forge; the old holder's fix push and pinned merge are both refused)
+- [ ] 3.29 Test "Branch without a merge request"
+- [ ] 3.30 `ready` claims on ready runs; remove on merged; drop claims of archived changes on any write
+- [ ] 3.31 Test "Ready on one machine"
+- [ ] 3.32 `tuckerbox claim show [--json]` and `claim release [--force]`; `doctor` in a fleet repository reports whether the fleet ref can be fetched
+- [ ] 3.33 Test "Release another machine's claim"
+- [ ] 3.34 Release with a remote branch (with or without `--force`): one atomic push removing the claim and moving the branch to an empty `Release <change> from <machine>` commit, leasing both; without a branch, the fleet ref only; the old holder blocks with `claim released`
+- [ ] 3.35 Test "Forced release while the holder is about to merge" (two state directories, bare remote, fake forge refusing a pinned merge when the tip moved)
+- [ ] 3.36 Test "Release before any push"
+- [ ] 3.37 Run TLC on `formal/fleet.tla` and its broken variants (`scripts/tla-check.sh` locally, the `tla` job in CI): the model passes, all four variants are rejected
+- [ ] 3.38 Code review against model.md's mapping table: every fleet ref write is a lease push; every branch push, take-over and release in fleet mode is atomic with the fleet ref; every merge is pinned; dispatched runs take a fleet slot before claiming
 
 ## 4. Dispatch (fleet-placement)
 
@@ -65,7 +82,7 @@
 - [ ] 4.6 Test "Sign-in unknown"
 - [ ] 4.7 Choice: preferred `machines`, then most free capacity, then name; capacity taken within the pass
 - [ ] 4.8 Test "Preferred machine full"
-- [ ] 4.9 Start with `tuckerbox run --for <remote> <change>` locally, over SSH or herdr-core; `run --for` finds the checkout through the machine index
+- [ ] 4.9 Start with `tuckerbox run --for <remote> --dispatched <change>` locally, over SSH or herdr-core; `run --for` finds the checkout through the machine index
 - [ ] 4.10 Test "Start over SSH"
 - [ ] 4.11 Report refused claims and failed starts without retrying in the pass
 - [ ] 4.12 Test "Two dispatchers"
@@ -83,11 +100,20 @@
 - [ ] 5.8 Refuse `--take-over` and `dispatch` in team mode
 - [ ] 5.9 Test "Take over refused"
 - [ ] 5.10 Test "Dispatch in a team repository"
-- [ ] 5.11 `approve` records the forge login; the run gate counts only `[team] approvers`
+- [ ] 5.11 `approve` records the forge login; in team mode the run gate reads the approval only from the fetched base commit, requires a listed login, and refuses worktrees or retained branches whose files don't match it
 - [ ] 5.12 Test "Approval by someone not listed"
 - [ ] 5.13 Test "No approvers"
-- [ ] 5.14 Open claimed merge requests for the board, at most once a minute, kept in the state directory, with their age when the forge is down
-- [ ] 5.15 Test "Board read twice"
+- [ ] 5.14 Test "Forged approval on a retained branch" (local branch with recomputed hashes and a listed login; nothing created locally or on the fake forge)
+- [ ] 5.15 Test "Worktree edited after approval"
+- [ ] 5.16 Team mode `resume` and `rerun`: compare the `agent` and `permissions` overrides with `settings_hash` from the approval on the fetched base (listed login), never the worktree's; refuse on mismatch; a stale text hash alone still passes
+- [ ] 5.17 Test "Forged settings approval on resume"
+- [ ] 5.18 Test "Forged settings approval on rerun"
+- [ ] 5.19 Test "Design rewritten by a plan step"
+- [ ] 5.20 Ask the forge whether the base branch refuses direct pushes and needs an approving review (GitHub branch rules, GitLab protected branches and approval rules); refuse in `run` and fail `check` when not, or when unreadable
+- [ ] 5.21 Test "Unprotected base"
+- [ ] 5.22 Test "Protection can't be read"
+- [ ] 5.23 Open claimed merge requests for the board, at most once a minute, kept in the state directory, with their age when the forge is down
+- [ ] 5.24 Test "Board read twice"
 
 ## 6. Board (modes-board)
 
@@ -101,7 +127,7 @@
 
 ## 7. Integration
 
-- [ ] 7.1 Fleet end to end with two machines (or two state directories and a fake `ssh`) and one bare remote: dispatch places two changes, one machine is killed, its claim expires, the other takes over, the killed one wakes and blocks at its renewal
+- [ ] 7.1 Fleet end to end with two machines (or two state directories and a fake `ssh`) and one bare remote: dispatch places two changes, one machine is killed during its steps and another while waiting for CI, their claims expire, the other machine takes both over, and the killed ones wake and are refused at their next push, merge or renewal
 - [ ] 7.2 Team end to end against a throwaway GitHub repository: two people start the same change, one wins, the draft becomes ready at the ship stage
 - [ ] 7.3 `go vet ./...`, `go test -race ./...`, `CGO_ENABLED=0 go build ./...` and `scripts/tla-check.sh` pass on Linux, macOS and Windows CI
 
