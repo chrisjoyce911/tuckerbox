@@ -446,9 +446,12 @@ func (e *Engine) save(ws Workspace, rs *Run) error {
 	return nil
 }
 
+// stopRequest records whether the run was asked to stop by tuckerbox stop
+// (its stop file), as opposed to a signal alone.
 type stopRequest struct {
 	mu   sync.Mutex
 	seen bool
+	path string
 }
 
 func (s *stopRequest) set() {
@@ -457,16 +460,23 @@ func (s *stopRequest) set() {
 	s.mu.Unlock()
 }
 
+// get reports a stop request. tuckerbox stop writes the file before it
+// signals, so a signal that arrives first still counts as its request.
 func (s *stopRequest) get() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.seen {
+		if _, err := os.Stat(s.path); err == nil {
+			s.seen = true
+		}
+	}
 	return s.seen
 }
 
 // watchStop cancels the run when the stop file appears.
 func (e *Engine) watchStop(ctx context.Context, cancel func(), ws Workspace) *stopRequest {
-	req := &stopRequest{}
 	p := StopFile(ws.State)
+	req := &stopRequest{path: p}
 	go func() {
 		t := time.NewTicker(e.poll())
 		defer t.Stop()

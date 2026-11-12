@@ -13,14 +13,22 @@ import (
 const usage = `Tuckerbox runs OpenSpec changes through coding agents.
 
 Usage:
-  tuckerbox <command>
+  tuckerbox <command> [arguments]
 
 Commands:
-  version   Print the version, commit, Go version and platform
-  doctor    Check that git, openspec and the agent CLIs are installed
-  check     Validate this repository's .tuckerbox/config.toml with machine config
-  init      Write a commented starter .tuckerbox/config.toml
-  help      Show this help
+  run <change>... | --all   Run OpenSpec changes through the workflow, one
+                            background process per change (--foreground:
+                            one change, attached to this terminal)
+  status [--json]           Show every run on this machine
+  logs <change> [step]      Show a step's agent output (--follow to watch)
+  stop <change>             Stop a run's agent and mark the run stopped
+  resume <change>           Continue a stopped or blocked run
+  rerun <change> <step>     Start a run again from a step
+  version                   Print the version, commit, Go version and platform
+  doctor                    Check that git, openspec and the agent CLIs are installed
+  check                     Validate .tuckerbox/config.toml with machine config
+  init                      Write a commented starter .tuckerbox/config.toml
+  help                      Show this help
 `
 
 // App holds what commands need from the outside world, so tests can replace it.
@@ -32,6 +40,9 @@ type App struct {
 	// real git, user config directory and working directory.
 	ConfigEnv config.Env
 	Getwd     func() (string, error)
+	// Executable is the tuckerbox binary that detached runs re-execute;
+	// nil means os.Executable.
+	Executable func() (string, error)
 }
 
 // Run runs the command in args (without the program name) and returns the
@@ -75,6 +86,20 @@ func (a App) Run(args []string) int {
 			return a.tooMany(cmd)
 		}
 		return a.initConfig()
+	case "run":
+		return a.run(rest)
+	case "engine":
+		return a.engine(rest)
+	case "status":
+		return a.status(rest)
+	case "logs":
+		return a.logs(rest)
+	case "stop":
+		return a.stop(rest)
+	case "resume":
+		return a.resume(rest)
+	case "rerun":
+		return a.rerun(rest)
 	default:
 		fmt.Fprintf(a.Stderr, "tuckerbox: unknown command %q\n\n%s", cmd, usage)
 		return 2
