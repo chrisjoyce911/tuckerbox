@@ -17,23 +17,28 @@ small and every rule has a test.
 
 - **Install and uninstall take a lock per Herdr home**, held for the whole
   read, change and record, so two at once can't lose each other's record.
-- **A failed record write rolls back** the files that run changed.
+- **A journal file is written before anything changes,** so a failed
+  record write rolls back, and when rollback fails too, the next install or
+  uninstall finishes the undo.
 - **A failed drawer step after a layout clone** removes the clone and shows
-  the layout that was shown before.
+  the layout that was shown before. A clone that can't be removed is
+  recorded, and uninstall removes it even if it is malformed.
 - **`--key` on a re-install is honoured:** the new key is checked for
   clashes and replaces the old binding; uninstall still restores the
   original `keys.json`.
 - **Stale reads are dropped** in the board window and the drawer: a read
   that finishes after the space or its folders changed is discarded, and a
-  read for the current space starts at once.
+  read for the current space starts at once. TLA+ model
+  `formal/boardview.tla` with a broken variant TLC rejects.
 - **`machine: null` pins this computer.** An absent `machine` prop still
   means the space's machine.
 - **The board finds the main checkout:** a pane in a change's worktree
   resolves to the repository's main worktree, never the change worktree.
 - **Done cards show no approval badge.**
 - **Columns scroll sideways** in the board window and a docked pane when
-  they don't fit, at a fixed width each, by trackpad, shift-wheel and
-  scrollbar drag. In a narrow docked pane Ready and Done were unreachable.
+  they don't fit, at a fixed width each, by trackpad and scrollbar drag;
+  shift with the wheel steps a column at a time, using only Herdr's real
+  API. In a narrow docked pane Ready and Done were unreachable.
 - **Titles come from `title` in each change's `tuckerbox.toml`,** as now.
   The proposal's heading is not used. Every active change in this
   repository gets a title, `add-herdr-board` gets `title = "Herdr board"`,
@@ -57,11 +62,13 @@ requirements in their own capabilities (see design.md).
 
 ## Impact
 
-- Code: `internal/herdrmod` (install, uninstall, record),
+- Code: `internal/herdrmod` (install, uninstall, record, journal),
   `herdr/mods/tuckerbox-board/` (`data.js`, `model.js`, `drawer.js`,
   `board.js`, `card.js`), a repository test for change titles.
 - Files: `openspec/changes/add-herdr-board/tuckerbox.toml` (new, title
   only; the sidecar is not in the approval hash).
-- No config, CLI flag or JSON format changes.
+- No config, CLI flag or JSON format changes. A new file in the Herdr home,
+  `.tuckerbox-install.journal.json`, exists only while an install or
+  uninstall is unfinished.
 - Does not declare `depends_on = ["add-herdr-board"]`: a run waits until its
   dependencies are ready or archived, and `add-herdr-board` is neither.

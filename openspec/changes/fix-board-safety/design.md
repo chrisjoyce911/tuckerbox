@@ -2,14 +2,14 @@
 
 ## Context
 
-See proposal.md for why. The rules being fixed are in `add-herdr-board` (active, built and merged as code): `herdr-board`'s `Install record`, `Toggle key`, `Adding the drawer`, `Uninstalling`, `Which repository`, `Docking the board` and `What the drawer shows`, and `board-data`'s `Card summary` and `Archived approvals`. Findings 1–6 come from the review of PR #25; 7–10 were seen live on the board.
+See proposal.md for why. The rules being fixed are in `add-herdr-board` (active, built and merged as code): `herdr-board`'s `Install record`, `Toggle key`, `Adding the drawer`, `Uninstalling`, `Which repository`, `Docking the board` and `What the drawer shows`, and `board-data`'s `Card summary` and `Archived approvals`. Findings 1–6 come from the review of PR #25; 7–10 were seen live on the board. The review of PR #29 then asked for a durable journal, a defined way to undo a clone left behind, an implementation of shift-wheel scrolling that uses only Herdr's real API, and a model of the stale-read race; those are folded in.
 
 This is the first change Tuckerbox builds through its own board: the owner approves it, `tuckerbox run` builds it with Claude and reviews it with Codex. So it changes no config, flag or JSON format, and every requirement maps to tests.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- An install or uninstall never leaves a Herdr file changed without a record that can undo it.
+- An install or uninstall never leaves a Herdr file changed without a record or journal on disk that can undo it, except when even the journal can't be written, and then it changes nothing.
 - The board always reads the repository the person means, on the machine they mean, and never shows a result for a space they left.
 
 **Non-Goals:**
@@ -26,14 +26,14 @@ The natural form is MODIFIED deltas against `herdr-board` and `board-data`. But 
 | New requirement | Narrows |
 |---|---|
 | One install at a time per Herdr home | herdr-board: Install record |
-| Failed record write rolls back | herdr-board: Install record ("a step that fails SHALL leave its files unchanged") |
-| Failed drawer step after a clone | herdr-board: Adding the drawer, Install record |
+| Install journal, Failed record write rolls back, Recovering from a left journal | herdr-board: Install record ("a step that fails SHALL leave its files unchanged") |
+| Failed drawer step after a clone, Uninstalling a clone it can't read | herdr-board: Adding the drawer, Install record, Uninstalling, Uninstalling a cloned layout |
 | Re-install with another key | herdr-board: Toggle key, Toggle key never replaces a binding |
 | The repository's main checkout | herdr-board: Which repository, Docking the board |
 | Explicit machine pin | herdr-board: Which repository, Docking the board |
 | Stale reads are dropped | herdr-board: What the drawer shows, Boards follow their own space |
 | No approval badge on Done cards | board-data: Archived approvals (the data stays `none`; the mod hides it) |
-| Columns scroll sideways | herdr-board: Docking the board, Card detail view |
+| Columns scroll sideways, Shift and the mouse wheel step through columns | herdr-board: Docking the board, Card detail view |
 | Titles of this repository's changes | board-data: Card summary |
 
 No `depends_on = ["add-herdr-board"]`: a run waits until each dependency is `ready` on this machine or archived, and `add-herdr-board` is neither, so the dependency would hold this run forever. The code it fixes is already on the base branch.
@@ -42,9 +42,38 @@ No `depends_on = ["add-herdr-board"]`: a run waits until each dependency is `rea
 
 `internal/herdrmod` takes an exclusive lock on `<herdr home>/.tuckerbox-install.lock` with the OS lock the change lock uses in `internal/runs/lock.go` (`flock` on Unix, `LockFileEx` on Windows), moved to a shared helper if needed, for the whole of install or uninstall: read the record, change files, write the record. Atomic renames make each file write whole, but don't serialise read, modify, write; the lock does. It waits with a 30-second limit, polling every 100 ms, because Herdr's own `layout.clone` call can take a moment. The lock file is never removed (removing it would race a waiter), and is not in the record.
 
-### Rollback
+### Rollback and the journal
 
-Each run keeps a journal in memory of what it changed: for each file, its bytes before (or "absent"), and a clone it made with the layout shown before. On any failure after the first change, including writing the record, it replays the journal backwards: restore bytes, switch back to the earlier layout, remove the clone. The record is written last, so a failed record write leaves the old one. If the replay itself fails, install writes a record that covers what is still changed, so `uninstall` can finish the job, and says so. This is the "Clean-up fails" scenario.
+A journal in memory dies with the process, and the record can't hold undo information when writing the record is what failed. So the journal is a file, written before anything changes.
+
+`.tuckerbox-install.journal.json` in the Herdr home, next to the record:
+
+```json
+{"version": 1, "op": "install",
+ "entries": [
+   {"file": "keys.json", "before": "<bytes as they were, or null for absent>", "after": "sha256:…"},
+   {"clone": "main-tuckerbox", "from": "main", "shown_before": "main", "after": "sha256:… or null"}
+ ]}
+```
+
+- **Written first, durably:** written to a temporary file, synced, and renamed into place, before the first change. If that fails, nothing has changed and install exits non-zero naming the journal file.
+- **Write-ahead:** each entry's `after` is the hash install is about to write, so the journal is complete before the file changes. A clone's hash isn't known until Herdr makes it, so its entry is written with `after: null` before calling `layout.clone` and updated with the hash straight after.
+- **Success:** the record is written last; then the journal is removed.
+- **Failure:** the run undoes its entries backwards (restore `before`, or remove a file that was absent; show `shown_before`, remove the clone). If every undo worked, the journal is removed. If one failed, the journal stays, install exits non-zero, and says the next `tuckerbox herdr install` or `uninstall` finishes the undo.
+- **Recovery:** every install and uninstall, once it holds the lock, first looks for a journal and undoes it the same way, comparing each file's current hash with the entry's `after`: a match is undone; a file changed since is reported and left. A clone with `after: null` (the process died between cloning and updating the journal) is reported and left, since nothing proves it is unchanged. Then the journal is removed and the command carries on.
+
+Undo is idempotent: a file already back to `before` is skipped. So a crash during recovery is recovered by the next run.
+
+This is a bounded contract, not a promise that nothing can go wrong: if the disk can't hold even the journal, install changes nothing; once the journal exists, every change it makes has undo information on disk until it is undone or recorded.
+
+### A clone left behind
+
+When the drawer step fails after cloning and removing the clone fails too, the record (when it can be written) holds the clone in the existing drawer entry format, so uninstall needs no new field:
+- `layout`: the clone, `cloned_from`: its source (which was the shown layout, because install clones the shown one)
+- `before`: empty, since a clone is removed, never restored
+- `after`: the hash of the clone as found, however malformed
+
+`uninstallDrawer` today parses the layout before checking its hash, so a malformed clone stops it. It changes to compare the hash first: a clone still as recorded is removed without parsing, after switching back to `cloned_from` if it is shown. Only a layout that changed since is parsed, to take out the drawer block; if that layout no longer parses, it is left and reported, and uninstall goes on with the key and the mod folders rather than stopping.
 
 ### Re-install with another key
 
@@ -62,11 +91,11 @@ Why the main worktree: it is where the person keeps the repository and where `tu
 
 ### Stale reads
 
-Both views keep a `want` key, the candidate folders and machine joined, updated on every space or focus change. A read records the key it started with. On completion:
-- if its key isn't the current `want`, the result is dropped and, unless a read for `want` is already running, one starts at once
-- otherwise it is applied as today
+Both views keep `want`, the candidate key (folders and machine joined), updated on every space or focus change. When `want` changes, the view drops what it shows (the drawer draws nothing, the board shows its loading state) and starts a read for the new key at once. `loading` becomes a set of keys with a read running, so a read for a new key isn't blocked by one for an old key, and a second read for the same key doesn't start. A read records the key it started with; on completion it is applied only if that key is still `want`, and dropped otherwise.
 
-`loading` no longer blocks a refresh for a new key; it only stops a second read for the same key. Tested with the real `DrawerView` and board view and a delayed fake `exec`.
+This is modelled in `formal/boardview.tla` (model.md): switches including A → B → A, overlapping reads, completions in any order. `ShownIsCurrent` says the view never shows a result for a key that isn't current; `Settles` says it comes to show the current key's result once switches stop. The broken variant `boardview_broken_anykey` applies whatever read finishes, as the old code did, and TLC finds the 4-state race: read A starts, the space switches to B, A's read finishes and A is shown in B.
+
+Tested with the real `DrawerView` and board view and a delayed fake `exec` whose completions the test releases in a chosen order.
 
 ### Done cards
 
@@ -74,12 +103,25 @@ Both views keep a `want` key, the candidate folders and machine joined, updated 
 
 ### Columns scroll sideways
 
-`board.js` already gives the column row `overflow_x_scrollbar()`, but the row is `flex_1` in a column with no width bound, so it grows to fit its fixed-width (`COL_W`, 236 px) columns instead of scrolling, and the pane clips Ready and Done. The fix bounds the row to the board's width (`w_full().min_w(0)` on the row and its parent), keeps each column `flex_none` at `COL_W`, and leaves the header outside the scrolling row. Trackpad swipes and scrollbar drags then work through the framework's own scrolling. If shift with the mouse wheel isn't turned into horizontal scrolling on every platform, the row handles `on_scroll_wheel` with shift held and moves its scroll offset sideways.
+What Herdr offers, from its `gpui-kit.d.ts`:
+- `overflow_x_scrollbar()`: Herdr's own horizontal scroll area with a scrollbar; trackpad swipes and scrollbar drags work there with no script.
+- `track_scroll(ScrollHandle)`: a `ScrollHandle` has only `scroll_to_item(index)` (reveal a direct child with the smallest scroll; already visible children stay put) and `release()`. There is no offset getter or setter.
+- `on_scroll_wheel(event)`: `delta` and `delta_lines` (x, y), `modifiers`, `touch_phase`.
+- `on_size_change({width, height})` on a stable root element: the board's size in logical pixels.
 
-A narrow pane could instead stack the columns as collapsible sections. We don't, in this change:
-- The mod gets no reliable width signal for its pane, so choosing a layout by width would be a guess, and would flip as panes are resized.
-- One layout is one thing to test and explain. The compact layout (five columns) is already the default, and scrolling reaches all of them.
-- It is a design change, not a fix; this change is meant to be small. A stacked layout can be a later change once Herdr tells a mod its size.
+The board root is already `size_full()` and the row already has `overflow_x_scrollbar()`, so why Ready and Done were unreachable in a narrow docked pane is not yet known. The first task reproduces it in a 500 px docked pane and records the cause in the implementing pull request before changing layout; nothing here assumes a cause.
+
+Shift with the wheel, with only supported calls:
+- The row gets `track_scroll(handle)`; its columns are its direct children, so column `i` is item `i`.
+- The root's `on_size_change` gives the width; the row's viewport is that minus its padding, so `v`, the number of whole columns that fit, is known.
+- The view keeps `first`, its estimate of the first visible column, and a wheel accumulator.
+- `on_scroll_wheel` on the row, and on each column's list, acts only when shift is held and `delta.x` is 0 (a purely vertical movement). It adds `delta.y` to the accumulator; each 236 px moves one column: down reveals `min(n-1, first+v)` with `scroll_to_item`, then `first` becomes that minus `v-1`; up reveals `max(0, first-1)`. It stops the event, so a column's list doesn't scroll vertically.
+- Movements with a sideways part (trackpad swipes; shift with the wheel on platforms that already turn it sideways) are left to `overflow_x_scrollbar`. Their `delta.x` is added to an estimated offset, from which `first` is kept up to date.
+- A scrollbar drag isn't seen by the script, so `first` can be off after one. The error is bounded: `scroll_to_item` on a column already visible does nothing, so the next steps catch up.
+
+The tests use a strict stub of the Herdr API that throws on any call the installed `gpui-kit.d.ts` doesn't declare: a committed list of the members used (`ScrollHandle`: `scroll_to_item`, `release`; the element methods above) with the Herdr version it was taken from. A check script compares that list with the installed `gpui-kit.d.ts` when one is present (on a developer's machine); CI, which has no Herdr, uses the committed list.
+
+A stacked layout of collapsible sections for narrow panes is not part of this change. `on_size_change` gives the width, so it is possible, but it is a second layout to design and test, and this change is meant to be small. A later change can add it.
 
 ### Titles
 
@@ -92,12 +134,13 @@ Two options were asked about: write `title` in each change's `tuckerbox.toml`, o
 
 ### Model
 
-None (model.md). One process writes the install files, under the new lock: the same OS-lock pattern `formal/runs.tla` checks for the change lock. The stale-read fix is inside one mod process, one event loop.
+`formal/boardview.tla` models the stale-read race (model.md). The install lock needs no new model: it is one OS lock around one process's work, the pattern `formal/runs.tla` checks for the change lock; the journal is a single writer under that lock.
 
 ## Risks / Trade-offs
 
 - **[A hung `layout.clone` holds the lock]** → `herdr-app do` already has a timeout; the waiter's 30-second limit reports the wait rather than hanging.
-- **[Rollback can't undo the layout switch if Herdr quit meanwhile]** → The clone is then recorded and the output says to run `uninstall` with Herdr running.
+- **[Rollback can't undo the layout switch if Herdr quit meanwhile]** → The journal (and the record, if it can be written) keeps the clone, and the output says to run `uninstall` with Herdr running.
+- **[A journal left behind]** → It is undone by the next install or uninstall; entries changed since are reported, never overwritten.
 - **[`git worktree list` on a remote machine is slower]** → One more git call per probe; the probe cache (30 s for found, 10 s for not) is unchanged.
 - **[Repositories where the main worktree is a bare clone]** → Fall back to the folder's own top level, which is today's behaviour.
 - **[The title test makes forgetting a title fail CI]** → Intended. The fix is one line.
