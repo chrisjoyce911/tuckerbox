@@ -2,7 +2,7 @@
 // their boards merge into the one shown.   node --test test/
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normaliseBoard, otherMachines, sharedRepo, fitColumn, mergeBoards, group, cardAt } from "../model.js";
+import { normaliseBoard, otherMachines, sharedRepo, fitColumn, mergeBoards, group, cardAt, execFailure } from "../model.js";
 
 const COMPACT = [
   { id: "proposed", kind: "proposed", name: "Proposed" },
@@ -48,6 +48,23 @@ test("An unreachable machine is named and hides no card", () => {
     { machine: "laptop", board: { error: { code: "repo_not_found", message: "no checkout" } } },
   ]);
   assert.deepEqual(b.unreachable, [{ machine: "mini", message: "connection refused" }]);
+  assert.deepEqual(b.cards.map((c) => c.change), ["change-a"]);
+});
+
+test("A connected machine without tuckerbox is named as such, not as unreachable", () => {
+  // herdr-core's exec when the program is missing, and when the machine is down (board trial).
+  assert.equal(execFailure("cannot start tuckerbox: No such file or directory (os error 2)"), "not_installed");
+  assert.equal(execFailure("mac-mini-m6 is unreachable: cannot reach mac-mini-m6: ssh: connect to host port 22: Operation timed out"), "unreachable");
+  assert.equal(execFailure(undefined), "unreachable");
+  const own = normaliseBoard(doc("studio", "/work/shop", [card("change-a")]));
+  const b = mergeBoards(own, [
+    { machine: "linux-box", board: { error: { code: "not_installed", message: "cannot start tuckerbox" } } },
+    { machine: "mini", board: { error: { code: "unreachable", message: "offline" } } },
+  ]);
+  assert.deepEqual(b.unreachable, [
+    { machine: "linux-box", message: "cannot start tuckerbox", missing: true },
+    { machine: "mini", message: "offline" },
+  ]);
   assert.deepEqual(b.cards.map((c) => c.change), ["change-a"]);
 });
 

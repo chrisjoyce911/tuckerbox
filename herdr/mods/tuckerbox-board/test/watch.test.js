@@ -14,6 +14,7 @@ export function spaces() { return [{ id: "s1", machine: null, active: true }]; }
 export function panes() { return []; }
 export function focused() { return { space: "s1" }; }
 export async function exec() { throw new Error("Watch runs no command"); }
+export async function hc() { throw new Error("Watch runs no command"); }
 export function readTextFile() { return ""; }
 export function appHome() { return "/home"; }
 export function props() { return {}; }

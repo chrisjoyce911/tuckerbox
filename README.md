@@ -32,7 +32,8 @@ tuckerbox version   # version, commit, Go version and platform (--json for tools
 tuckerbox doctor    # checks git, openspec and the agent CLIs (claude, codex)
 tuckerbox init      # writes a commented starter .tuckerbox/config.toml
 tuckerbox herdr install  # installs or updates the board mod in the Herdr app
-                         # (--keys: a key to open and hide it; --drawer: a peek drawer)
+                         # (--keys: a key to open and hide it; --drawer: a peek drawer,
+                         #  with Herdr running, else nothing changes)
 tuckerbox herdr uninstall  # undoes exactly what herdr install did
 tuckerbox check     # validates it, merged with this machine's config
 ```
@@ -176,6 +177,16 @@ To show Queued and one column per workflow step, set this in repository config
 [board]
 columns = "steps" # "compact" is the default
 ```
+
+In Herdr, the board looks like this with `columns = "steps"` (from the mod's
+fixtures, an example shop repository):
+
+![The Tuckerbox board in Herdr: columns Proposed, Approved, Queued, Plan, Build, Review, Ready and Done, with one card per change](docs/herdr-board.png)
+
+Clicking a card opens its detail: proposal, tasks with tick boxes, approval,
+rounds, history and the actions its state allows.
+
+<img src="docs/herdr-card-detail.png" alt="Card detail for add-login-page: blocked in review round 3, approved, its proposal, tasks 3 of 5 ticked, and Resume, Re-run review and Unapprove buttons" width="453">
 
 Agents report by ending with a small JSON result as their final message; Tuckerbox records it in the step's result file, so an agent needs no write access outside its worktree and a reviewer can run read-only (for Codex, `--sandbox read-only` in a machine profile). Tuckerbox reads Claude's final message from its stream-json output and Codex's from the file it writes with `-o`. A custom agent can pass `{lastmessage}`, a file its CLI writes the final message to; otherwise its standard output is read:
 

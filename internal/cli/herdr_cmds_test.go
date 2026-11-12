@@ -13,7 +13,8 @@ import (
 )
 
 // herdrApp is app() with Herdr's home at home (a temp folder, never the
-// real one) and a herdr-app check that passes.
+// real one), a herdr-app check that passes, and a window that answers
+// status but whose do commands fail.
 func herdrApp(t *testing.T, home string, installed ...string) (App, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
 	a, out, errOut := app(installed...)
@@ -29,7 +30,8 @@ func herdrApp(t *testing.T, home string, installed ...string) (App, *bytes.Buffe
 		Do: func(context.Context, string, map[string]any) (string, error) {
 			return "", errors.New("Herdr isn't running")
 		},
-		GOOS: "linux",
+		Reach: func(context.Context) error { return nil },
+		GOOS:  "linux",
 	}
 	return a, out, errOut
 }
@@ -44,6 +46,28 @@ func TestHerdrInstallWithoutHerdr(t *testing.T) {
 		t.Errorf("stderr %q", errOut)
 	}
 	if es, _ := os.ReadDir(parent); len(es) != 0 {
+		t.Errorf("wrote %v", es)
+	}
+}
+
+// Owner decision: install --keys --drawer with Herdr not running fails up
+// front, before the mod, the key or the layout changes, and says why.
+func TestHerdrInstallDrawerWithHerdrNotRunning(t *testing.T) {
+	home := t.TempDir()
+	a, out, errOut := herdrApp(t, home)
+	a.HerdrEnv.Reach = func(context.Context) error { return errors.New("no Herdr window") }
+	if code := a.Run([]string{"herdr", "install", "--keys", "--drawer"}); code != 1 {
+		t.Fatalf("exit %d; out %s", code, out)
+	}
+	for _, want := range []string{"needs the Herdr app running for --drawer", "no Herdr window", "nothing was changed", "open Herdr"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("stderr %q lacks %q", errOut, want)
+		}
+	}
+	if out.Len() != 0 {
+		t.Errorf("out %q", out)
+	}
+	if es, _ := os.ReadDir(home); len(es) != 0 {
 		t.Errorf("wrote %v", es)
 	}
 }

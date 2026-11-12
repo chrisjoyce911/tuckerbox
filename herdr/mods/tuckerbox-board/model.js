@@ -561,7 +561,9 @@ export function boardSpace({ props, spaces, panes, self }) {
 export function repoCandidates({ props, spaces, panes, focused, self }) {
   const p = props ?? {};
   const space = boardSpace({ props: p, spaces, panes, self });
-  const on = p.machine ?? p.on ?? space?.machine ?? null;
+  // A present machine prop wins, null meaning this computer; only an absent
+  // one falls back (board-view: Explicit machine pin).
+  const on = "machine" in p ? (p.machine ?? null) : (p.on ?? space?.machine ?? null);
   const id = space?.id ?? null;
   if (typeof p.folder === "string" && p.folder) return { cwds: [p.folder], on, space: id, pinned: true };
   if (!space) return { cwds: [], on, space: null, pinned: false };
@@ -593,6 +595,23 @@ export function pickRepo(cands, probes) {
 
 // A key that changes when the candidate folders do: cheap to compute every
 // second, so a board or drawer follows a space switch without waiting a poll.
+// The repository's main checkout from `git worktree list --porcelain`: the
+// first entry's path, or null when there is none or it is bare (then the
+// folder's own top level counts; board-view: The repository's main checkout).
+export function mainWorktreeOf(porcelain) {
+  const first = String(porcelain ?? "").replace(/\r/g, "").split(/\n\s*\n/)[0].split("\n");
+  if (first.includes("bare")) return null;
+  const line = first.find((l) => l.startsWith("worktree "));
+  const path = line ? line.slice("worktree ".length).trim() : "";
+  return path || null;
+}
+
+// Whether a card shows its approval badge: never in Done, whatever the
+// data says (board-view: No approval badge on Done cards).
+export function showsApproval(card) {
+  return card?.column !== "done";
+}
+
 export function candidatesKey(c) {
   return JSON.stringify([c?.space ?? null, c?.on ?? null, list(c?.cwds)]);
 }
@@ -661,6 +680,13 @@ export function otherMachines(list, own = null) {
     .map((m) => ({ name: m.name ?? null, reachable: m.layout !== "unavailable" }));
 }
 
+// Why exec of tuckerbox was rejected: "not_installed" when the machine
+// answered but tuckerbox couldn't start there (herdr-core: "cannot start
+// tuckerbox: No such file or directory"), else "unreachable".
+export function execFailure(message) {
+  return /cannot start|no such file|ENOENT/i.test(String(message ?? "")) ? "not_installed" : "unreachable";
+}
+
 // A repository with no remote has its checkout path as its key, and lives on
 // one machine only (design: Matching a repository across machines).
 export function sharedRepo(board) {
@@ -718,7 +744,10 @@ export function mergeBoards(own, others = []) {
     const b = o?.board;
     if (!b || b.error) {
       if (b?.error?.code === "repo_not_found") continue;
-      unreachable.push({ machine: o?.machine ?? null, message: b?.error?.message || "unreachable" });
+      const u = { machine: o?.machine ?? null, message: b?.error?.message || "unreachable" };
+      // A connected machine without tuckerbox is named as such, not as unreachable.
+      if (b?.error?.code === "not_installed") u.missing = true;
+      unreachable.push(u);
       continue;
     }
     if (b.repo !== own.repo) continue;
