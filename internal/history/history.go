@@ -111,6 +111,12 @@ const (
 
 // Event is one line of history.jsonl.
 type Event struct {
+	Commit    string `json:"commit,omitempty"`
+	Branch    string `json:"branch,omitempty"`
+	Link      string `json:"link,omitempty"`
+	Number    int    `json:"number,omitempty"`
+	Method    string `json:"method,omitempty"`
+	ShipRound int    `json:"ship_round,omitempty"`
 	// V is the line's format version (Version); Append sets it.
 	V int `json:"v"`
 	// Time is when the event happened, with the writer's offset.

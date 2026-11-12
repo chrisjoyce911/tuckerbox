@@ -20,6 +20,7 @@ import (
 
 	"github.com/chrisjoyce911/tuckerbox/internal/agent"
 	"github.com/chrisjoyce911/tuckerbox/internal/scope"
+	"github.com/chrisjoyce911/tuckerbox/internal/ship"
 )
 
 // State is a run's state.
@@ -27,12 +28,14 @@ type State string
 
 // Run states.
 const (
-	Queued  State = "queued"
-	Running State = "running"
-	Blocked State = "blocked"
-	Stopped State = "stopped"
-	Failed  State = "failed"
-	Ready   State = "ready"
+	Queued   State = "queued"
+	Running  State = "running"
+	Blocked  State = "blocked"
+	Stopped  State = "stopped"
+	Failed   State = "failed"
+	Ready    State = "ready"
+	Shipping State = "shipping"
+	Merged   State = "merged"
 )
 
 // RunVersion is the format version of run.json.
@@ -41,6 +44,7 @@ const RunVersion = 1
 // Run is the content of run.json. Only the run's engine process writes it,
 // while it holds the change lock.
 type Run struct {
+	ship.Record
 	Version int    `json:"version"`
 	Change  string `json:"change"`
 	// Repo is the checkout the run was started from; its config is used.
@@ -193,7 +197,7 @@ const Crashed = "the run process ended without recording a final state"
 // stopped. The file itself is left alone; only the engine writes it.
 func (r *Run) Effective(active bool) Run {
 	v := *r
-	if !active && (v.State == Queued || v.State == Running) {
+	if !active && (v.State == Queued || v.State == Running || v.State == Shipping) {
 		v.State = Stopped
 		v.Reason = Crashed
 		v.Pid, v.AgentPid = 0, 0

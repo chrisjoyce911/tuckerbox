@@ -2,11 +2,13 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/doctor"
+	"github.com/chrisjoyce911/tuckerbox/internal/forge"
 	"github.com/chrisjoyce911/tuckerbox/internal/herdrmod"
 	"github.com/chrisjoyce911/tuckerbox/internal/version"
 )
@@ -49,6 +51,8 @@ Commands:
 
 // App holds what commands need from the outside world, so tests can replace it.
 type App struct {
+	// Forge supplies a fake session for foreground shipping tests.
+	Forge          func(context.Context, *config.Config) (forge.Client, func(string) string, error)
 	Stdout, Stderr io.Writer
 	DoctorEnv      doctor.Env
 	DoctorTools    []doctor.Tool

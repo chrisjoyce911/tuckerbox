@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 )
 
 func main() {
@@ -42,6 +43,14 @@ func main() {
 			os.Exit(2)
 		}
 		id := os.Args[2]
+		if id == "--all" {
+			if data, err := os.ReadFile("INVALID_ALL"); err == nil {
+				fmt.Print(string(data))
+				os.Exit(1)
+			}
+			fmt.Println("All specs valid")
+			return
+		}
 		dir := filepath.Join(changes, id)
 		if _, err := os.Stat(filepath.Join(dir, "proposal.md")); err != nil {
 			fmt.Fprintf(os.Stderr, "Unknown item '%s'\n", id)
@@ -52,6 +61,30 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("Change '%s' is valid\n", id)
+	case "archive":
+		if len(os.Args) < 3 {
+			os.Exit(2)
+		}
+		id := os.Args[2]
+		dir := filepath.Join(changes, id)
+		if data, err := os.ReadFile(filepath.Join(dir, "INVALID")); err == nil {
+			fmt.Print(string(data))
+			os.Exit(1)
+		}
+		dest := filepath.Join(changes, "archive", time.Now().In(time.FixedZone("AEST", 10*3600)).Format("2006-01-02")+"-"+id)
+		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+			panic(err)
+		}
+		if err := os.Rename(dir, dest); err != nil {
+			panic(err)
+		}
+		if err := os.MkdirAll(filepath.Join("openspec", "specs", "fake"), 0755); err != nil {
+			panic(err)
+		}
+		if err := os.WriteFile(filepath.Join("openspec", "specs", "fake", "spec.md"), []byte("# Applied delta\n"), 0644); err != nil {
+			panic(err)
+		}
+		fmt.Println("Archived", id)
 	default:
 		fmt.Fprintln(os.Stderr, "fakeopenspec: unsupported command", os.Args[1])
 		os.Exit(2)
