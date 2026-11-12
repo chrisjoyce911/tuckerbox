@@ -107,3 +107,31 @@ func TestDependencyStopAndUnknown(t *testing.T) {
 	}
 	wantStarts(t, f.env)
 }
+
+// A dependency that leaves ready while the run waits for a slot is seen
+// once the slot is taken: the run gives the slot back and waits again, so
+// the dependency's rerun goes first. With max_parallel = 1: A is ready, C
+// holds the slot, B (depends on A) queues for it, then A is rerun and
+// queues behind B. When C ends, B must not start before A is ready again.
+func TestDependencyRecheckedAfterSlot(t *testing.T) {
+	f := setup(t, testenv.RepoOptions{Changes: []string{"a", "b", "c"}})
+	f.dependsOn("b", "a")
+	if r := f.run(Request{Change: "a"}); r.State != Ready {
+		t.Fatalf("a: %+v", r)
+	}
+	gate := f.gate("c")
+	f.env.SetPlan(t, map[string]testenv.Action{"c:build": {WaitFor: gate}})
+	dc := f.start(context.Background(), Request{Change: "c"})
+	f.waitState("c", Running, "build")
+	db := f.start(context.Background(), Request{Change: "b"}) // in the queue
+	da := f.start(context.Background(), Request{Change: "a", Mode: Rerun, Step: "build"})
+	f.waitState("a", Queued, "build")
+	open_(t, gate)
+	for name, ch := range map[string]<-chan result{"a": da, "b": db, "c": dc} {
+		if res := <-ch; res.err != nil || res.run.State != Ready {
+			t.Fatalf("%s: %+v %v", name, res.run, res.err)
+		}
+	}
+	wantStarts(t, f.env, "a build 1", "a review 1", "c build 1", "c review 1",
+		"a build 2", "a review 2", "b build 1", "b review 1")
+}

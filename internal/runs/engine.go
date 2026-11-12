@@ -217,31 +217,55 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 		notified = true
 	}
 
-	// Wait for dependencies before joining the slot queue, so a waiting
-	// run holds neither a slot nor a place at the head of the queue.
-	if fail, err := e.waitDeps(ctx, ws, rs, notify); ctx.Err() != nil {
-		return e.finish(ws, rs, Stopped, stopReason(stopReq, "while waiting on dependencies"))
-	} else if err != nil {
-		return rs, err
-	} else if fail != "" {
+	dw, fail := e.newDepWait(ws, rs)
+	if fail != "" {
 		return e.finish(ws, rs, Failed, fail)
 	}
-
-	// TakeSlot: wait in queue order for one of max_parallel slots.
-	q, err := JoinQueue(e.Repo.Common, req.Change, ws.State.RunLock(), e.now().UnixNano())
-	if err != nil {
-		return e.finish(ws, rs, Failed, "joining the queue: "+err.Error())
-	}
-	notify()
-	slot, err := WaitSlot(ctx, e.Repo.Common, e.Config.MaxParallel, q, e.poll(), func() {
-		e.logf(req.Change, "queued: all %d slots are taken", e.Config.MaxParallel)
-	})
-	q.Leave()
-	if err != nil {
-		if ctx.Err() != nil {
-			return e.finish(ws, rs, Stopped, stopReason(stopReq, "while queued"))
+	var slot *Slot
+	for slot == nil {
+		// Wait for dependencies before joining the slot queue, so a
+		// waiting run holds neither a slot nor a place in the queue.
+		if fail, err := dw.wait(ctx, notify); ctx.Err() != nil {
+			return e.finish(ws, rs, Stopped, stopReason(stopReq, "while waiting on dependencies"))
+		} else if err != nil {
+			return rs, err
+		} else if fail != "" {
+			return e.finish(ws, rs, Failed, fail)
 		}
-		return e.finish(ws, rs, Failed, "waiting for a slot: "+err.Error())
+
+		// TakeSlot: wait in queue order for one of max_parallel slots.
+		q, err := JoinQueue(e.Repo.Common, req.Change, ws.State.RunLock(), e.now().UnixNano())
+		if err != nil {
+			return e.finish(ws, rs, Failed, "joining the queue: "+err.Error())
+		}
+		notify()
+		s, err := WaitSlot(ctx, e.Repo.Common, e.Config.MaxParallel, q, e.poll(), func() {
+			e.logf(req.Change, "queued: all %d slots are taken", e.Config.MaxParallel)
+		})
+		q.Leave()
+		if err != nil {
+			if ctx.Err() != nil {
+				return e.finish(ws, rs, Stopped, stopReason(stopReq, "while queued"))
+			}
+			return e.finish(ws, rs, Failed, "waiting for a slot: "+err.Error())
+		}
+		// A dependency may have left ready while this run waited for the
+		// slot (it was rerun): look again, and if so give the slot back
+		// and wait for the dependencies once more.
+		met, fail, err := dw.check(ctx)
+		switch {
+		case err != nil:
+			s.Release()
+			return rs, err
+		case fail != "":
+			s.Release()
+			return e.finish(ws, rs, Failed, fail)
+		case !met:
+			s.Release()
+			e.logf(req.Change, "a dependency is no longer ready; gave the slot back")
+			continue
+		}
+		slot = s
 	}
 	// Release: the slot is freed after the final state is written (the
 	// deferred lock release runs after this one).
