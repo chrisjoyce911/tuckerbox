@@ -65,9 +65,12 @@ func (t *HCTerminal) Working() bool {
 func (t *HCTerminal) LastActivity() time.Time {
 	var ms int64
 	if t != nil {
+		// The first one herdr-core reports wins: a status change after the
+		// last output doesn't replace the output's time.
 		for _, v := range []*int64{t.OutputMs, t.StatusMs, t.CreatedMs} {
-			if v != nil && *v > ms {
+			if v != nil && *v > 0 {
 				ms = *v
+				break
 			}
 		}
 	}

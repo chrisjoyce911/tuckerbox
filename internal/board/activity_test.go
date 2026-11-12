@@ -79,6 +79,38 @@ func TestQuietAgent(t *testing.T) {
 	}
 }
 
+// agent-activity: Times and last activity. The run process crashed during
+// build round 2 and resume adopted the same agent, recording step_started
+// again: the step's running time still counts from the attempt's start. A
+// step that ended and started again in the same round counts from the new
+// start.
+func TestActivityStepStartAcrossAdoption(t *testing.T) {
+	noTerminal(t)
+	dir := t.TempDir()
+	st := statedir.Dir(filepath.Join(dir, "state"))
+	folder := filepath.Join(dir, "change")
+	testenv.WriteFile(t, filepath.Join(folder, "tasks.md"), "## 2. Sign in\n\n- [ ] 2.1 Check the password\n")
+	now := time.Now()
+	start, adopted := now.Add(-40*time.Minute), now.Add(-5*time.Minute)
+	events := []history.Event{
+		{Kind: history.Started, Time: start.Add(-time.Minute), Step: "build", Round: 2},
+		{Kind: history.StepStarted, Time: start, Step: "build", Round: 2},
+		{Kind: history.Resumed, Time: adopted, Step: "build", Round: 2},
+		{Kind: history.StepStarted, Time: adopted, Step: "build", Round: 2},
+	}
+	r := &runs.Run{Change: "add-login", State: runs.Running, Step: "build", Round: 2, AgentBackend: "headless", Since: adopted}
+	if a := readActivity(context.Background(), activityConfig(), r, folder, st, events, ""); a.StepStarted != timestamp(start) {
+		t.Errorf("adopted: step started %s, want %s", a.StepStarted, timestamp(start))
+	}
+	again := now.Add(-2 * time.Minute)
+	events = append(events,
+		history.Event{Kind: history.StepFinished, Time: now.Add(-3 * time.Minute), Step: "build", Round: 2},
+		history.Event{Kind: history.StepStarted, Time: again, Step: "build", Round: 2})
+	if a := readActivity(context.Background(), activityConfig(), r, folder, st, events, ""); a.StepStarted != timestamp(again) {
+		t.Errorf("new attempt: step started %s, want %s", a.StepStarted, timestamp(again))
+	}
+}
+
 // agent-activity: The task a run is on, "Everything in scope ticked", as the
 // card shows it.
 func TestActivityAllTicked(t *testing.T) {

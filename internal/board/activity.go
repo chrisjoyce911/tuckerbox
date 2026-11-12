@@ -111,10 +111,23 @@ func readActivity(ctx context.Context, cfg *config.Config, r *runs.Run, folder s
 		runStart = r.Created
 	}
 	a.RunStarted = timestamp(runStart)
+	// The step's start is the first step_started of its attempt: resuming
+	// adopts the same agent after a crash and records step_started again
+	// without the attempt having ended, so only a step_finished, stopped,
+	// failed or blocked for the step and round begins a new attempt.
 	var stepStart time.Time
+	ended := false
 	for _, e := range events {
-		if e.Kind == history.StepStarted && e.Step == r.Step && e.Round == r.Round {
-			stepStart = e.Time
+		if e.Step != r.Step || e.Round != r.Round {
+			continue
+		}
+		switch e.Kind {
+		case history.StepStarted:
+			if stepStart.IsZero() || ended {
+				stepStart, ended = e.Time, false
+			}
+		case history.StepFinished, history.Stopped, history.Failed, history.Blocked:
+			ended = true
 		}
 	}
 	if stepStart.IsZero() && r.State == runs.Running {
