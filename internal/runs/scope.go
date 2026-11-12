@@ -108,6 +108,13 @@ const (
 	outcomeBlocked
 )
 
+// shipsToForge reports whether mode ships to a forge ("mr" or "merge"),
+// where shipping ticks CI tasks once CI is green. In local mode (or no
+// mode) CI tasks count like any other task.
+func shipsToForge(mode config.ShipMode) bool {
+	return mode != "" && mode != config.ShipLocal
+}
+
 // shipDecision decides what a run whose last step is done does, from the
 // ship mode, whether it has a scope and whether the change is complete
 // (task-scope: Partial runs don't ship, Incomplete whole-change runs). In

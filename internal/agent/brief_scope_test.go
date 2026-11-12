@@ -90,3 +90,21 @@ func TestBuildAfterRejectionWithScope(t *testing.T) {
 		}
 	}
 }
+
+// Scenario: CI task in local mode. Only a run that ships to a forge is
+// told not to tick CI tasks; in local mode they are ticked like any other.
+func TestBriefCITasksOnlyWhenShippingToAForge(t *testing.T) {
+	root := t.TempDir()
+	writeTasks(t, root, "add-login", "# Tasks\n\n## 1. Build\n\n- [ ] 1.1 Add it\n- [ ] 1.2 Go tests pass on Linux, macOS and Windows CI\n")
+	const line = "are ticked when shipping finds CI green on the merge request"
+	for _, forge := range []bool{false, true} {
+		b := Brief{Change: "add-login", Step: "build", Role: "builder", Round: 1, Root: root, ResultPath: "r.json", ShipsToForge: forge}
+		text, err := b.Render()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(text, line); got != forge {
+			t.Errorf("ships to forge %v: brief has the CI line %v:\n%s", forge, got, text)
+		}
+	}
+}

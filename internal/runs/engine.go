@@ -571,6 +571,7 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 			Permissions: e.Config.PermissionArgs(st),
 			Worktree:    ws.Path, State: ws.State, Base: rs.Base,
 			Earlier: rs.Earlier(), Scope: rs.Scope,
+			ShipsToForge: shipsToForge(e.Config.Ship),
 		}, opts)
 		rs.AgentPid = 0
 		switch {
@@ -643,7 +644,7 @@ func (e *Engine) ship(ctx context.Context, ws Workspace, rs *Run) (*Run, error) 
 	}
 	// Shipping to a forge ticks CI tasks once CI is green, so they don't
 	// hold the run back; in local mode they count as before.
-	toForge := e.Config.Ship != "" && e.Config.Ship != config.ShipLocal
+	toForge := shipsToForge(e.Config.Ship)
 	var left []string
 	if !archived {
 		if rs.Scope != nil {
