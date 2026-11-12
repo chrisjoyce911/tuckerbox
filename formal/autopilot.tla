@@ -7,6 +7,9 @@
 \* approval rule: a start needs the change approved; a crash resume needs
 \* it not unapproved (a stale approval from the run's own steps is fine).
 \* Crash resumes are limited per crash streak, counted from history.
+\* A change can be archived on the default branch some other way (merged by
+\* hand); autopilot then closes its run if no agent runs (openspec change
+\* fix-factory-gaps). A person can close a run by hand.
 EXTENDS Naturals
 
 CONSTANTS Changes, Groups, MaxAutoResumes, MaxAttempt
@@ -15,7 +18,11 @@ None == "none"
 
 \* Run states. "stopped" is a stop by a person; "crashed" is a run whose
 \* process died. "done" means every group ran and the run went on to ship.
-States == {"new", "active", "ready", "blocked", "stopped", "crashed", "done"}
+\* "closed" is merged elsewhere or closed by a person.
+States == {"new", "active", "ready", "blocked", "stopped", "crashed", "done", "closed"}
+
+\* Runs with no agent running that may be closed.
+Closable == {"ready", "blocked", "stopped", "crashed"}
 
 Approvals == {"approved", "stale", "none"}
 
@@ -24,36 +31,41 @@ VARIABLES
   attempt,    \* run.json's since: changes on every state change
   approval,   \* approval state per change, from the files
   left,       \* task groups not yet ticked
+  archived,   \* the change is archived on the fetched default branch
   streak,     \* autopilot resumes since the run's last progress or person action (history)
   pc,         \* autopilot: "idle" or "read"
   target,     \* the change autopilot looked at
-  seen,       \* what it saw: [st, at, ap]
+  seen,       \* what it saw: [st, at, ap, ar]
   badStart,   \* autopilot started a change that was not approved or not startable
   badResume,  \* autopilot resumed a run that was not crashed, or was unapproved
-  badStale    \* autopilot acted on an attempt other than the one it saw
+  badStale,   \* autopilot acted on an attempt other than the one it saw
+  badClose    \* autopilot closed a run with an agent, or of a change not archived
 
-vars == <<state, attempt, approval, left, streak, pc, target, seen,
-          badStart, badResume, badStale>>
+vars == <<state, attempt, approval, left, archived, streak, pc, target, seen,
+          badStart, badResume, badStale, badClose>>
 
 Init ==
   /\ state = [c \in Changes |-> "new"]
   /\ attempt = [c \in Changes |-> 0]
   /\ approval \in [Changes -> {"approved", "none"}]
   /\ left = [c \in Changes |-> Groups]
+  /\ archived = [c \in Changes |-> FALSE]
   /\ streak = [c \in Changes |-> 0]
   /\ pc = "idle"
   /\ target = None
-  /\ seen = [st |-> "new", at |-> 0, ap |-> "none"]
+  /\ seen = [st |-> "new", at |-> 0, ap |-> "none", ar |-> FALSE]
   /\ badStart = FALSE
   /\ badResume = FALSE
   /\ badStale = FALSE
+  /\ badClose = FALSE
 
 \* Every run.json write of a new state gets a new since.
 Move(c, s) ==
   /\ state' = [state EXCEPT ![c] = s]
   /\ attempt' = [attempt EXCEPT ![c] = attempt[c] + 1]
 
-AutoUnchanged == UNCHANGED <<pc, target, seen, badStart, badResume, badStale>>
+\* Autopilot's variables, and the archive, which only the actions below change.
+AutoUnchanged == UNCHANGED <<pc, target, seen, badStart, badResume, badStale, badClose, archived>>
 
 \* ---- The run (engine), one group per run attempt ----
 
@@ -93,8 +105,9 @@ Approve(c) ==
 
 \* tuckerbox run by hand (the run gate passes).
 PersonStart(c) ==
-  /\ state[c] \in {"new", "ready"}
+  /\ state[c] \in {"new", "ready", "closed"}
   /\ approval[c] = "approved"
+  /\ ~archived[c]
   /\ Move(c, "active")
   /\ streak' = [streak EXCEPT ![c] = 0]
   /\ UNCHANGED <<approval, left>> /\ AutoUnchanged
@@ -111,6 +124,22 @@ PersonResume(c) ==
   /\ streak' = [streak EXCEPT ![c] = 0]
   /\ UNCHANGED <<approval, left>> /\ AutoUnchanged
 
+\* tuckerbox close: a run with no agent running.
+PersonClose(c) ==
+  /\ state[c] \in Closable
+  /\ Move(c, "closed")
+  /\ UNCHANGED <<approval, left, streak>> /\ AutoUnchanged
+
+\* ---- Someone else ----
+
+\* The change is archived on the default branch (merged by hand), at any
+\* time, even while its run is active.
+ArchiveElsewhere(c) ==
+  /\ ~archived[c]
+  /\ archived' = [archived EXCEPT ![c] = TRUE]
+  /\ UNCHANGED <<state, attempt, approval, left, streak, pc, target, seen,
+                 badStart, badResume, badStale, badClose>>
+
 \* ---- Autopilot ----
 
 \* A pass reads one change's run.json and approval (not atomic with acting).
@@ -118,17 +147,19 @@ Look(c) ==
   /\ pc = "idle"
   /\ pc' = "read"
   /\ target' = c
-  /\ seen' = [st |-> state[c], at |-> attempt[c], ap |-> approval[c]]
-  /\ UNCHANGED <<state, attempt, approval, left, streak, badStart, badResume, badStale>>
+  /\ seen' = [st |-> state[c], at |-> attempt[c], ap |-> approval[c], ar |-> archived[c]]
+  /\ UNCHANGED <<state, attempt, approval, left, archived, streak, badStart, badResume, badStale, badClose>>
 
 \* The engine's checks, under the change lock.
 StillAsSeen(c) == state[c] = seen.st /\ attempt[c] = seen.at
-StartGate(c) == approval[c] = "approved"
-ResumeGate(c) == approval[c] # "none"
+StartGate(c) == approval[c] = "approved" /\ ~archived[c]
+ResumeGate(c) == approval[c] # "none" /\ ~archived[c]
+CloseGate(c) == StillAsSeen(c) /\ archived[c]
 Budget(c) == streak[c] < MaxAutoResumes
 
-WantsStart == seen.st \in {"new", "ready"} /\ seen.ap = "approved"
-WantsResume == seen.st = "crashed" /\ seen.ap # "none"
+WantsStart == seen.st \in {"new", "ready"} /\ seen.ap = "approved" /\ ~seen.ar
+WantsResume == seen.st = "crashed" /\ seen.ap # "none" /\ ~seen.ar
+WantsClose == seen.st \in Closable /\ seen.ar
 
 \* Start (or start the next group).
 AutoStart ==
@@ -139,11 +170,12 @@ AutoStart ==
   /\ IF StillAsSeen(c) /\ StartGate(c)
        THEN /\ Move(c, "active")
             /\ streak' = [streak EXCEPT ![c] = 0]
-            /\ badStart' = (badStart \/ state[c] \notin {"new", "ready"} \/ approval[c] # "approved")
+            /\ badStart' = (badStart \/ state[c] \notin {"new", "ready"} \/ approval[c] # "approved"
+                             \/ archived[c])
             /\ badStale' = (badStale \/ attempt[c] # seen.at)
        ELSE UNCHANGED <<state, attempt, streak, badStart, badStale>>
   /\ pc' = "idle"
-  /\ UNCHANGED <<approval, left, target, seen, badResume>>
+  /\ UNCHANGED <<approval, left, archived, target, seen, badResume, badClose>>
 
 \* Resume a crashed run, within the crash budget.
 AutoResume ==
@@ -154,32 +186,47 @@ AutoResume ==
   /\ IF StillAsSeen(c) /\ ResumeGate(c) /\ Budget(c)
        THEN /\ Move(c, "active")
             /\ streak' = [streak EXCEPT ![c] = streak[c] + 1]
-            /\ badResume' = (badResume \/ state[c] # "crashed" \/ approval[c] = "none")
+            /\ badResume' = (badResume \/ state[c] # "crashed" \/ approval[c] = "none" \/ archived[c])
             /\ badStale' = (badStale \/ attempt[c] # seen.at)
        ELSE UNCHANGED <<state, attempt, streak, badResume, badStale>>
   /\ pc' = "idle"
-  /\ UNCHANGED <<approval, left, target, seen, badStart>>
+  /\ UNCHANGED <<approval, left, archived, target, seen, badStart, badClose>>
+
+\* Close the run of a change archived elsewhere, if no agent runs.
+AutoClose ==
+  LET c == target IN
+  /\ pc = "read"
+  /\ WantsClose
+  /\ state[c] # "active"
+  /\ IF CloseGate(c)
+       THEN /\ Move(c, "closed")
+            /\ badClose' = (badClose \/ state[c] \notin Closable \/ ~archived[c])
+            /\ badStale' = (badStale \/ attempt[c] # seen.at)
+       ELSE UNCHANGED <<state, attempt, badClose, badStale>>
+  /\ pc' = "idle"
+  /\ UNCHANGED <<approval, left, archived, streak, target, seen, badStart, badResume>>
 
 \* Nothing to do for what it saw, or the change lock is taken.
 AutoSkip ==
   /\ pc = "read"
-  /\ ~((WantsStart \/ WantsResume) /\ state[target] # "active")
+  /\ ~((WantsStart \/ WantsResume \/ WantsClose) /\ state[target] # "active")
   /\ pc' = "idle"
-  /\ UNCHANGED <<state, attempt, approval, left, streak, target, seen,
-                 badStart, badResume, badStale>>
+  /\ UNCHANGED <<state, attempt, approval, left, archived, streak, target, seen,
+                 badStart, badResume, badStale, badClose>>
 
 \* Autopilot exits and is started again: it forgets what it saw. The
 \* streak is in history, so it survives.
 Restart ==
   /\ pc' = "idle"
-  /\ UNCHANGED <<state, attempt, approval, left, streak, target, seen,
-                 badStart, badResume, badStale>>
+  /\ UNCHANGED <<state, attempt, approval, left, archived, streak, target, seen,
+                 badStart, badResume, badStale, badClose>>
 
 Next ==
   \/ \E c \in Changes :
        Finish(c) \/ Block(c) \/ Crash(c) \/ EditText(c) \/ Approve(c)
-       \/ PersonStart(c) \/ PersonStop(c) \/ PersonResume(c) \/ Look(c)
-  \/ AutoStart \/ AutoResume \/ AutoSkip \/ Restart
+       \/ PersonStart(c) \/ PersonStop(c) \/ PersonResume(c) \/ PersonClose(c)
+       \/ ArchiveElsewhere(c) \/ Look(c)
+  \/ AutoStart \/ AutoResume \/ AutoClose \/ AutoSkip \/ Restart
 
 Spec == Init /\ [][Next]_vars
 
@@ -190,6 +237,7 @@ TypeOK ==
   /\ state \in [Changes -> States]
   /\ approval \in [Changes -> Approvals]
   /\ left \in [Changes -> 0..Groups]
+  /\ archived \in [Changes -> BOOLEAN]
   /\ streak \in [Changes -> Nat]
   /\ pc \in {"idle", "read"}
 
@@ -208,4 +256,8 @@ ActsOnSeenAttempt == ~badStale
 \* autopilot: Crashed runs. Autopilot resumes at most MaxAutoResumes times
 \* per crash streak, whatever the rounds.
 CrashBudget == \A c \in Changes : streak[c] <= MaxAutoResumes
+
+\* run-closing: Runs of changes merged elsewhere. Autopilot closes only a
+\* run with no agent running whose change is archived.
+ClosesOnlyIdleArchived == ~badClose
 =============================================================================
