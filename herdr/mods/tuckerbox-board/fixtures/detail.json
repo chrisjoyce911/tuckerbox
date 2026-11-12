@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "repo": "github.com/example/shop",
+  "path": "/work/shop",
+  "machine": "studio",
+  "require_approval": true,
+  "columns": [
+    { "id": "proposed", "kind": "proposed", "name": "Proposed" },
+    { "id": "approved", "kind": "approved", "name": "Approved" },
+    { "id": "queued", "kind": "queued", "name": "Queued" },
+    { "id": "step:plan", "kind": "step", "step": "plan", "name": "Plan" },
+    { "id": "step:build", "kind": "step", "step": "build", "name": "Build" },
+    { "id": "step:review", "kind": "step", "step": "review", "name": "Review" },
+    { "id": "ready", "kind": "ready", "name": "Ready" },
+    { "id": "done", "kind": "done", "name": "Done" }
+  ],
+  "cards": [
+    {
+      "change": "add-login-page",
+      "title": "add login page",
+      "column": "step:review",
+      "tasks": { "done": 3, "total": 5 },
+      "approval": { "state": "approved", "by": "Sam Example", "at": "2026-11-10T09:00:00+10:00", "committed": true },
+      "state": "blocked",
+      "reason": "review limit reached",
+      "step": "review",
+      "agent": "codex",
+      "round": 3,
+      "since": "2026-11-12T08:15:30+10:00",
+      "branch": "tuckerbox/add-login-page",
+      "worktree": "/work/shop-worktrees/add-login-page",
+      "machine": "studio",
+      "edit_folder": "/work/shop-worktrees/add-login-page",
+      "depends_on": [{ "change": "add-users", "column": "step:build" }]
+    }
+  ],
+  "detail": {
+    "change": "add-login-page",
+    "proposal": "# Proposal\n\n## Why\n\nPeople can't sign in from the shop's front page. They have to find the account page first.\n\n## What Changes\n\n- A **login page** at `/login` with email and password.\n- A sign-in link in the header.\n- Wrong passwords show one message, without saying which field was wrong.\n\n## Impact\n\n- Depends on `add-users`.\n",
+    "specs": [
+      { "capability": "login", "text": "## ADDED Requirements\n\n### Requirement: Login page\nThe shop SHALL show a login page at `/login`.\n" },
+      { "capability": "header", "text": "## ADDED Requirements\n\n### Requirement: Sign-in link\nThe header SHALL show a sign-in link to people who are not signed in.\n" }
+    ],
+    "tasks": [
+      { "number": "1.1", "group": "1. Page", "text": "Route `/login` and its template", "checked": true },
+      { "number": "1.2", "group": "1. Page", "text": "Form with email and password", "checked": true },
+      { "number": "2.1", "group": "2. Sign in", "text": "Check the password against the users table", "checked": true },
+      { "number": "2.2", "group": "2. Sign in", "text": "One message for a wrong email or password", "checked": false },
+      { "number": "3.1", "group": "3. Header", "text": "Sign-in link for people who are not signed in", "checked": false }
+    ],
+    "rounds": [
+      {
+        "round": 1,
+        "result": "rejected",
+        "step": "review",
+        "summary": "The form posts the password in the query string.",
+        "findings": [
+          { "severity": "high", "file": "web/login.go", "detail": "The form uses GET, so the password ends up in the access log." },
+          { "severity": "medium", "file": "web/templates/login.html", "detail": "The error message says which field was wrong." }
+        ],
+        "ended": "2026-11-11T16:02:00+10:00"
+      },
+      {
+        "round": 2,
+        "result": "rejected",
+        "step": "review",
+        "summary": "One finding left.",
+        "findings": [
+          { "severity": "medium", "file": "web/templates/login.html", "detail": "The error message still differs for an unknown email." }
+        ],
+        "ended": "2026-11-12T07:40:00+10:00"
+      },
+      {
+        "round": 3,
+        "result": "blocked",
+        "step": "review",
+        "summary": "Review limit reached.",
+        "findings": [
+          { "severity": "low", "file": "", "detail": "Task 2.2 is still open." }
+        ],
+        "ended": "2026-11-12T08:15:30+10:00"
+      }
+    ],
+    "history": [
+      { "at": "2026-11-11T14:00:00+10:00", "event": "started", "step": "", "round": 1, "agent": "", "machine": "studio" },
+      { "at": "2026-11-11T14:00:02+10:00", "event": "step_started", "step": "build", "round": 1, "agent": "claude", "machine": "studio" },
+      { "at": "2026-11-11T15:20:00+10:00", "event": "step_finished", "step": "build", "round": 1, "agent": "claude", "machine": "studio", "result": "done" },
+      { "at": "2026-11-11T15:20:00+10:00", "event": "handoff", "step": "build", "round": 1, "agent": "claude", "machine": "studio", "to": "review", "summary": "Login page and form done; sign-in link next." },
+      { "at": "2026-11-11T15:20:01+10:00", "event": "step_started", "step": "review", "round": 1, "agent": "codex", "machine": "studio" },
+      { "at": "2026-11-11T16:02:00+10:00", "event": "rejected", "step": "review", "round": 1, "agent": "codex", "machine": "studio", "summary": "The form posts the password in the query string.", "findings": [
+        { "severity": "high", "file": "web/login.go", "detail": "The form uses GET, so the password ends up in the access log." },
+        { "severity": "medium", "file": "web/templates/login.html", "detail": "The error message says which field was wrong." }
+      ] },
+      { "at": "2026-11-11T16:02:01+10:00", "event": "step_started", "step": "build", "round": 2, "agent": "claude", "machine": "studio" },
+      { "at": "2026-11-11T17:30:00+10:00", "event": "stopped", "step": "build", "round": 2, "agent": "claude", "machine": "studio" },
+      { "at": "2026-11-12T07:00:00+10:00", "event": "resumed", "step": "build", "round": 2, "agent": "claude", "machine": "studio" },
+      { "at": "2026-11-12T07:20:00+10:00", "event": "step_finished", "step": "build", "round": 2, "agent": "claude", "machine": "studio", "result": "done" },
+      { "at": "2026-11-12T07:20:00+10:00", "event": "handoff", "step": "build", "round": 2, "agent": "claude", "machine": "studio", "to": "review", "summary": "Form posts now; messages merged." },
+      { "at": "2026-11-12T07:20:01+10:00", "event": "step_started", "step": "review", "round": 2, "agent": "codex", "machine": "studio" },
+      { "at": "2026-11-12T07:40:00+10:00", "event": "rejected", "step": "review", "round": 2, "agent": "codex", "machine": "studio", "summary": "One finding left.", "findings": [
+        { "severity": "medium", "file": "web/templates/login.html", "detail": "The error message still differs for an unknown email." }
+      ] },
+      { "at": "2026-11-12T07:40:01+10:00", "event": "step_started", "step": "build", "round": 3, "agent": "claude", "machine": "studio" },
+      { "at": "2026-11-12T08:00:00+10:00", "event": "handoff", "step": "build", "round": 3, "agent": "claude", "machine": "studio", "to": "review", "summary": "Unknown email gets the same message." },
+      { "at": "2026-11-12T08:00:01+10:00", "event": "step_started", "step": "review", "round": 3, "agent": "codex", "machine": "studio" },
+      { "at": "2026-11-12T08:15:30+10:00", "event": "blocked", "step": "review", "round": 3, "agent": "codex", "machine": "studio", "reason": "review limit reached" }
+    ]
+  }
+}
