@@ -3,8 +3,8 @@
 //
 // The board never writes a file or run state itself (herdr-board: Actions go
 // through Tuckerbox). Every action is a `tuckerbox` command on the card's
-// machine; the two Herdr-only ones (Open proposal, Open worktree) open a view
-// and change nothing.
+// machine; the Herdr-only ones (Open proposal, Open worktree, Watch) open or
+// focus a view and change nothing.
 import { isActive } from "./model.js";
 
 export const ACTIONS = {
@@ -16,6 +16,7 @@ export const ACTIONS = {
   resume: { label: "Resume", primary: true },
   rerun: { label: "Re-run step" },
   follow: { label: "Follow log ↗" },
+  watch: { label: "Watch ↗", primary: true },
   proposal: { label: "Open proposal" },
   worktree: { label: "Open worktree" },
   edit: { label: "Edit" },
@@ -74,6 +75,7 @@ export function commandLine(action, change, extra = {}) {
     case "mr":
     case "proposal":
     case "worktree":
+    case "watch":
       return null;
     default:
       throw new Error(`unknown action ${JSON.stringify(action)}`);
@@ -95,7 +97,18 @@ export function invocation(action, card, extra = {}) {
   if (action === "edit") out.title = `edit ${card?.change} ${extra.file}`;
   if (action === "proposal") out.file = card?.edit_folder ? `${card.edit_folder}/openspec/changes/${card.change}/proposal.md` : "";
   if (action === "worktree") out.folder = card?.worktree ?? "";
+  if (action === "watch") {
+    const addr = card?.activity?.terminal?.address ?? "";
+    if (!/^[A-Za-z0-9._-]+$/.test(addr)) throw new Error("Watch needs the agent's terminal address");
+    out.terminal = addr;
+  }
   return out;
+}
+
+// agent-terminals: Watch from the board. A running card whose agent works in
+// a herdr-core terminal offers Watch; one running headless keeps Follow log.
+export function watchable(card) {
+  return card?.state === "running" && card?.activity?.backend === "terminal" && Boolean(card.activity.terminal?.address);
 }
 
 // The actions a card offers in its detail, in button order. `board` gives
@@ -113,7 +126,8 @@ export function detailActions(card, board) {
   if (card.state === "stopped" || card.state === "blocked" || (card.state==="ready" && board?.ship==="mr" && card.mr?.state==="open")) out.push("resume");
   if (["stopped", "blocked", "failed", "ready"].includes(card.state) && rerunSteps(card, board).length) out.push("rerun");
   if (active) out.push("stop");
-  if (card.step && ["running", "blocked", "stopped", "failed"].includes(card.state)) out.push("follow");
+  if (watchable(card)) out.push("watch");
+  else if (card.step && ["running", "blocked", "stopped", "failed"].includes(card.state)) out.push("follow");
   if (!active && card.approval.state !== "approved") out.push("approve");
   if (!active && card.approval.state === "approved") out.push("unapprove");
   if (card.edit_folder) out.push("proposal");
@@ -138,7 +152,7 @@ export function runGroups(card, board, detail) {
 // The one or two buttons on the card itself: what moves it on.
 export function cardActions(card, board) {
   const all = detailActions(card, board);
-  const pick = ["start", "approve", "resume", "stop"].filter((a) => all.includes(a));
+  const pick = ["start", "approve", "resume", "watch", "stop"].filter((a) => all.includes(a));
   if (!pick.length && all.includes("rerun") && card.state === "failed") pick.push("rerun");
   // Start not offered before approval: Approve is the way on (and only it).
   return pick.slice(0, 2);
@@ -192,6 +206,10 @@ export function herdrCall(inv, ctx = {}) {
     case "pane":
       return here ? { command: "terminal.open", args: { argv: inv.argv, folder: inv.cwd, place: "right", name } } : elsewhere();
     case "view":
+      // Watch: Herdr focuses the agent's terminal and opens its tab (from its
+      // herdr.space and herdr.tab labels) if it isn't showing. A terminal on
+      // another machine is addressed as <machine>/<address>.
+      if (inv.action === "watch") return { command: "agent.focus", args: { terminal: inv.on ? `${inv.on}/${inv.terminal}` : inv.terminal } };
       if (inv.action === "proposal") {
         return { command: "pane.split", args: { direction: "right", mod: ctx.mod, props: { view: "proposal", change: inv.change, card: inv.card, board: inv.board } } };
       }

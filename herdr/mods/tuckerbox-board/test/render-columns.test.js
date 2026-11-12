@@ -22,7 +22,7 @@ const node = () => new Proxy({ text: [], ids: [] }, { get(target, key, receiver)
 const div = node, h_flex = node, v_flex = node;
 const theme = () => ({}), needsYou = () => false, cardActions = () => [], defaultStep = () => "";
 const stateChip = node, approvalChip = node, progressBar = node, editOf = () => null, editNote = () => null;
-const ago = () => "recently", columnName = () => "In progress";
+const ago = () => "recently", columnName = () => "In progress", activityLine = () => null;
 const sortedColumn = () => true, dropPosition = () => null, eventBox = () => null, liveDrop = () => null, priorityCard = (c) => c;
 `;
 const { BoardView } = await import(`data:text/javascript;base64,${Buffer.from(stubs + source.replace(/^import .*;\n/gm, "")).toString("base64")}`);

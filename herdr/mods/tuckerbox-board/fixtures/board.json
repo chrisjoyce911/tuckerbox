@@ -243,13 +243,8 @@
         "step_started": "2026-11-12T09:10:40+10:00",
         "run_started": "2026-11-12T09:10:30+10:00",
         "last_activity": "2026-11-12T09:14:02+10:00",
-        "agent_state": "waiting for you",
-        "backend": "terminal",
-        "terminal": {
-          "address": "t4k",
-          "name": "tb-1f0c2a9e7d3b5c81",
-          "machine": "studio"
-        }
+        "agent_state": "working",
+        "backend": "headless"
       }
     },
     {
