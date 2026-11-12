@@ -65,10 +65,10 @@ async function look(cwd, on) {
   }
 }
 
-export function probe(cwd, on, now = Date.now()) {
+export function probe(cwd, on, now = Date.now(), fresh = false) {
   const key = `${on ?? ""}\0${cwd}`;
   const hit = probes.get(key);
-  if (hit && now - hit.at < hit.ttl) return hit.result;
+  if (!fresh && hit && now - hit.at < hit.ttl) return hit.result;
   const entry = { at: now, ttl: PROBE_MS.no, result: null };
   entry.result = look(cwd, on).then((r) => { entry.ttl = r?.config ? PROBE_MS.yes : PROBE_MS.no; return r; });
   probes.set(key, entry);
@@ -77,9 +77,14 @@ export function probe(cwd, on, now = Date.now()) {
 
 // Where the board reads, for this copy: { found, root, cwd, on, space }.
 // `c` is the candidates a caller already took, so the read is tied to them.
-export async function locate(self = null, c = candidates(self)) {
-  const found = await Promise.all(c.cwds.map((cwd) => probe(cwd, c.on)));
-  return pickRepo(c, found);
+export async function locate(self = null, c = candidates(self), { includeUnconfigured = false, fresh = false } = {}) {
+  const found = await Promise.all(c.cwds.map((cwd) => probe(cwd, c.on, Date.now(), fresh)));
+  const at = pickRepo(c, found);
+  if (!at.found && includeUnconfigured) {
+    const repo = found.find((r) => r?.root);
+    if (repo) return { ...at, root: repo.root, cwd: repo.root };
+  }
+  return at;
 }
 
 async function tuckerbox(args, { cwd, on }, timeout = 20000) {

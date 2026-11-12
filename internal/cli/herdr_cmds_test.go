@@ -223,3 +223,67 @@ func TestDoctorReportsTheBoardMod(t *testing.T) {
 		t.Errorf("out %q", out2)
 	}
 }
+
+func TestHerdrTopbarNoTabsInstallsModButLeavesLayout(t *testing.T) {
+	home := herdrHomeWithLayout(t, `{"global":{}}`)
+	a, out, errOut := herdrApp(t, home)
+	before, _ := os.ReadFile(filepath.Join(home, "layouts", "mine.json"))
+	if code := a.Run([]string{"herdr", "install", "--topbar"}); code != 1 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	if !strings.Contains(out.String(), "installed the board mod") || !strings.Contains(out.String(), `"block": "tuckerbox-bar"`) || !strings.Contains(errOut.String(), "add the printed block by hand") {
+		t.Fatalf("%s %s", out, errOut)
+	}
+	after, _ := os.ReadFile(filepath.Join(home, "layouts", "mine.json"))
+	if !bytes.Equal(before, after) {
+		t.Fatal("layout changed")
+	}
+	if _, err := os.Stat(filepath.Join(home, "mods", "tuckerbox-board", "main.js")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHerdrTopbarNeedsRunningAppBeforeInstall(t *testing.T) {
+	home := t.TempDir()
+	a, out, errOut := herdrApp(t, home)
+	a.HerdrEnv.Reach = func(context.Context) error { return errors.New("offline") }
+	if code := a.Run([]string{"herdr", "install", "--topbar"}); code != 1 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	if !strings.Contains(errOut.String(), "--topbar") {
+		t.Fatal(errOut)
+	}
+	entries, _ := os.ReadDir(home)
+	if len(entries) != 0 {
+		t.Fatal("changed files")
+	}
+}
+
+func TestHerdrTopbarDrawerInstallUninstall(t *testing.T) {
+	home := herdrHomeWithLayout(t, `{"global":{}}`)
+	layout := `{ "id":"root", "type":"column", "children":[{"id":"tabs","type":"block","size":{"px":42}},{"id":"panel-body","type":"stack","children":[{"id":"files","type":"block"},{"id":"changes","type":"block"}]}] }`
+	path := filepath.Join(home, "layouts", "mine.json")
+	if err := os.WriteFile(path, []byte(layout), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a, out, errOut := herdrApp(t, home)
+	if code := a.Run([]string{"herdr", "install", "--topbar", "--drawer"}); code != 0 {
+		t.Fatalf("exit %d: %s %s", code, out, errOut)
+	}
+	b, _ := os.ReadFile(path)
+	for _, id := range []string{"tuckerbox-bar", "tuckerbox-panel", "tuckerbox-drawer"} {
+		if !strings.Contains(string(b), id) {
+			t.Fatalf("missing %s", id)
+		}
+	}
+	if code := a.Run([]string{"herdr", "uninstall"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	b, _ = os.ReadFile(path)
+	if string(b) != layout {
+		t.Fatal("layout bytes not restored")
+	}
+	if _, err := os.Stat(filepath.Join(home, "mods", "tuckerbox-board")); !os.IsNotExist(err) {
+		t.Fatal("mod not removed")
+	}
+}

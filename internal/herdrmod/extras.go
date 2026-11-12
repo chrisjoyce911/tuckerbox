@@ -52,9 +52,10 @@ type DrawerRecord struct {
 	Layout string `json:"layout"`
 	// ClonedFrom is the shipped layout install cloned (layout.clone) to make
 	// Layout; empty when Layout was already the person's own.
-	ClonedFrom string `json:"cloned_from,omitempty"`
-	Before     string `json:"before"`
-	After      string `json:"after"`
+	ClonedFrom string   `json:"cloned_from,omitempty"`
+	Before     string   `json:"before"`
+	After      string   `json:"after"`
+	Blocks     []string `json:"blocks,omitempty"`
 }
 
 func recordPath(home string) string { return filepath.Join(home, RecordFile) }
@@ -155,9 +156,13 @@ func herdrAppReach(ctx context.Context) error {
 // to clone a shipped layout and to switch back if the install is undone.
 func Preconditions(ctx context.Context, env Env, opt Options) error {
 	env = env.withDefaults()
-	if opt.Drawer {
+	if opt.Drawer || opt.Topbar {
+		flag := "--drawer"
+		if opt.Topbar {
+			flag = "--topbar"
+		}
 		if err := env.Reach(ctx); err != nil {
-			return fmt.Errorf("%w for --drawer, and it can't be reached (%v); nothing was changed: open Herdr and run this again", ErrHerdrNotRunning, err)
+			return fmt.Errorf("%w for %s, and it can't be reached (%v); nothing was changed: open Herdr and run this again", ErrHerdrNotRunning, flag, err)
 		}
 	}
 	return nil
@@ -482,7 +487,12 @@ func installDrawer(home string, rec *Record, t *txn) (string, error) {
 		}
 	}
 	name := shownLayout(home)
-	d := &DrawerRecord{Layout: name}
+	d := rec.Drawer
+	if d == nil {
+		d = &DrawerRecord{Layout: name}
+	} else {
+		name = d.Layout
+	}
 	if shippedLayout(home, name) {
 		as := name + "-tuckerbox"
 		for i := 2; ; i++ {
@@ -510,7 +520,19 @@ func installDrawer(home string, rec *Record, t *txn) (string, error) {
 	if err := t.write("layouts/"+d.Layout+".json", after); err != nil {
 		return "", err
 	}
-	d.Before, d.After = string(before), sum(after)
+	if d.Before == "" {
+		d.Before = string(before)
+	} else if sum(before) != d.After {
+		base, _ := parseOrdered(before)
+		ids := d.Blocks
+		if len(ids) == 0 {
+			ids = []string{DrawerID}
+		}
+		removeLayoutBlocks(base.(*obj), ids)
+		d.Before = string(encodeOrdered(base))
+	}
+	d.After = sum(after)
+	d.Blocks = append(d.Blocks, DrawerID)
 	rec.Drawer = d
 	if d.ClonedFrom != "" {
 		return fmt.Sprintf("added the drawer to layout %s, a copy of Herdr's %s (now shown)", d.Layout, d.ClonedFrom), nil
@@ -554,31 +576,18 @@ func uninstallDrawer(ctx context.Context, home string, env Env, d *DrawerRecord)
 	if err != nil {
 		return fmt.Sprintf("layout %s changed since install and can't be read now (%v); left as it is", d.Layout, err), nil
 	}
-	if !hasDrawer(root) {
-		return fmt.Sprintf("layout %s no longer has the drawer; left as it is", d.Layout), nil
+	blocks := d.Blocks
+	if len(blocks) == 0 {
+		blocks = []string{DrawerID}
 	}
-	f, _ := root.vals["floating"].([]any)
-	var keep []any
-	for _, x := range f {
-		if o, ok := x.(*obj); ok {
-			if id, _ := o.vals["id"].(string); id == DrawerID {
-				continue
-			}
-		}
-		keep = append(keep, x)
-	}
-	if len(keep) == 0 {
-		root.del("floating")
-	} else {
-		root.set("floating", keep)
-	}
+	removeLayoutBlocks(root, blocks)
 	if err := replaceFile(path, encodeOrdered(root)); err != nil {
 		return "", err
 	}
 	if d.ClonedFrom != "" {
-		return fmt.Sprintf("removed the drawer from layout %s; kept the layout, since it changed since install", d.Layout), nil
+		return fmt.Sprintf("removed recorded Tuckerbox blocks from layout %s; kept the layout, since it changed since install", d.Layout), nil
 	}
-	return fmt.Sprintf("removed the drawer from layout %s (it changed since install, so the rest stays)", d.Layout), nil
+	return fmt.Sprintf("removed recorded Tuckerbox blocks from layout %s (it changed since install, so the rest stays)", d.Layout), nil
 }
 
 // ---- install extras, uninstall ----
@@ -588,6 +597,7 @@ type Options struct {
 	Keys   bool   // bind the toggle key (the mod's keys.json)
 	Key    string // a key other than the shipped one
 	Drawer bool   // add the drawer to the shown layout
+	Topbar bool   // add the top bar and side panel
 }
 
 // InstallExtras makes the opt-in changes, after Install. It holds the
@@ -628,6 +638,7 @@ func InstallExtras(ctx context.Context, env Env, opt Options) ([]string, error) 
 	t := newTxn(ctx, home, env, "install")
 	var steps []string
 	var clash *KeyClash
+	var topbarErr error
 	err = func() error {
 		if opt.Keys {
 			msg, err := installKeys(home, env, rec, opt.Key, t)
@@ -647,6 +658,15 @@ func InstallExtras(ctx context.Context, env Env, opt Options) ([]string, error) 
 			}
 			steps = append(steps, msg)
 		}
+		if opt.Topbar {
+			msg, e := installTopbar(home, rec, t)
+			if errors.Is(e, errNoTabs) {
+				topbarErr = e
+			} else if e != nil {
+				return e
+			}
+			steps = append(steps, msg)
+		}
 		return writeRecord(home, rec)
 	}()
 	if err != nil {
@@ -659,7 +679,7 @@ func InstallExtras(ctx context.Context, env Env, opt Options) ([]string, error) 
 	if clash != nil {
 		return did, clash
 	}
-	return did, nil
+	return did, topbarErr
 }
 
 // rollback undoes this run's journaled changes after cause failed, and says

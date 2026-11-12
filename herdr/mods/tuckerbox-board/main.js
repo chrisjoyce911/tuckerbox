@@ -12,11 +12,12 @@ import { props } from "herdr";
 import { BoardView } from "./board.js";
 import { CardView } from "./card.js";
 import { ProposalView } from "./proposal.js";
+import { BarView, BarMenuView } from "./bar.js";
 import { DrawerView } from "./drawer.js";
 
 export default class Main extends View {
   init(p, cx) {
-    const Inner = { card: CardView, proposal: ProposalView, drawer: DrawerView }[props()?.view] ?? BoardView;
+    const Inner = { card: CardView, proposal: ProposalView, drawer: DrawerView, bar: BarView, "bar-menu": BarMenuView, panel: BoardView }[props()?.view] ?? BoardView;
     this.inner = new Inner(p);
     this.inner.init?.(p, cx);
   }

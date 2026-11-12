@@ -33,7 +33,8 @@ tuckerbox doctor    # checks git, openspec and the agent CLIs (claude, codex)
 tuckerbox init      # writes a commented starter .tuckerbox/config.toml
 tuckerbox herdr install  # installs or updates the board mod in the Herdr app
                          # (--keys: a key to open and hide it; --drawer: a peek drawer,
-                         #  with Herdr running, else nothing changes)
+                         #  with Herdr running, else nothing changes; --topbar: a bar beside tabs
+                         #  and a board in the Files/Changes side panel)
 tuckerbox herdr uninstall  # undoes exactly what herdr install did
 tuckerbox check     # validates it, merged with this machine's config
 ```
@@ -182,6 +183,15 @@ In Herdr, the board looks like this with `columns = "steps"` (from the mod's
 fixtures, an example shop repository):
 
 ![The Tuckerbox board in Herdr: columns Proposed, Approved, Queued, Plan, Build, Review, Ready and Done, with one card per change](docs/herdr-board.png)
+
+With `tuckerbox herdr install --topbar`, the bar shows Tuckerbox, running and
+needs-you counts, and a menu for Board, Board in side panel, and Settings.
+In a git repository without a Tuckerbox config it offers **Set up Tuckerbox**,
+which opens a pane running `tuckerbox init`. Outside repositories it takes no
+space. Herdr must be running for `--topbar` or `--drawer`; asking for both
+shares a single clone of a shipped layout. `tuckerbox herdr uninstall` restores
+unchanged layouts byte for byte and removes only recorded blocks from layouts
+you edited afterward.
 
 Clicking a card opens its detail: proposal, tasks with tick boxes, approval,
 rounds, history and the actions its state allows.

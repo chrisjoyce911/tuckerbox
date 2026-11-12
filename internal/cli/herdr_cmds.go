@@ -10,13 +10,13 @@ import (
 	"github.com/chrisjoyce911/tuckerbox/internal/version"
 )
 
-const herdrUsage = "usage: tuckerbox herdr install [--keys [--key <key>]] [--drawer] | tuckerbox herdr uninstall"
+const herdrUsage = "usage: tuckerbox herdr install [--keys [--key <key>]] [--drawer] [--topbar] | tuckerbox herdr uninstall"
 
-// herdr: tuckerbox herdr install [--keys [--key <key>]] [--drawer], tuckerbox herdr uninstall
+// herdr: tuckerbox herdr install [--keys [--key <key>]] [--drawer] [--topbar], tuckerbox herdr uninstall
 func (a App) herdr(args []string) int {
-	var keys, drawer bool
+	var keys, drawer, topbar bool
 	var key string
-	pos, err := parseArgs(args, map[string]*bool{"keys": &keys, "drawer": &drawer}, map[string]*string{"key": &key})
+	pos, err := parseArgs(args, map[string]*bool{"keys": &keys, "drawer": &drawer, "topbar": &topbar}, map[string]*string{"key": &key})
 	if err != nil || len(pos) != 1 {
 		return a.usageErr("herdr", herdrUsage)
 	}
@@ -25,9 +25,9 @@ func (a App) herdr(args []string) int {
 		if key != "" && !keys {
 			return a.usageErr("herdr", "--key needs --keys")
 		}
-		return a.herdrInstall(herdrmod.Options{Keys: keys, Key: key, Drawer: drawer})
+		return a.herdrInstall(herdrmod.Options{Keys: keys, Key: key, Drawer: drawer, Topbar: topbar})
 	case "uninstall":
-		if keys || drawer || key != "" {
+		if keys || drawer || topbar || key != "" {
 			return a.usageErr("herdr", "uninstall takes no flags: it undoes what install recorded")
 		}
 		return a.herdrUninstall()
