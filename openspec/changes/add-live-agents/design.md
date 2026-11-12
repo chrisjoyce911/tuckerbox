@@ -87,6 +87,24 @@ The agent no longer dies with the run process. That changes run and stop concurr
 - **Stop.** With a live run process holding the lock, `stop` signals it as today, and that process ends the terminal and records `stopped`. With no process holding the lock (the run process died), `stop` takes the lock itself, ends the terminal by name, records `stopped`, and lets go. `terminals_broken_stopnokill` records `stopped` without ending the unwatched agent; TLC finds the stopped run with a live agent.
 - **Crash.** The OS frees the lock; the agent keeps working. `status` sees the run `running` with no live process (as today's crash detection does) and a live terminal, and shows `not watched`. `resume`, or autopilot's crash resume, adopts the terminal: no new round, no second agent, and the agent's result is accepted when its turn ends. With no live terminal, resume starts a new round as today.
 
+### Orphan agents keep their slot (`formal/liveslots.tla`)
+
+A parallel slot today is an OS lock (`slots/<n>.lock`) held by the run process. With an agent that outlives that process, a crash would free the slot while the agent keeps working, and a queued change could start a second agent beyond `max_parallel`. Adoption later can't undo that.
+
+Each slot gets a second lock, `slots/<n>.agent.lock`:
+- **Admission** takes the run lock of a slot, then tries its agent lock. If the agent lock is held, it lets go of the run lock and tries the next slot. A slot is free only when both are free.
+- **`tuckerbox agent-hold --slot <n> -- <argv>`** is what the terminal runs. It takes slot `n`'s agent lock, then starts the agent as its child and waits for it, passing its exit status through. It holds no other state and does no other work. When the agent exits, or `stop` kills the terminal, it exits and the OS frees the lock. It refuses to start the agent if the lock is held.
+- **Crash:** the run lock is freed; the agent lock is not. The slot stays taken while the agent lives.
+- **Adoption** reads the slot number from `run.json` and takes that slot's run lock. It needs no free slot, so it never waits behind queued changes for capacity it already has. An admission that is testing that slot holds its run lock only for a moment; adoption waits for it.
+- **Fleet slots** (`add-operating-modes`, machine-wide `fleet_capacity`) get the same pair. A dispatched run passes both slot numbers to `agent-hold`.
+
+Alternatives considered:
+- **Adopt before any admission.** Every admission would first look for orphaned agents in herdr-core (`hc ls`) and adopt or count them. But the check and the admission aren't atomic: a run process can die between them. It also makes admission depend on herdr-core being reachable.
+- **Hand the run lock to the agent's terminal.** OS locks can't be passed between processes, and releasing then retaking leaves a gap another admission can use.
+- **A keeper process per slot outside the terminal.** That is a daemon in all but name. `agent-hold` lives inside the agent's own terminal and ends with it.
+
+Headless agents stay as today, children of the run process, without `agent-hold`. A headless agent that outlives a killed run process is an existing gap, not one this change opens; `agent-hold` could cover it later.
+
 ### Answering a blocked run
 
 A step that reports `blocked` usually asks something: "I can't verify this without a live Herdr; should I keep the install rollback?" Today the only way to answer is to edit a file the agent will read, or to rerun and hope. Now:
@@ -126,7 +144,14 @@ The board mod's Watch calls Herdr's `agent.focus {terminal}` with the address fr
 | `Stop` with the lock held / free | `runs.Stop` → signal; or take the lock, `hc kill <name>`, write `stopped` |
 | `Crash` | the OS releasing the lock; the terminal untouched |
 
-`OneAgent` and `StoppedMeansNoAgent` are named by `agent-terminals` requirements. `scripts/tla-check.sh` runs every model and variant.
+| `liveslots` model | Code (under `internal/`) |
+|---|---|
+| `Admit`: both slot locks free | `runs.TrySlot`, testing `<n>.agent.lock` |
+| `Launch`: agent lock of the run's own slot | `tuckerbox agent-hold --slot <n>` |
+| `Crash`: run lock freed, agent lock kept | the OS releasing the run process's locks |
+| `Adopt`: run lock of the agent's slot | `resume`, slot number from `run.json` |
+
+`OneAgent`, `StoppedMeansNoAgent`, `WithinLimitLive` and `OrphanHoldsSlot` are named by `agent-terminals` requirements. `scripts/tla-check.sh` runs every model and variant.
 
 ## Risks / Trade-offs
 

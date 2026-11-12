@@ -41,6 +41,9 @@ change absorbs it.
   - `stop` ends the agent's terminal.
   - If Tuckerbox's run process dies while the agent works, the terminal
     keeps going. `resume` adopts it instead of starting a second agent.
+    The agent keeps its parallel slot while it lives: a small
+    `tuckerbox agent-hold` in its terminal holds the slot's agent lock, so
+    no other change is admitted in its place (`formal/liveslots.tla`).
   - TLA+ model `formal/terminals.tla` with two broken variants.
 - **Answer a blocked card:**
   - A run blocked with a question shows that question on its card.

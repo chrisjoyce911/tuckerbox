@@ -77,6 +77,28 @@ When a run's process died while its agent's terminal lives, `status` and the boa
 - **WHEN** the machine's `tuckerbox` process for `add-login` was killed while the build agent kept working in round 2, and the user runs `tuckerbox resume add-login`
 - **THEN** no new agent starts, the run is still round 2, and the build agent's result is accepted when its turn ends
 
+### Requirement: Orphan agents keep their slot
+Each parallel slot SHALL have a run lock and an agent lock. A terminal agent SHALL start through `tuckerbox agent-hold`, which takes its run's slot's agent lock before starting the agent and lives exactly as long as it. Admission SHALL take a slot only when both locks are free. A dispatched run's fleet slot SHALL work the same way. Model: `formal/liveslots.tla`, `WithinLimitLive`, `OrphanHoldsSlot`.
+
+#### Scenario: Crash, then another change queued
+- **WHEN** `max_parallel = 1`, `add-login`'s run process dies while its build agent keeps working, and `add-search` is queued
+- **THEN** `add-search` stays queued while that agent lives, and starts once the agent ends or is stopped
+
+#### Scenario: Crash with room for another change
+- **WHEN** `max_parallel = 2`, `add-login`'s run process dies while its agent keeps working, and `add-search` is queued
+- **THEN** `add-search` takes the other slot, and the two agents are the only ones running
+
+#### Scenario: Agent ends while orphaned
+- **WHEN** an orphaned agent's turn ends and its program exits
+- **THEN** its agent lock is free, and a queued change can take the slot
+
+### Requirement: Adoption takes the agent's own slot
+Adopting a live agent SHALL take the run lock of the slot whose agent lock that agent holds, recorded in `run.json`, and SHALL need no free slot. It SHALL wait while an admission briefly holds that run lock to test the agent lock.
+
+#### Scenario: Crash, another change admitted, then adoption
+- **WHEN** `max_parallel = 2`, `add-login`'s run process dies, `add-search` is admitted to the other slot, and the user runs `tuckerbox resume add-login`
+- **THEN** resume takes `add-login`'s own slot, no third agent starts, and both runs finish within the limit
+
 ### Requirement: Logs of a terminal agent
 `tuckerbox logs <change> [step] [--follow]` SHALL show the agent terminal's history through herdr-core while it lives. When the step ends, Tuckerbox SHALL append that history to the step's log file, so `logs` still works after the terminal is gone.
 
