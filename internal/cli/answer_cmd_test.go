@@ -251,7 +251,8 @@ func TestResumeWithTheDecision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != string(want) {
+	// Git on Windows may check the golden file out with CRLF endings.
+	if got != strings.ReplaceAll(string(want), "\r\n", "\n") {
 		t.Errorf("answers section differs from %s:\n--- got\n%s--- want\n%s", golden, got, want)
 	}
 	if strings.Index(got, decision) > strings.Index(got, "keep the backup") {
