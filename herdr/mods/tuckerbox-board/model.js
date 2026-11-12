@@ -551,6 +551,13 @@ export function otherMachines(list, own = null) {
     .map((m) => ({ name: m.name ?? null, reachable: m.layout !== "unavailable" }));
 }
 
+// Why exec of tuckerbox was rejected: "not_installed" when the machine
+// answered but tuckerbox couldn't start there (herdr-core: "cannot start
+// tuckerbox: No such file or directory"), else "unreachable".
+export function execFailure(message) {
+  return /cannot start|no such file|ENOENT/i.test(String(message ?? "")) ? "not_installed" : "unreachable";
+}
+
 // A repository with no remote has its checkout path as its key, and lives on
 // one machine only (design: Matching a repository across machines).
 export function sharedRepo(board) {
@@ -608,7 +615,10 @@ export function mergeBoards(own, others = []) {
     const b = o?.board;
     if (!b || b.error) {
       if (b?.error?.code === "repo_not_found") continue;
-      unreachable.push({ machine: o?.machine ?? null, message: b?.error?.message || "unreachable" });
+      const u = { machine: o?.machine ?? null, message: b?.error?.message || "unreachable" };
+      // A connected machine without tuckerbox is named as such, not as unreachable.
+      if (b?.error?.code === "not_installed") u.missing = true;
+      unreachable.push(u);
       continue;
     }
     if (b.repo !== own.repo) continue;

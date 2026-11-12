@@ -2,7 +2,7 @@
 // the dev flag, the fixtures next to this file. The board reads nothing else
 // (design: the mod calls the CLI, never the files).
 import { exec, readTextFile, appHome, props, spaces, panes, focused, machines } from "herdr";
-import { parseBoard, normaliseBoard, dirFromStack, repoCandidates, pickRepo, otherMachines, sharedRepo, mergeBoards, mainWorktreeOf } from "./model.js";
+import { parseBoard, normaliseBoard, dirFromStack, repoCandidates, pickRepo, otherMachines, sharedRepo, mergeBoards, mainWorktreeOf, execFailure } from "./model.js";
 
 export const MOD = "tuckerbox-board";
 
@@ -88,8 +88,9 @@ async function tuckerbox(args, { cwd, on }, timeout = 20000) {
     return parseBoard(r.stdout ?? "", r.stderr ?? "", r.code ?? 0, { on });
   } catch (e) {
     const msg = String(e?.message ?? e);
-    // exec rejects when the program can't start: tuckerbox isn't on that machine's PATH.
-    return { error: { code: "unreachable", message: msg } };
+    // exec rejects when the program can't start (tuckerbox isn't on that
+    // machine's PATH) or the machine can't be reached.
+    return { error: { code: execFailure(msg), message: msg } };
   }
 }
 
