@@ -196,6 +196,29 @@ Release(m) ==
   /\ UNCHANGED <<expired, tip, next, merged, seen, snap, snapTip, job, epoch, lease,
                  checked, grants, stalePush, staleMerge>>
 
+\* A person runs `tuckerbox claim release --force` on machine r for change c,
+\* at any moment, also while the holder is shipping. Like a take-over, it is
+\* one atomic push: it leases the fleet ref and removes the claim, and when the
+\* branch exists it leases the branch at the fetched tip and moves it to a new
+\* release commit, so the old holder's pushes and pinned merge stop matching.
+ReleaseTip(c) == next
+
+ForceRelease(r, c) ==
+  /\ pc[r] = "fetched"
+  /\ Held(snap[r], c)
+  /\ ~merged[c]
+  /\ version < MaxVersion
+  /\ snapTip[r][c] # 0 => next <= MaxCommits
+  /\ IF version = seen[r] /\ tip[c] = snapTip[r][c]
+       THEN /\ claim' = [snap[r] EXCEPT ![c] = [holder |-> None, epoch |-> snap[r][c].epoch]]
+            /\ version' = version + 1
+            /\ tip' = [tip EXCEPT ![c] = IF tip[c] = 0 THEN 0 ELSE ReleaseTip(c)]
+            /\ next' = IF tip[c] = 0 THEN next ELSE next + 1
+       ELSE UNCHANGED <<claim, version, tip, next>>
+  /\ pc' = [pc EXCEPT ![r] = "idle"]
+  /\ UNCHANGED <<expired, merged, seen, snap, snapTip, job, epoch, lease, checked,
+                 grants, stalePush, staleMerge>>
+
 \* Every machine has stopped, or the bound on fleet ref pushes is used up:
 \* nothing more happens, and TLC does not report the bound as a deadlock.
 Finished ==
@@ -206,7 +229,7 @@ Finished ==
 Next ==
   \/ \E m \in Machines :
        \/ Fetch(m) \/ Pass(m) \/ Renew(m) \/ Push(m) \/ SeeGreen(m) \/ Merge(m) \/ Release(m)
-       \/ \E c \in Changes : Claim(m, c)
+       \/ \E c \in Changes : Claim(m, c) \/ ForceRelease(m, c)
   \/ \E c \in Changes : Expire(c)
   \/ Finished
 

@@ -18,11 +18,22 @@ Machine config MAY list other machines as `[machines.<name>]`, each with exactly
 - **THEN** `tuckerbox check` exits non-zero and names `machines.mini`
 
 ### Requirement: Machine capacity
-Machine config `fleet_capacity` SHALL say how many fleet runs this machine takes at once, across repositories, and default to 0 (it takes none). Runs a person starts on the machine directly SHALL NOT count against it. `max_parallel` SHALL still apply per repository.
+Machine config `fleet_capacity` SHALL limit how many dispatched runs this machine has at once, across repositories, and default to 0 (it takes none). Runs a person starts on the machine directly SHALL NOT count against it. `max_parallel` SHALL still apply per repository.
 
 #### Scenario: Machine not in the fleet
 - **WHEN** machine `mini` has no `fleet_capacity`
 - **THEN** it reports capacity 0 and `tuckerbox dispatch` places nothing on it
+
+### Requirement: Machine-wide admission
+A run started by dispatch (`tuckerbox run --for <remote> --dispatched`) SHALL take one of `fleet_capacity` machine-wide fleet slots, OS file locks in the machine's state directory, before it claims the change, and hold it until the run ends, stops or blocks. With none free it SHALL refuse with `<machine> is full`, claim nothing and make no worktree. Model: `formal/runs.tla`, `WithinLimit`.
+
+#### Scenario: Two repositories, one place
+- **WHEN** `mini` has `fleet_capacity = 1`, and dispatchers for two different repositories place a change each on `mini` at the same moment
+- **THEN** one run takes the slot and claims its change; the other refuses with `mini is full`, claims nothing, and its dispatch reports it
+
+#### Scenario: Person's own run
+- **WHEN** `mini` has `fleet_capacity = 1` with one dispatched run, and a person runs `tuckerbox run add-users` on `mini` directly
+- **THEN** that run starts under its repository's `max_parallel` and takes no fleet slot
 
 ### Requirement: Machine report
 `tuckerbox machine --json [--for <remote>]` SHALL print the machine's name, Tuckerbox version, operating system, capacity and fleet runs, each agent CLI with whether it is installed and signed in, and, with `--for`, whether this machine has a checkout of that remote and its path. It SHALL NOT print tokens or permission flags.

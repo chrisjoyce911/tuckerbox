@@ -123,3 +123,14 @@ A run that becomes `ready` SHALL mark its claim `ready`: it does not expire or c
 #### Scenario: Release another machine's claim
 - **WHEN** the user runs `tuckerbox claim release add-login` on `studio` and the claim is `mini`'s
 - **THEN** it refuses and says `--force` removes it
+
+### Requirement: Releasing moves the branch
+Releasing a claim on a change whose remote branch exists, by `claim release` with or without `--force`, SHALL be one atomic push that leases the fleet ref and removes the claim, and leases the branch at the tip just fetched and moves it to an empty `Release <change> from <machine>` commit. If either lease fails, nothing SHALL change. Model: `formal/fleet.tla`, `FencedMerge`.
+
+#### Scenario: Forced release while the holder is about to merge
+- **WHEN** `mini` saw `add-login`'s head `abc123` green and renewed, a person runs `tuckerbox claim release --force add-login` on `studio`, and `mini` then asks the forge to merge `abc123`
+- **THEN** the release moved the tip to its release commit, the forge refuses `mini`'s pinned merge, nothing merges, and `mini`'s next push or renewal blocks it with `claim released`
+
+#### Scenario: Release before any push
+- **WHEN** `mini`'s claim on `add-login` is force-released while `mini` is still in its steps and no branch exists
+- **THEN** only the fleet ref changes, and `mini`'s first push is refused by its fleet ref lease

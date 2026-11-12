@@ -47,7 +47,7 @@ Machine config, never committed:
 
 ```toml
 machine = "studio"      # from add-forge-shipping; default: the host name
-fleet_capacity = 2      # fleet runs this machine takes at once (default 0)
+fleet_capacity = 2      # dispatched runs this machine takes at once, all repositories (default 0)
 
 [machines.mini]
 ssh = "mini"            # an SSH destination, e.g. an alias in ~/.ssh/config
@@ -99,10 +99,14 @@ The ref is outside `refs/heads/` and `refs/tags/`, so CI does not run on it, it 
 A machine can be slow, asleep or cut off at any stage, including after it started shipping, and still believe it holds its claim. Leases can't stop that; fencing does. A shipping run has three kinds of shared effect, and each is fenced:
 
 - **Every push of the change's branch**, the first and each fix round's, is one atomic push: `git push --atomic --force-with-lease=refs/heads/<b>:<lease> --force-with-lease=refs/tuckerbox/fleet:<seen> <remote> <b> <renewal>:refs/tuckerbox/fleet`. Both refs move, or neither. A renewal commit is pushed with it because git only checks a lease on a ref the push updates.
-- **A merge** is a forge API call, which can't join a git push. It is fenced by the branch instead: the merge is pinned to the commit seen green (`add-forge-shipping`), and every take-over of a branch moves its tip (next section). So an old holder's pinned merge names a commit that is no longer the tip, and the forge refuses it. The run also renews just before merging, which closes most of the window early, but safety doesn't depend on that.
+- **A merge** is a forge API call, which can't join a git push. It is fenced by the branch instead: the merge is pinned to the commit seen green (`add-forge-shipping`), and every take-over or release of a claim on a branch moves its tip (the next sections). So an old holder's pinned merge names a commit that is no longer the tip, and the forge refuses it. The run also renews just before merging, which closes most of the window early, but safety doesn't depend on that.
 - **Replies on review threads and marker edits** only follow a push or a take-over by the same run, so an old holder whose push is refused makes none. A late reply or edit can't change what merges.
 
 The steps themselves only change the machine's own worktree, so a zombie working on is wasted effort, not damage. So expiry timing affects only how soon a person may take over, never whether two machines can both push or merge. The model checks this by letting `Expire` happen at any moment, and by letting any machine pause between any two of its actions.
+
+### Releasing a claim
+
+`tuckerbox claim release <change>` (this machine's claim, no run active) and `--force` (another machine's) remove a claim by hand. Removing it from the fleet ref alone isn't enough: a holder that renewed just before its pinned merge, then paused, would wake and merge, because the branch tip is unchanged and the forge accepts the pin. So a release is built like a take-over. When the change's remote branch exists, one atomic push leases the fleet ref and removes the claim, and leases the branch at the fetched tip and moves it to an empty `Release <change> from <machine>` commit. The old holder's pinned merge and its next push then name an old tip and are refused; its next renewal finds no claim and blocks with `claim released`. Without a branch, only the fleet ref changes, and the old holder's first push is refused by its fleet ref lease. The same rule covers releasing this machine's own claim, so there is one release path to test. `formal/fleet_broken_releasekeep.tla` shows the forced release without the tip move letting the old holder merge.
 
 ### Claiming before the worktree
 
@@ -154,7 +158,8 @@ tuckerbox dispatch [change...] [--dry-run] [--json]
   print what happened, exit
 ```
 
-- **Placement is advice.** Reports are a snapshot; another dispatcher may act at the same time. The started `tuckerbox run` claims the change itself, so the claim, not the dispatcher, decides. A refused claim is reported, not retried elsewhere in the same pass, which keeps a pass simple and bounded.
+- **Placement is advice.** Reports are a snapshot; another dispatcher, for this or another repository, may act at the same time. The started run decides: it takes a machine-wide fleet slot, then claims the change. A refusal (machine full, or claimed elsewhere) is reported, not retried elsewhere in the same pass, which keeps a pass simple and bounded.
+- **Machine-wide admission.** `fleet_capacity` is a limit, not a hint. Dispatch starts runs with `--dispatched`; such a run takes one of `fleet_capacity` OS file locks, `$XDG_STATE_HOME/tuckerbox/fleet-slots/<n>.lock` (the machine state directory on each OS), before claiming. These are the same kind of slot locks `add-core-runner` uses per repository, in a machine-wide folder, so `formal/runs.tla`'s `WithinLimit` covers them with `MaxParallel = fleet_capacity` and processes from any repository as `Procs`. The slot is held by the run's process while it is queued, running or shipping, and freed when it ends, stops or blocks; `resume` of a dispatched run takes one again. A person's own `tuckerbox run` (no `--dispatched`) takes none. Taking the slot before the claim means a full machine never holds a claim it can't work on.
 - **`--for <remote>`** finds the machine's checkout of the repository through the machine index the board already uses (normalised remote URL). A machine without a checkout is not a candidate; dispatch never clones.
 - **Agents per change** come from `add-change-settings`' effective settings: a change whose build step uses Codex needs a machine with Codex.
 - **Sign-in `unknown` is a candidate,** with a note. Refusing unknown would rule out every custom agent.
@@ -195,6 +200,8 @@ Why not the fleet ref for teams too? People work from their own machines and see
 - the files the run will use (a new worktree made at that base commit, or an existing worktree) must match that approval's hashes; an existing worktree or retained branch whose files differ is refused, whatever its own `[approval]` says
 - the forge must confirm the base branch refuses direct pushes and needs a merge request with an approving review; if it doesn't, or the token can't read the rules, the run refuses
 
+The same holds for `resume` and `rerun`. They don't re-check the text hash (a plan step may rewrite the design), but they do check the settings hash (`add-change-settings`), and in team mode they take that `settings_hash` from the approval on the base just fetched, with a listed login, never from the worktree's own `[approval]`. Otherwise a stopped run's worktree could get an unapproved agent and a recomputed hash, and resume.
+
 So an approval counts only if it reached the protected base through a reviewed merge request. Someone with push access can still put a listed login into an approval merge request, but a reviewer with rights on the base must approve it, and both are on the forge's record. That is the trust the repository already gives its base branch.
 
 Alternatives considered:
@@ -211,6 +218,8 @@ A claimed change whose machine isn't connected to Herdr still shows its claim, s
 
 - `ship-claim` and `forge-shipping`: referenced, not restated. Narrowings: team mode's draft at start and "mark ready" at the ship stage (`team-claims`, `Ready at the ship stage`); in fleet mode, the marker's epoch and its rewrite after a take-over (`fleet-claims`, `Forge claim after a take-over`).
 - `change-approval`: in team mode the run gate reads only the protected base (`team-claims`, `Approvals only from the protected base`).
+- `change-settings` (`add-change-settings`): in team mode `resume` and `rerun` take `settings_hash` from the protected base (`team-claims`, `Resumed settings from the protected base`).
+- `change-runs`' slot locks: dispatched runs also take a machine-wide fleet slot (`machine-inventory`, `Machine-wide admission`).
 - `board-data` and `herdr-board`: additions are in `modes-board`, as `ship-board` does.
 - `run-status`: `status --all-machines` adds a `machine` field, an addition within the format version.
 - `change-runs`' `Parallel limit` is unchanged: per machine. Fleet limits are new and separate.
@@ -222,6 +231,7 @@ A claimed change whose machine isn't connected to Herdr still shows its claim, s
 | Model | Code (under `internal/`) |
 |---|---|
 | `Fetch` | `fleet.fetch`: `git fetch <remote> +refs/tuckerbox/fleet:refs/tuckerbox/fleet` |
+| `ForceRelease`: fleet ref, branch lease and release commit in one atomic push | `fleet.release`: `git push --atomic` with both leases |
 | `Claim`, `Renew`, `Release`: lease push of the fleet ref | `fleet.update`: build the new commit, `git push --force-with-lease=refs/tuckerbox/fleet:<seen>`; on refusal fetch and re-decide |
 | `Claim` with a branch: fleet ref, branch lease and take-over commit in one atomic push | `fleet.takeOver`: `git push --atomic` with both leases |
 | `Push`: every branch push, with the fleet ref, atomic | `ship.push` in fleet mode: `git push --atomic` with both leases |
@@ -237,7 +247,7 @@ A claimed change whose machine isn't connected to Herdr still shows its claim, s
 - **[Clock skew]** → Affects only when a claim reads as expired; safety comes from fencing. A 1-minute allowance avoids most false expiries.
 - **[Laptop sleeps during a step]** → Its claim expires; if nobody takes over, it renews on wake and carries on. If someone did, it blocks at its next renewal and its work stays in its worktree.
 - **[Take-over loses work]** → Steps' work on the old machine isn't on the remote. The confirmation says so. Checkpointing is a later change.
-- **[A dispatcher overfills a machine]** → Capacity reports are a snapshot. The target machine's own slots (`max_parallel`, `runs.tla`) still hold; extra runs queue there.
+- **[Dispatchers race for one machine]** → Capacity reports are a snapshot, so two dispatchers may both place on the last place. The target's machine-wide fleet slots decide; the loser refuses with `<machine> is full` and its dispatch reports it.
 - **[Agent signed in but out of quota]** → Sign-in says nothing about limits. The step fails as it does today; dispatch doesn't predict quota.
 - **[Team approvals typed by hand]** → Read only from the protected base, which the forge must confirm (see Approvers). Approvals on branches and worktrees don't count.
 - **[Take-over commit in history]** → One empty commit per take-over stays in the merge request. It says who took over from whom, which is useful in review.

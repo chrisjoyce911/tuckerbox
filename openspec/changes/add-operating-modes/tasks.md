@@ -25,8 +25,11 @@
 - [ ] 2.8 Test "Machine not in the fleet"
 - [ ] 2.9 Test "Codex signed out"
 - [ ] 2.10 Test "No checkout"
-- [ ] 2.11 `tuckerbox status --all-machines [--json]` with a `machine` field per run, version unchanged; update the status JSON snapshot
-- [ ] 2.12 Test "Runs on two machines"
+- [ ] 2.11 Machine-wide fleet slots: `run --dispatched` takes one of `fleet_capacity` OS file locks under the machine state directory before claiming, holds it while queued, running or shipping, frees it on end, stop or block; `resume` of a dispatched run takes one again; refuse with `<machine> is full`
+- [ ] 2.12 Test "Two repositories, one place" (two processes from two repositories, `fleet_capacity = 1`; one claims, the other refuses and claims nothing)
+- [ ] 2.13 Test "Person's own run" (no fleet slot taken)
+- [ ] 2.14 `tuckerbox status --all-machines [--json]` with a `machine` field per run, version unchanged; update the status JSON snapshot
+- [ ] 2.15 Test "Runs on two machines"
 
 ## 3. Fleet claims (fleet-claims)
 
@@ -63,8 +66,11 @@
 - [ ] 3.31 Test "Ready on one machine"
 - [ ] 3.32 `tuckerbox claim show [--json]` and `claim release [--force]`; `doctor` in a fleet repository reports whether the fleet ref can be fetched
 - [ ] 3.33 Test "Release another machine's claim"
-- [ ] 3.34 Run TLC on `formal/fleet.tla` and its broken variants (`scripts/tla-check.sh` locally, the `tla` job in CI): the model passes, both variants are rejected
-- [ ] 3.35 Code review against model.md's mapping table: every fleet ref write is a lease push; every branch push and take-over in fleet mode is atomic with the fleet ref; every merge is pinned
+- [ ] 3.34 Release with a remote branch (with or without `--force`): one atomic push removing the claim and moving the branch to an empty `Release <change> from <machine>` commit, leasing both; without a branch, the fleet ref only; the old holder blocks with `claim released`
+- [ ] 3.35 Test "Forced release while the holder is about to merge" (two state directories, bare remote, fake forge refusing a pinned merge when the tip moved)
+- [ ] 3.36 Test "Release before any push"
+- [ ] 3.37 Run TLC on `formal/fleet.tla` and its broken variants (`scripts/tla-check.sh` locally, the `tla` job in CI): the model passes, all four variants are rejected
+- [ ] 3.38 Code review against model.md's mapping table: every fleet ref write is a lease push; every branch push, take-over and release in fleet mode is atomic with the fleet ref; every merge is pinned; dispatched runs take a fleet slot before claiming
 
 ## 4. Dispatch (fleet-placement)
 
@@ -76,7 +82,7 @@
 - [ ] 4.6 Test "Sign-in unknown"
 - [ ] 4.7 Choice: preferred `machines`, then most free capacity, then name; capacity taken within the pass
 - [ ] 4.8 Test "Preferred machine full"
-- [ ] 4.9 Start with `tuckerbox run --for <remote> <change>` locally, over SSH or herdr-core; `run --for` finds the checkout through the machine index
+- [ ] 4.9 Start with `tuckerbox run --for <remote> --dispatched <change>` locally, over SSH or herdr-core; `run --for` finds the checkout through the machine index
 - [ ] 4.10 Test "Start over SSH"
 - [ ] 4.11 Report refused claims and failed starts without retrying in the pass
 - [ ] 4.12 Test "Two dispatchers"
@@ -99,11 +105,15 @@
 - [ ] 5.13 Test "No approvers"
 - [ ] 5.14 Test "Forged approval on a retained branch" (local branch with recomputed hashes and a listed login; nothing created locally or on the fake forge)
 - [ ] 5.15 Test "Worktree edited after approval"
-- [ ] 5.16 Ask the forge whether the base branch refuses direct pushes and needs an approving review (GitHub branch rules, GitLab protected branches and approval rules); refuse in `run` and fail `check` when not, or when unreadable
-- [ ] 5.17 Test "Unprotected base"
-- [ ] 5.18 Test "Protection can't be read"
-- [ ] 5.19 Open claimed merge requests for the board, at most once a minute, kept in the state directory, with their age when the forge is down
-- [ ] 5.20 Test "Board read twice"
+- [ ] 5.16 Team mode `resume` and `rerun`: compare the `agent` and `permissions` overrides with `settings_hash` from the approval on the fetched base (listed login), never the worktree's; refuse on mismatch; a stale text hash alone still passes
+- [ ] 5.17 Test "Forged settings approval on resume"
+- [ ] 5.18 Test "Forged settings approval on rerun"
+- [ ] 5.19 Test "Design rewritten by a plan step"
+- [ ] 5.20 Ask the forge whether the base branch refuses direct pushes and needs an approving review (GitHub branch rules, GitLab protected branches and approval rules); refuse in `run` and fail `check` when not, or when unreadable
+- [ ] 5.21 Test "Unprotected base"
+- [ ] 5.22 Test "Protection can't be read"
+- [ ] 5.23 Open claimed merge requests for the board, at most once a minute, kept in the state directory, with their age when the forge is down
+- [ ] 5.24 Test "Board read twice"
 
 ## 6. Board (modes-board)
 

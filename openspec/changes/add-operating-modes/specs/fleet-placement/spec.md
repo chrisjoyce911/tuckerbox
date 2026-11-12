@@ -39,11 +39,11 @@ Among candidates, dispatch SHALL prefer the change's `machines` list in its orde
 - **THEN** dispatch places `add-login` on `lab`
 
 ### Requirement: Starting on a machine
-Dispatch SHALL start a placed change by running `tuckerbox run --for <remote> <change>` on the chosen machine, over SSH or herdr-core as its entry says, or locally for this machine. `--for` SHALL find that machine's checkout of the remote. The started run SHALL claim the change itself.
+Dispatch SHALL start a placed change by running `tuckerbox run --for <remote> --dispatched <change>` on the chosen machine, over SSH or herdr-core as its entry says, or locally for this machine. `--for` SHALL find that machine's checkout of the remote. The started run SHALL take a fleet slot and claim the change itself.
 
 #### Scenario: Start over SSH
 - **WHEN** dispatch places `add-login` on `mini`, whose entry is `ssh = "mini"`
-- **THEN** it runs `ssh mini -- tuckerbox run --for <remote> add-login`, and the run on `mini` claims the change
+- **THEN** it runs `ssh mini -- tuckerbox run --for <remote> --dispatched add-login`, and the run on `mini` takes a fleet slot and claims the change
 
 ### Requirement: Placement is advice
 A placement SHALL NOT reserve anything. If the started run's claim is refused, or the remote command fails, dispatch SHALL report it and SHALL NOT retry on another machine in the same pass.

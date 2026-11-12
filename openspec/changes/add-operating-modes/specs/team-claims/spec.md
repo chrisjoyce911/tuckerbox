@@ -60,6 +60,21 @@ In team mode the run gate SHALL read the approval only from the base branch at t
 - **WHEN** the base branch holds `sam`'s approval of `add-login`, and its existing worktree has edited design text with an `[approval]` rewritten to match
 - **THEN** `tuckerbox run add-login` refuses and says the worktree's files don't match the approval on the base branch
 
+### Requirement: Resumed settings from the protected base
+In team mode, `tuckerbox resume` and `tuckerbox rerun` SHALL compare the change's `agent` and `permissions` overrides they will use with the `settings_hash` of the approval on the base branch just fetched, whose login is listed, never with the worktree's own `[approval]`. On a mismatch they SHALL refuse. A stale text hash alone SHALL NOT stop them.
+
+#### Scenario: Forged settings approval on resume
+- **WHEN** a team run of `add-login` stopped, someone set `step.build.agent=codex` in its worktree and rewrote the worktree's `settings_hash` to match, and the base branch's approval covers `claude`
+- **THEN** `tuckerbox resume add-login` refuses, names `step.build.agent`, and says the approval on the base branch doesn't cover it
+
+#### Scenario: Forged settings approval on rerun
+- **WHEN** the same forged worktree settings are in place and the user runs `tuckerbox rerun add-login build`
+- **THEN** it refuses as resume does and starts no step
+
+#### Scenario: Design rewritten by a plan step
+- **WHEN** a team run's plan step edited the design and the run then blocked, with no settings changed
+- **THEN** `tuckerbox resume` continues the run
+
 ### Requirement: The base branch must be protected
 In team mode, `tuckerbox check` and `tuckerbox run` SHALL ask the forge whether the base branch refuses direct pushes and needs a merge request with an approving review. When it doesn't, or the forge can't say, `run` SHALL refuse with `team approvals need a protected base branch`, and `check` SHALL fail.
 
