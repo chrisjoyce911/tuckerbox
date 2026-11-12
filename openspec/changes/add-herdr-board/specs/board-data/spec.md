@@ -13,6 +13,10 @@ Defines the machine-readable board for one repository, derived from OpenSpec and
 - **WHEN** a repository has three active changes, none approved and none ever run
 - **THEN** the document has three cards, all in the Proposed column
 
+#### Scenario: Not a Tuckerbox repository
+- **WHEN** `tuckerbox board --json` runs in a folder outside a git repository, or in a repository without `.tuckerbox/config.toml`
+- **THEN** it exits non-zero and prints a document with `version` and `error` holding `code` `not_a_repository` and a message, so a dashboard can offer `tuckerbox init`
+
 ### Requirement: Derived columns
 Columns SHALL be derived from OpenSpec, approval and run state, never stored. The order SHALL be Proposed, Approved, Queued, one column per workflow step in workflow order, Ready, then Done. When the repository sets `require_approval = false`, there SHALL be no Approved column.
 

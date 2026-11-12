@@ -1,0 +1,351 @@
+{
+  "version": 1,
+  "repo": "github.com/example/shop",
+  "path": "/work/shop",
+  "machine": "studio",
+  "require_approval": true,
+  "columns": [
+    {
+      "id": "proposed",
+      "kind": "proposed",
+      "name": "Proposed"
+    },
+    {
+      "id": "approved",
+      "kind": "approved",
+      "name": "Approved"
+    },
+    {
+      "id": "queued",
+      "kind": "queued",
+      "name": "Queued"
+    },
+    {
+      "id": "step:plan",
+      "kind": "step",
+      "step": "plan",
+      "name": "Plan"
+    },
+    {
+      "id": "step:build",
+      "kind": "step",
+      "step": "build",
+      "name": "Build"
+    },
+    {
+      "id": "step:review",
+      "kind": "step",
+      "step": "review",
+      "name": "Review"
+    },
+    {
+      "id": "ready",
+      "kind": "ready",
+      "name": "Ready"
+    },
+    {
+      "id": "done",
+      "kind": "done",
+      "name": "Done"
+    }
+  ],
+  "cards": [
+    {
+      "change": "add-search",
+      "title": "add search",
+      "column": "proposed",
+      "tasks": {
+        "done": 0,
+        "total": 6
+      },
+      "approval": {
+        "state": "none",
+        "by": "",
+        "at": "",
+        "committed": true
+      },
+      "state": "",
+      "reason": "",
+      "step": "",
+      "agent": "",
+      "round": 0,
+      "since": "",
+      "branch": "",
+      "worktree": "",
+      "machine": "studio",
+      "edit_folder": "/work/shop",
+      "depends_on": []
+    },
+    {
+      "change": "refund-flow",
+      "title": "Refunds from the order page",
+      "column": "proposed",
+      "tasks": {
+        "done": 0,
+        "total": 9
+      },
+      "approval": {
+        "state": "stale",
+        "by": "Sam Example",
+        "at": "2026-11-10T16:20:00+10:00",
+        "committed": true
+      },
+      "state": "",
+      "reason": "",
+      "step": "",
+      "agent": "",
+      "round": 0,
+      "since": "",
+      "branch": "",
+      "worktree": "",
+      "machine": "studio",
+      "edit_folder": "/work/shop",
+      "depends_on": []
+    },
+    {
+      "change": "add-wishlist",
+      "title": "add wishlist",
+      "column": "approved",
+      "tasks": {
+        "done": 0,
+        "total": 5
+      },
+      "approval": {
+        "state": "approved",
+        "by": "Sam Example",
+        "at": "2026-11-12T08:55:00+10:00",
+        "committed": false
+      },
+      "state": "",
+      "reason": "",
+      "step": "",
+      "agent": "",
+      "round": 0,
+      "since": "",
+      "branch": "",
+      "worktree": "",
+      "machine": "studio",
+      "edit_folder": "/work/shop",
+      "depends_on": []
+    },
+    {
+      "change": "checkout-v2",
+      "title": "Checkout v2",
+      "column": "queued",
+      "tasks": {
+        "done": 0,
+        "total": 12
+      },
+      "approval": {
+        "state": "approved",
+        "by": "Sam Example",
+        "at": "2026-11-11T14:00:00+10:00",
+        "committed": true
+      },
+      "state": "queued",
+      "reason": "waiting on add-users",
+      "step": "",
+      "agent": "",
+      "round": 0,
+      "since": "2026-11-12T09:02:11+10:00",
+      "branch": "tuckerbox/checkout-v2",
+      "worktree": "/work/shop-worktrees/checkout-v2",
+      "machine": "studio",
+      "edit_folder": "/work/shop-worktrees/checkout-v2",
+      "depends_on": [
+        {
+          "change": "add-users",
+          "column": "step:build"
+        }
+      ]
+    },
+    {
+      "change": "fix-tax-rounding",
+      "title": "fix tax rounding",
+      "column": "step:plan",
+      "tasks": {
+        "done": 0,
+        "total": 3
+      },
+      "approval": {
+        "state": "approved",
+        "by": "Sam Example",
+        "at": "2026-11-12T08:30:00+10:00",
+        "committed": true
+      },
+      "state": "running",
+      "reason": "",
+      "step": "plan",
+      "agent": "claude",
+      "round": 1,
+      "since": "2026-11-12T09:10:40+10:00",
+      "branch": "tuckerbox/fix-tax-rounding",
+      "worktree": "/work/shop-worktrees/fix-tax-rounding",
+      "machine": "studio",
+      "edit_folder": "/work/shop-worktrees/fix-tax-rounding",
+      "depends_on": []
+    },
+    {
+      "change": "add-users",
+      "title": "add users",
+      "column": "step:build",
+      "tasks": {
+        "done": 4,
+        "total": 11
+      },
+      "approval": {
+        "state": "approved",
+        "by": "Sam Example",
+        "at": "2026-11-11T10:00:00+10:00",
+        "committed": true
+      },
+      "state": "running",
+      "reason": "",
+      "step": "build",
+      "agent": "codex",
+      "round": 2,
+      "since": "2026-11-12T08:41:05+10:00",
+      "branch": "tuckerbox/add-users",
+      "worktree": "/work/shop-worktrees/add-users",
+      "machine": "studio",
+      "edit_folder": "/work/shop-worktrees/add-users",
+      "depends_on": []
+    },
+    {
+      "change": "image-cdn",
+      "title": "image cdn",
+      "column": "step:build",
+      "tasks": {
+        "done": 2,
+        "total": 7
+      },
+      "approval": {
+        "state": "approved",
+        "by": "Sam Example",
+        "at": "2026-11-11T11:00:00+10:00",
+        "committed": true
+      },
+      "state": "failed",
+      "reason": "agent exited with code 1",
+      "step": "build",
+      "agent": "claude",
+      "round": 1,
+      "since": "2026-11-12T07:58:00+10:00",
+      "branch": "tuckerbox/image-cdn",
+      "worktree": "/work/shop-worktrees/image-cdn",
+      "machine": "studio",
+      "edit_folder": "/work/shop-worktrees/image-cdn",
+      "depends_on": []
+    },
+    {
+      "change": "add-login-page",
+      "title": "add login page",
+      "column": "step:review",
+      "tasks": {
+        "done": 3,
+        "total": 5
+      },
+      "approval": {
+        "state": "approved",
+        "by": "Sam Example",
+        "at": "2026-11-10T09:00:00+10:00",
+        "committed": true
+      },
+      "state": "blocked",
+      "reason": "review limit reached",
+      "step": "review",
+      "agent": "codex",
+      "round": 3,
+      "since": "2026-11-12T08:15:30+10:00",
+      "branch": "tuckerbox/add-login-page",
+      "worktree": "/work/shop-worktrees/add-login-page",
+      "machine": "studio",
+      "edit_folder": "/work/shop-worktrees/add-login-page",
+      "depends_on": [
+        {
+          "change": "add-users",
+          "column": "step:build"
+        }
+      ]
+    },
+    {
+      "change": "order-emails",
+      "title": "order emails",
+      "column": "step:plan",
+      "tasks": {
+        "done": 1,
+        "total": 4
+      },
+      "approval": {
+        "state": "stale",
+        "by": "Sam Example",
+        "at": "2026-11-09T12:00:00+10:00",
+        "committed": true
+      },
+      "state": "stopped",
+      "reason": "",
+      "step": "plan",
+      "agent": "claude",
+      "round": 1,
+      "since": "2026-11-11T17:45:00+10:00",
+      "branch": "tuckerbox/order-emails",
+      "worktree": "/work/shop-worktrees/order-emails",
+      "machine": "studio",
+      "edit_folder": "/work/shop-worktrees/order-emails",
+      "depends_on": []
+    },
+    {
+      "change": "cart-badge",
+      "title": "cart badge",
+      "column": "ready",
+      "tasks": {
+        "done": 4,
+        "total": 4
+      },
+      "approval": {
+        "state": "approved",
+        "by": "Sam Example",
+        "at": "2026-11-11T09:00:00+10:00",
+        "committed": true
+      },
+      "state": "ready",
+      "reason": "",
+      "step": "",
+      "agent": "",
+      "round": 1,
+      "since": "2026-11-11T15:30:00+10:00",
+      "branch": "tuckerbox/cart-badge",
+      "worktree": "/work/shop-worktrees/cart-badge",
+      "machine": "studio",
+      "edit_folder": "/work/shop-worktrees/cart-badge",
+      "depends_on": []
+    },
+    {
+      "change": "add-sitemap",
+      "title": "add sitemap",
+      "column": "done",
+      "tasks": {
+        "done": 3,
+        "total": 3
+      },
+      "approval": {
+        "state": "approved",
+        "by": "Sam Example",
+        "at": "2026-11-05T09:00:00+10:00",
+        "committed": true
+      },
+      "state": "",
+      "reason": "",
+      "step": "",
+      "agent": "",
+      "round": 0,
+      "since": "",
+      "branch": "",
+      "worktree": "",
+      "machine": "studio",
+      "edit_folder": "",
+      "depends_on": [],
+      "archived": "2026-11-08"
+    }
+  ]
+}

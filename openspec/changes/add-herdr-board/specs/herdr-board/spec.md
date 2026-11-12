@@ -65,7 +65,7 @@ Card detail SHALL offer Edit for the proposal, design, model, tasks and each spe
 - **THEN** its detail offers no Edit, and if a run starts while the edit pane opens, the pane shows the command's refusal
 
 ### Requirement: Tasks and approval from the board
-Card detail SHALL let the person tick and untick each task by running `tuckerbox tasks <change> tick|untick <n.m>`, except while the change has a queued or running run. It SHALL show Approve when the approval state is `none` or `stale`, and Unapprove when it is `approved`, running `tuckerbox approve` or `tuckerbox unapprove`. It SHALL show the command's note that nothing was committed.
+Card detail SHALL let the person tick and untick each task by running `tuckerbox tasks <change> tick|untick <n.m>`, except while the change has a queued or running run. It SHALL show Approve when the approval state is `none` or `stale`, and Unapprove when it is `approved`, running `tuckerbox approve` or `tuckerbox unapprove`, except while the change has a queued or running run (both take the run lock and would refuse). It SHALL show the command's note that nothing was committed.
 
 #### Scenario: Tick from the board
 - **WHEN** the user ticks task 2.1 on a stopped card

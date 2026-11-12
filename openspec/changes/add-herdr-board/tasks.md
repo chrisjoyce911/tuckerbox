@@ -43,13 +43,13 @@
 
 ## 6. Herdr mod (herdr-board)
 
-- [ ] 6.1 `herdr/mods/tuckerbox-board/`: board view with header counts, columns and cards (look based on Kelpie's board), approval badge on each card
+- [x] 6.1 `herdr/mods/tuckerbox-board/`: board view with header counts, columns and cards (look based on Kelpie's board), approval badge on each card
 - [ ] 6.2 Gather from every connected machine with `exec({on})`; merge by change id; show unreachable machines
-- [ ] 6.3 Card detail dialog: markdown proposal, tasks with tick boxes, approval, last validation result, dependencies, rounds, history
+- [x] 6.3 Card detail dialog: markdown proposal, tasks with tick boxes, approval, last validation result, dependencies, rounds, history
 - [ ] 6.4 Run actions: Start (Approved cards only, or Proposed when approval is off), Stop, Resume, Re-run step, Follow log (tab), Open proposal (pane), Open worktree (space); show command errors
 - [ ] 6.5 Edit: pane on the card's machine running `tuckerbox edit`; `tuckerbox validate --json` when it closes, kept in memory; Validate button if pane close can't be detected; hidden while queued or running
 - [ ] 6.6 Tick and untick through `tuckerbox tasks`; Approve and Unapprove through `tuckerbox approve` and `unapprove`; show the "not committed" note
-- [ ] 6.7 Polling: 5 s while shown, 30 s while hidden, detail on open
+- [x] 6.7 Polling: 5 s while shown, 30 s while hidden, detail on open
 - [ ] 6.8 `tuckerbox herdr install` and the `doctor` mod-version check
 - [ ] 6.9 Tests for each herdr-board scenario that can run without the app (action-to-command mapping, which actions each state offers)
 - [ ] 6.10 `herdr-app check` passes; try it with runs on two connected machines, including edit, tick and approve
