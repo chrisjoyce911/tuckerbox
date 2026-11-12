@@ -116,13 +116,22 @@ func TestTurnMessage(t *testing.T) {
 	if err := os.WriteFile(tr, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Payloads are marshalled, so a Windows path's backslashes are escaped.
+	payload := func(fields map[string]string) string {
+		data, err := json.Marshal(fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	stop := payload(map[string]string{"hook_event_name": "Stop", "transcript_path": tr})
 	cases := []struct {
 		name, format string
 		args         []string
 		stdin, want  string
 		bad          bool
 	}{
-		{"claude transcript", TurnClaude, nil, `{"hook_event_name":"Stop","transcript_path":"` + tr + `"}`, "Done.\n{\"change\":\"c\"}", false},
+		{"claude transcript", TurnClaude, nil, stop, "Done.\n{\"change\":\"c\"}", false},
 		{"claude payload message", TurnClaude, nil, `{"transcript_path":"/nope","last_assistant_message":"direct"}`, "direct", false},
 		{"claude no transcript", TurnClaude, nil, `{"hook_event_name":"Stop"}`, "", true},
 		{"codex", TurnCodex, []string{`{"type":"agent-turn-complete","last-assistant-message":"from codex","input-messages":["x"]}`}, "", "from codex", false},
@@ -131,7 +140,7 @@ func TestTurnMessage(t *testing.T) {
 		{"codex format changed", TurnCodex, []string{`{"message":"x"}`}, "", "", true},
 		{"auto codex", TurnAuto, []string{`{"last-assistant-message":"m"}`}, "", "m", false},
 		{"auto text arg", TurnAuto, []string{"all", "done"}, "", "all done", false},
-		{"auto claude", TurnAuto, nil, `{"transcript_path":"` + tr + `"}`, "Done.\n{\"change\":\"c\"}", false},
+		{"auto claude", TurnAuto, nil, payload(map[string]string{"transcript_path": tr}), "Done.\n{\"change\":\"c\"}", false},
 		{"auto stdin text", TurnAuto, nil, "plain", "plain", false},
 	}
 	for _, c := range cases {
