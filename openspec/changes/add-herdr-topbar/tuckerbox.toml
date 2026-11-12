@@ -1,0 +1,2 @@
+title = "Tuckerbox in the top bar"
+depends_on = ["fix-board-safety", "add-config-ui", "add-autopilot"]
