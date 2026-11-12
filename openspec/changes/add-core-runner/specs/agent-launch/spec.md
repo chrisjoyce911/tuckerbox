@@ -25,7 +25,7 @@ Before starting a step, Tuckerbox SHALL write a brief file the agent reads first
 - **THEN** its brief includes round 1's findings
 
 ### Requirement: Result file contract
-An agent SHALL report by writing a JSON result file at the path given in its brief. The file holds `status` (`done`, `rejected`, `blocked`, `failed`), a short `summary`, and optional `findings`, each with severity, file and detail. Tuckerbox SHALL accept only a well-formed result for the current step and round. It SHALL ignore stale or malformed files and record why. Model: `formal/runs.tla`, invariant `StaleNeverAccepted`.
+An agent SHALL report in a JSON result file at the path in its brief, holding `change`, `step` and `round` from the brief, `status` (`done`, `rejected`, `blocked`, `failed`), a short `summary` and optional `findings`, each with `severity` (`critical`, `high`, `medium`, `low`, `info`), `file` (may be empty) and `detail`. Tuckerbox SHALL accept only a well-formed result for the current change, step and round, and SHALL ignore others, recording why. Model: `formal/runs.tla`, `StaleNeverAccepted`.
 
 #### Scenario: Stale result from an earlier round
 - **WHEN** a result file names round 1 while the step is on round 2

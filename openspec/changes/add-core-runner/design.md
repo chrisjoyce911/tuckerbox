@@ -110,4 +110,5 @@ The binary is `tuckerbox`. A short alias is decided before release (see Risks).
 - **Headless machines:** Claude's sign-in sits in the login keychain, which is locked while nobody is logged in. Runs there need a keychain-free token, such as `claude setup-token`; this is untested. This change doesn't solve it, but `tuckerbox doctor` should report it.
 - **Agent CLI flags change between releases.** Built-in agent templates are kept small and can be overridden in machine config.
 - **One process per active run** is simple and survives crashes, but `stop` and `resume` must find the process through the lock and a pid file. This works on all three OSes but needs Windows testing.
+- **Stopping agents on Windows** kills only the agent process. Processes it started keep running until Tuckerbox puts agents in a job object. On macOS and Linux the agent runs in its own process group, and stop signals the whole group.
 - **Short alias:** `tb` and `tbx` may clash with existing tools. To be checked before the first release.
