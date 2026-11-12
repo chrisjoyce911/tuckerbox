@@ -285,6 +285,31 @@ func TestReviewerRejects(t *testing.T) {
 	}
 }
 
+// A reviewer that cannot write outside its worktree (a read-only sandbox)
+// reports through its final message. The engine records the result, writes
+// the result file and loops back to build with the findings.
+func TestReviewerReportsInFinalMessage(t *testing.T) {
+	f := setup(t, testenv.RepoOptions{Changes: []string{"fix-login"}})
+	f.env.SetPlan(t, map[string]testenv.Action{
+		"review:1": {
+			Status: "rejected", Summary: "not yet", Message: true,
+			Findings: []testenv.Finding{{Severity: "high", File: "login.go", Detail: "password is logged"}},
+		},
+		"review": {Message: true},
+	})
+	r := f.run(Request{Change: "fix-login"})
+	if r.State != Ready {
+		t.Fatalf("state %s: %s", r.State, r.Reason)
+	}
+	wantStarts(t, f.env, "fix-login build 1", "fix-login review 1", "fix-login build 2", "fix-login review 2")
+	if brief := readFile(t, f.state("fix-login").Brief("build", 2)); !strings.Contains(brief, "password is logged") {
+		t.Error("build round 2 brief lacks the findings from the final message")
+	}
+	if res := readFile(t, f.state("fix-login").Result("review", 1)); !strings.Contains(res, `"rejected"`) {
+		t.Errorf("engine did not write the review result file:\n%s", res)
+	}
+}
+
 // Scenario: Agent exits without a result. The step is failed with the exit
 // status and the tail of its output.
 func TestAgentExitsWithoutResult(t *testing.T) {

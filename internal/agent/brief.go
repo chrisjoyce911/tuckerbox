@@ -113,8 +113,8 @@ func (b Brief) Render() (string, error) {
 	var s strings.Builder
 	fmt.Fprintf(&s, "# Tuckerbox brief: step %s, round %d, change %s\n\n", b.Step, b.Round, b.Change)
 	s.WriteString("You are running headless: nobody will answer questions while you work. ")
-	s.WriteString("Do the step below, then write the result file described at the end. ")
-	s.WriteString("Tuckerbox reads only that file to decide what happens next.\n\n")
+	s.WriteString("Do the step below, then end with the result described at the end as your final message. ")
+	s.WriteString("Tuckerbox reads only that result to decide what happens next.\n\n")
 
 	fmt.Fprintf(&s, "## Role: %s\n\n", b.Role)
 	fmt.Fprintf(&s, "<!-- role prompt: %s -->\n", source)
@@ -160,9 +160,10 @@ func (b Brief) Render() (string, error) {
 		}
 	}
 
-	s.WriteString("## Result file\n\n")
-	s.WriteString("When you finish, write this JSON object to the result file:\n\n")
-	fmt.Fprintf(&s, "    %s\n\n", b.ResultPath)
+	s.WriteString("## Result\n\n")
+	s.WriteString("When you finish, make your final message this JSON object, as a fenced `json` block or the bare object, ")
+	s.WriteString("with nothing after it. Tuckerbox reads it from your final message and records it; ")
+	s.WriteString("you need no write access outside the worktree.\n\n")
 	s.WriteString("```json\n")
 	fmt.Fprintf(&s, "{\n  \"change\": %q,\n  \"step\": %q,\n  \"round\": %d,\n", b.Change, b.Step, b.Round)
 	s.WriteString("  \"status\": \"done\",\n  \"summary\": \"One or two sentences on what you did.\",\n")
@@ -175,8 +176,11 @@ func (b Brief) Render() (string, error) {
 	s.WriteString("- `summary` is required and short.\n")
 	fmt.Fprintf(&s, "- `findings` is optional. Each has `severity` (%s), `file` (relative to the worktree, or empty for the whole change) and `detail`.\n",
 		strings.Join(severities, ", "))
-	s.WriteString("- Write the whole file once, at the end (write a temporary file next to it and rename it). Do not write it anywhere else.\n")
-	s.WriteString("- If you exit without writing a valid result file, the step is recorded as `failed`.\n")
+	s.WriteString("- If your final message holds no valid result, the step is recorded as `failed`.\n")
+	s.WriteString("\nOptionally, if you can write there, you may also write the same object to this file ")
+	s.WriteString("(a temporary file next to it, then a rename). Don't try to work around a sandbox to do it; ")
+	s.WriteString("if it differs from your final message, the file wins.\n\n")
+	fmt.Fprintf(&s, "    %s\n", b.ResultPath)
 	return s.String(), nil
 }
 

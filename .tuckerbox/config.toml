@@ -15,6 +15,6 @@ permissions = "edit"     # machine profile: edits in the worktree, go and read-o
 [steps.review]
 agent = "codex"
 role = "reviewer"
-permissions = "review"   # machine profile: lets the reviewer write its result file
+permissions = "review"   # machine profile; the reviewer reports in its final message, so read-only works
 on_reject = "build"
 max_rounds = 3

@@ -83,7 +83,7 @@ func CheckID(kind, id string) error {
 
 // Ensure creates the state directory and its subdirectories.
 func (d Dir) Ensure() error {
-	for _, sub := range []string{"briefs", "results", "logs"} {
+	for _, sub := range []string{"briefs", "results", "messages", "logs"} {
 		if err := os.MkdirAll(filepath.Join(string(d), sub), 0o755); err != nil {
 			return err
 		}
@@ -103,6 +103,14 @@ func (d Dir) Brief(step string, round int) string {
 // Result is the result file for a step and round.
 func (d Dir) Result(step string, round int) string {
 	return filepath.Join(string(d), "results", stepRound(step, round)+".json")
+}
+
+// LastMessage is where an agent that can write its final message to a file
+// (the {lastmessage} placeholder, such as codex -o) puts it for a step and
+// round. Tuckerbox owns the file; the agent CLI writes it from outside any
+// sandbox it puts the model in.
+func (d Dir) LastMessage(step string, round int) string {
+	return filepath.Join(string(d), "messages", stepRound(step, round)+".txt")
 }
 
 // Log is the log file of a step. All rounds of a step append to it.
