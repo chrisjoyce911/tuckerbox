@@ -7,7 +7,7 @@ Defines how a workflow step starts an agent command-line tool, what the agent is
 ## ADDED Requirements
 
 ### Requirement: Agents by command template
-A step SHALL name an agent. An agent is defined by a command template with placeholders for the brief file, the working directory, the model and the effort. Tuckerbox SHALL ship built-in definitions for Claude Code and Codex. Machine or repository config MAY define other agents, without permission flags (see repo-config).
+A step SHALL name an agent. An agent is defined by a command template with placeholders for the brief file, the working directory, the model, the effort and a file for its final message. Tuckerbox SHALL ship built-in definitions for Claude Code and Codex. Machine or repository config MAY define other agents, without permission flags (see repo-config).
 
 #### Scenario: Custom agent
 - **WHEN** a repository defines agent `omp` with a command template and a step uses it
@@ -17,18 +17,30 @@ A step SHALL name an agent. An agent is defined by a command template with place
 Before starting a step, Tuckerbox SHALL write a brief file the agent reads first. The brief contains:
 - the step's role prompt (from the repository, or the built-in default for that role)
 - the change id and the paths of its proposal, design, tasks and spec deltas
-- the result file path and its format
+- the result format, and that the agent ends with it as its final message
 - findings from earlier rounds, when the step is re-run after a rejection
 
 #### Scenario: Build after rejection
 - **WHEN** the build step starts after the review step rejected round 1
 - **THEN** its brief includes round 1's findings
 
-### Requirement: Result file contract
-An agent SHALL report in a JSON result file at the path in its brief, holding `change`, `step` and `round` from the brief, `status` (`done`, `rejected`, `blocked`, `failed`), a short `summary` and optional `findings`, each with `severity` (`critical`, `high`, `medium`, `low`, `info`), `file` (may be empty) and `detail`. Tuckerbox SHALL accept only a well-formed result for the current change, step and round, and SHALL ignore others, recording why. Model: `formal/runs.tla`, `StaleNeverAccepted`.
+### Requirement: Result contract
+An agent SHALL end with its result as its final message: a JSON object, fenced or bare, with `change`, `step` and `round` from the brief, `status` (`done`, `rejected`, `blocked`, `failed`), a `summary` and optional `findings` (`severity`, `file`, `detail`). Tuckerbox SHALL write the result file itself. A result file the agent writes is also accepted, and wins if they differ. Only a well-formed result for this change, step and round is accepted. Model: `formal/runs.tla`, `StaleNeverAccepted`.
+
+#### Scenario: Result in the final message
+- **WHEN** a reviewer in a read-only sandbox ends with a valid result for its step and round
+- **THEN** Tuckerbox accepts it and writes the step's result file
+
+#### Scenario: Malformed final message
+- **WHEN** the agent exits with no result file and a final message holding no well-formed result
+- **THEN** the step fails, and the log and run record why
+
+#### Scenario: Result file and final message differ
+- **WHEN** the agent writes a result file and ends with a different valid result
+- **THEN** Tuckerbox uses the result file and logs the difference
 
 #### Scenario: Stale result from an earlier round
-- **WHEN** a result file names round 1 while the step is on round 2
+- **WHEN** a result names round 1 while the step is on round 2
 - **THEN** Tuckerbox ignores it and keeps waiting for the round 2 result
 
 ### Requirement: Headless execution and logs

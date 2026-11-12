@@ -21,6 +21,10 @@ const (
 	PhBrief = "{brief}"
 	// PhResult is the absolute path the agent writes its result to.
 	PhResult = "{result}"
+	// PhLastMessage is the absolute path of a file, owned by Tuckerbox, where
+	// the agent CLI writes the agent's final message (codex -o). Without it,
+	// the final message is read from the agent's standard output.
+	PhLastMessage = "{lastmessage}"
 	// PhWorkdir is the change's worktree, also the process's working directory.
 	PhWorkdir = "{workdir}"
 	// PhModel is the step's model; empty when the step sets none.
@@ -34,7 +38,7 @@ const (
 )
 
 var known = map[string]bool{
-	PhPrompt: true, PhBrief: true, PhResult: true, PhWorkdir: true,
+	PhPrompt: true, PhBrief: true, PhResult: true, PhLastMessage: true, PhWorkdir: true,
 	PhModel: true, PhEffort: true, PhPermissions: true,
 }
 
@@ -53,9 +57,13 @@ type Template struct {
 
 // Builtin returns the built-in agent definitions, keyed by name.
 //
-// Claude Code needs --verbose for stream-json output in print mode. Codex runs
+// Claude Code needs --verbose for stream-json output in print mode; its
+// final message is the result event at the end of that output. Codex runs
 // with --no-daemon so each step's agent is its own process tree, which stop
-// can end; the flag is global, so it comes before exec.
+// can end; the flag is global, so it comes before exec. Codex writes its
+// final message to {lastmessage} with -o: the CLI writes that file itself,
+// outside the sandbox it runs the model's commands in, so a read-only
+// reviewer can still report.
 func Builtin() map[string]Template {
 	return map[string]Template{
 		"claude": {Name: "claude", Command: []string{
@@ -70,6 +78,7 @@ func Builtin() map[string]Template {
 			"-C", PhWorkdir,
 			"-m", PhModel,
 			"-c", "model_reasoning_effort=" + PhEffort,
+			"-o", PhLastMessage,
 			PhPermissions,
 			"--", PhPrompt,
 		}},
@@ -170,7 +179,7 @@ func (t Template) Validate() error {
 
 // Values fills in a template's placeholders.
 type Values struct {
-	Prompt, Brief, Result, Workdir, Model, Effort string
+	Prompt, Brief, Result, LastMessage, Workdir, Model, Effort string
 	// Permissions are the flags of the step's machine permission profile,
 	// already resolved. Nil runs the agent with its own defaults.
 	Permissions []string
@@ -182,7 +191,7 @@ func (t Template) Expand(v Values) ([]string, error) {
 		return nil, err
 	}
 	sub := map[string]string{
-		PhPrompt: v.Prompt, PhBrief: v.Brief, PhResult: v.Result,
+		PhPrompt: v.Prompt, PhBrief: v.Brief, PhResult: v.Result, PhLastMessage: v.LastMessage,
 		PhWorkdir: v.Workdir, PhModel: v.Model, PhEffort: v.Effort,
 	}
 	out := make([]string, 0, len(t.Command)+len(v.Permissions))
@@ -223,4 +232,15 @@ func (t Template) Expand(v Values) ([]string, error) {
 
 func isBareFlag(a string) bool {
 	return strings.HasPrefix(a, "-") && a != "--" && !placeholderRE.MatchString(a)
+}
+
+// UsesLastMessage reports whether the template passes {lastmessage}, so the
+// agent's final message is read from that file rather than its output.
+func (t Template) UsesLastMessage() bool {
+	for _, a := range t.Command {
+		if strings.Contains(a, PhLastMessage) {
+			return true
+		}
+	}
+	return false
 }

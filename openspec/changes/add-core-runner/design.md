@@ -77,6 +77,7 @@ A repo you clone must not be able to make your agents run without prompts. Machi
 Run state goes in `$(git rev-parse --git-dir)/tuckerbox/`, which is per worktree:
 - `run.json`
 - one result file per step and round
+- one final-message file per step and round, for agents that write it (codex `-o`)
 - briefs
 - logs
 
@@ -94,7 +95,7 @@ There is no daemon. Each active run is one `tuckerbox` process that holds two lo
 
 Locks are `flock` on Unix and `LockFileEx` on Windows, through `github.com/gofrs/flock`. The OS releases them if the process dies, so a crash never leaves a change stuck. A run waiting for a slot is `queued`. `tuckerbox run --all` starts one process per change, which queue on the slot locks.
 
-The engine is the only writer of `run.json`, and writes it atomically (a temporary file, then a rename). Agents write only their own result file. `stop` signals the run process, which writes the state change itself.
+The engine is the only writer of `run.json`, and writes it atomically (a temporary file, then a rename). The engine also writes each step's result file, from the agent's final message; an agent may write it too. `stop` signals the run process, which writes the state change itself.
 
 How the pieces fit, as built:
 - **Order of locks.** A run takes the change lock first, then waits for a slot, as in the model. Runs waiting for a slot hold a ticket in `<common-dir>/tuckerbox/queue/`, and only the oldest live ticket may take one, so queued runs start in the order requested. A ticket is live while its change lock is held, so a dead run's ticket is dropped by the next waiter. `run` starts its changes one at a time and waits until each holds its lock and has joined the queue.
@@ -114,9 +115,9 @@ How the pieces fit, as built:
 |---|---|
 | `Pick(p, c)`: take a free change lock in one step | `runs.TryChangeLock`: one `flock.TryLock` on `<git-dir>/tuckerbox/run.lock`. It retries a few times, each retry atomic, and never checks first and locks second. Called by `Engine.Run` before anything else is written. |
 | `TakeSlot(p)`: take a slot while fewer than `MaxParallel` are taken | `runs.TrySlot`: try-lock `<common-dir>/tuckerbox/slots/<n>.lock` for `n < max_parallel`, through `runs.WaitSlot`. The queue (`runs.Queue`) only decides who may try first, so it cannot add a run beyond the limit. |
-| `AgentWrites(p)` | The agent writes `<git-dir>/tuckerbox/results/<step>-<round>.json`, the path in its brief. |
+| `AgentWrites(p)` | The agent ends with the result as its final message, which the engine writes to `<git-dir>/tuckerbox/results/<step>-<round>.json`; the agent may also write that file itself, the path in its brief. |
 | `LateWrite(c)`: an earlier round's agent overwrites the file | Not prevented, only tolerated. Agents of earlier rounds are stopped before the next round starts, and each round has its own file, but the round check below is what makes it safe. |
-| `AcceptGuard(c)`: `result[c] = round[c]` | `agent.ReadResult` with `agent.Expect{Change, Step, Round}` accepts only an exact match; anything else is a `StaleError` and is ignored. `agent.Run` also moves a leftover file at the round's path aside before the agent starts. |
+| `AcceptGuard(c)`: `result[c] = round[c]` | `agent.ReadResult` (file) and `agent.MessageResult` (final message) with `agent.Expect{Change, Step, Round}` accept only an exact match; anything else is a `StaleError` and is ignored. `agent.Run` also moves a leftover result file at the round's path aside, and removes a leftover final-message file, before the agent starts. |
 | `Accept(p)`: rejection starts the next round, otherwise release | `Engine.steps`: `rejected` does `Round++` and goes to `on_reject`; `done` goes to the next step (the model has one step per round; more steps under the same lock change nothing it checks). The last `done`, `blocked`, `failed`, `stopped` and the round limit all end in `Engine.finish`. |
 | `round`, written only by the lock holder | `Run.Round` in `run.json`, written only by `Engine.save` while the change lock is held. It only grows, also on `resume` and `rerun`. |
 | `Release(p)`: free the change lock and the slot | `Engine.finish` writes the final state, then the deferred `Slot.Release` and `ChangeLock.Release` run, in that order. Between the two the process holds a change lock and no slot, which the model's `locked` state allows. If the process dies, the OS frees both. |
@@ -134,6 +135,18 @@ Agents run headless as child processes:
 - Codex: `codex exec --json <brief>`
 
 Output goes to log files. Interactive terminals that can be watched in Herdr come in change 4, behind a `terminal` backend interface, so the engine doesn't change.
+
+### Agents report in their final message
+An agent reports by ending with its result JSON as its final message (a fenced `json` block or the bare object). The engine reads it and writes the step's result file itself.
+
+Why: the result file lives in the git directory, outside the worktree, and a sandboxed agent cannot write there. The first self-run showed it: `codex exec --sandbox workspace-write --add-dir <repo .git>` reviewed the change but could not write its result, because Codex keeps `.git` read-only even in writable roots. A reviewer should also be able to run read-only (`--sandbox read-only`) and still report. So agents need no write access outside their worktree.
+
+Where the final message comes from:
+- **Claude:** the `result` field of the last `{"type":"result"}` event in its stream-json output.
+- **Codex:** `-o <file>` (`--output-last-message`) in the built-in template, pointing at `<git-dir>/tuckerbox/messages/<step>-<round>.txt`. The Codex CLI writes that file itself, outside the sandbox it runs the model's commands in. Without `-o`, the last `agent_message` item of `--json` output.
+- **Custom agents:** the `{lastmessage}` placeholder for a file the CLI writes the final message to, or else its standard output as plain text; the last result JSON in it is used.
+
+A result file the agent writes itself is still accepted. If both are valid and differ, the file wins and the difference is logged: a file is a deliberate write, while a final message may be cut short or reworded. The round and step check applies to both, so `StaleNeverAccepted` holds either way.
 
 ### OpenSpec through its CLI
 `openspec list --json` and `openspec validate <id>` decide which changes exist and are valid. Tuckerbox doesn't parse spec files itself, beyond passing their paths in the brief.

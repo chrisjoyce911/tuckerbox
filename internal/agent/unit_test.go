@@ -10,7 +10,7 @@ import (
 
 func TestBuiltinTemplates(t *testing.T) {
 	b := Builtin()
-	v := Values{Prompt: "P", Brief: "B", Result: "R", Workdir: "W"}
+	v := Values{Prompt: "P", Brief: "B", Result: "R", LastMessage: "M", Workdir: "W"}
 
 	claude, err := b["claude"].Expand(v)
 	if err != nil {
@@ -21,7 +21,7 @@ func TestBuiltinTemplates(t *testing.T) {
 		t.Errorf("claude = %q, want %q", got, want)
 	}
 
-	if got, _ := b["codex"].Expand(v); strings.Join(got, " ") != "codex --no-daemon exec --json -C W -- P" {
+	if got, _ := b["codex"].Expand(v); strings.Join(got, " ") != "codex --no-daemon exec --json -C W -o M -- P" {
 		t.Errorf("codex without model or effort = %q", got)
 	}
 	v.Model, v.Effort = "o9", "high"
@@ -29,9 +29,12 @@ func TestBuiltinTemplates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want = "codex --no-daemon exec --json -C W -m o9 -c model_reasoning_effort=high -- P"
+	want = "codex --no-daemon exec --json -C W -m o9 -c model_reasoning_effort=high -o M -- P"
 	if got := strings.Join(codex, " "); got != want {
 		t.Errorf("codex = %q, want %q", got, want)
+	}
+	if !b["codex"].UsesLastMessage() || b["claude"].UsesLastMessage() {
+		t.Error("codex should report through {lastmessage}, claude through its output")
 	}
 	for name, tpl := range b {
 		if err := tpl.Validate(); err != nil {
@@ -234,5 +237,71 @@ func TestBriefContents(t *testing.T) {
 	}
 	if _, err := (Brief{Change: "x", Step: "s", Role: "builder", Round: 0, ResultPath: "r"}).Render(); err == nil {
 		t.Error("round 0 accepted")
+	}
+}
+
+func TestMessageResultForms(t *testing.T) {
+	want := Expect{"c", "review", 1}
+	obj := `{"change":"c","step":"review","round":1,"status":"done","summary":"ok","findings":[{"severity":"low","file":"","detail":"d"}]}`
+	for name, msg := range map[string]string{
+		"bare":            obj,
+		"bare with space": "\n  " + obj + "\n",
+		"fenced json":     "Summary first.\n\n```json\n" + obj + "\n```\n",
+		"fenced plain":    "```\n" + obj + "\n```",
+		"after text":      "Here it is: " + obj,
+		"last fence wins": "```json\n{\"change\":\"x\"}\n```\nthen\n```json\n" + obj + "\n```",
+		"last object":     `first {"change":"c","step":"review","round":0} then ` + obj + "\n",
+	} {
+		r, err := MessageResult(msg, want)
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if r.Status != Done || len(r.Findings) != 1 {
+			t.Errorf("%s: %+v", name, r)
+		}
+	}
+	for name, msg := range map[string]string{
+		"empty":     "  \n",
+		"no json":   "done!",
+		"truncated": `{"change":"c","step":"review"`,
+	} {
+		if _, err := MessageResult(msg, want); !IsIgnored(err) {
+			t.Errorf("%s: want a malformed result, got %v", name, err)
+		}
+	}
+}
+
+func TestFinalMessageFromOutput(t *testing.T) {
+	stream := `{"type":"system"}
+{"type":"result","subtype":"success","result":"first"}
+{"type":"result","subtype":"success","result":"last"}
+`
+	if m, ok := FinalMessage([]byte(stream)); !ok || m != "last" {
+		t.Errorf("stream-json: %q %v", m, ok)
+	}
+	codex := `{"type":"item.completed","item":{"type":"agent_message","text":"a"}}
+{"type":"item.completed","item":{"type":"command_execution","text":"x"}}
+{"type":"item.completed","item":{"type":"agent_message","text":"b"}}
+{"type":"turn.completed"}
+`
+	if m, ok := FinalMessage([]byte(codex)); !ok || m != "b" {
+		t.Errorf("codex: %q %v", m, ok)
+	}
+	if m, ok := FinalMessage([]byte("plain\ntext\n")); !ok || m != "plain\ntext\n" {
+		t.Errorf("text: %q %v", m, ok)
+	}
+	if _, ok := FinalMessage([]byte(" \n")); ok {
+		t.Error("blank output is no message")
+	}
+}
+
+func TestTailBuffer(t *testing.T) {
+	b := &tailBuffer{max: 8}
+	for _, s := range []string{"abc", "defgh", "ijklmnop", "q"} {
+		b.Write([]byte(s))
+	}
+	if got := string(b.Bytes()); got != "jklmnopq" {
+		t.Errorf("tail %q", got)
 	}
 }

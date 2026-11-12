@@ -37,6 +37,9 @@ type action struct {
 	Exit int `json:"exit"`
 	// StaleFirst writes a result for the previous round first.
 	StaleFirst bool `json:"stale_first"`
+	// Message reports the result as the final message on stdout instead of
+	// writing the result file, as a sandboxed agent does.
+	Message bool `json:"message"`
 }
 
 func main() {
@@ -108,7 +111,13 @@ func main() {
 		write(round - 1)
 		time.Sleep(700 * time.Millisecond)
 	}
-	if status != "none" {
+	if status != "none" && a.Message {
+		data, _ := json.MarshalIndent(map[string]any{
+			"change": change, "step": step, "round": round, "status": status,
+			"summary": summary, "findings": a.Findings,
+		}, "", "  ")
+		fmt.Printf("Finished.\n\n```json\n%s\n```\n", data)
+	} else if status != "none" {
 		write(round)
 	} else {
 		fmt.Fprintln(os.Stderr, "fakeagent: giving up without a result")

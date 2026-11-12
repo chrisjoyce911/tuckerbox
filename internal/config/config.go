@@ -83,7 +83,10 @@ var BuiltinRoles = []string{"planner", "builder", "reviewer"}
 //   - {workdir}: the change's worktree
 //   - {model}: the step's model, or the agent's default model
 //   - {effort}: the step's effort, or the agent's default effort
-var Placeholders = []string{"brief", "workdir", "model", "effort"}
+//   - {lastmessage}: a file, owned by Tuckerbox, where the agent CLI writes
+//     the agent's final message; without it the final message is read from
+//     the agent's standard output
+var Placeholders = []string{"brief", "workdir", "model", "effort", "lastmessage"}
 
 // ShipMode says what happens when a run finishes its last step.
 type ShipMode string

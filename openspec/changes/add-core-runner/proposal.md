@@ -30,7 +30,8 @@ one change come in later changes (listed in design.md).
   to `max_parallel` changes run at once.
 - Agents are launched headless from command templates (Claude Code and Codex
   built in, any other CLI by template). Each step gets a written brief and
-  reports through a small JSON result file.
+  reports with a small JSON result in its final message, which Tuckerbox
+  records in a result file.
 - Run state is kept per worktree, outside the committed tree. Runs can be
   stopped and resumed, and steps re-run.
 - `tuckerbox status [--json]` shows every run on this machine. Later

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
@@ -70,14 +71,18 @@ type Outcome struct {
 	// Stopped is true when ctx ended before the agent finished. Result is
 	// still set if the agent wrote a valid one before it was stopped.
 	Stopped bool
-	// Ignored records each stale or malformed result file seen, and why.
+	// Ignored records each stale or malformed result seen, in a result file
+	// or the final message, and why.
 	Ignored []string
+	// Source says where Result came from: "final message" or "result file".
+	Source string
 	// Tail is the end of the step's log, set when Result is nil.
 	Tail string
 	// Argv is the command line that was run.
 	Argv []string
-	// BriefPath, ResultPath and LogPath are the step's files.
-	BriefPath, ResultPath, LogPath string
+	// BriefPath, ResultPath and LogPath are the step's files. MessagePath is
+	// the {lastmessage} file, set only when the agent's template passes it.
+	BriefPath, ResultPath, MessagePath, LogPath string
 }
 
 // Status is the step's outcome: the agent's reported status, or failed
@@ -107,13 +112,19 @@ func (o Outcome) FailureReason() string {
 // promptFor is the short instruction passed to agents as {prompt}.
 func promptFor(brief string) string {
 	return "Read the Tuckerbox brief at " + brief +
-		" and follow it. It ends with the result file you must write before you exit."
+		" and follow it. It ends with the result JSON your final message must contain."
 }
 
 // Run writes the step's brief, starts its agent headless in the worktree with
-// output appended to the step's log, and waits for it. It accepts only a
-// well-formed result naming this change, step and round; stale and malformed
-// result files are logged, recorded in Outcome.Ignored and waited past.
+// output appended to the step's log, and waits for it.
+//
+// The agent reports by ending with its result JSON as its final message (see
+// FinalMessage); Run then writes the result file itself, so the agent needs
+// no write access outside its worktree. A result file the agent writes
+// itself is also accepted, and wins when both exist and differ (logged).
+// Only a well-formed result naming this change, step and round is accepted;
+// stale and malformed results are logged, recorded in Outcome.Ignored and
+// waited past.
 //
 // Cancelling ctx stops the agent (stop): it is asked to exit, then killed
 // after StopGrace. An error is returned only when the agent could not be
@@ -136,6 +147,9 @@ func Run(ctx context.Context, s Step, opts Options) (Outcome, error) {
 	o.BriefPath = s.State.Brief(s.Step, s.Round)
 	o.ResultPath = s.State.Result(s.Step, s.Round)
 	o.LogPath = s.State.Log(s.Step)
+	if s.Agent.UsesLastMessage() {
+		o.MessagePath = s.State.LastMessage(s.Step, s.Round)
+	}
 	want := Expect{Change: s.Change, Step: s.Step, Round: s.Round}
 
 	brief := Brief{
@@ -153,9 +167,14 @@ func Run(ctx context.Context, s Step, opts Options) (Outcome, error) {
 			return o, fmt.Errorf("step %s: moving old result aside: %w", s.Step, err)
 		}
 	}
+	if o.MessagePath != "" {
+		if err := os.Remove(o.MessagePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return o, fmt.Errorf("step %s: removing old final message: %w", s.Step, err)
+		}
+	}
 
 	argv, err := s.Agent.Expand(Values{
-		Prompt: promptFor(o.BriefPath), Brief: o.BriefPath, Result: o.ResultPath,
+		Prompt: promptFor(o.BriefPath), Brief: o.BriefPath, Result: o.ResultPath, LastMessage: o.MessagePath,
 		Workdir: s.Worktree, Model: s.Model, Effort: s.Effort, Permissions: s.Permissions,
 	})
 	if err != nil {
@@ -168,13 +187,21 @@ func Run(ctx context.Context, s Step, opts Options) (Outcome, error) {
 		return o, fmt.Errorf("step %s: log: %w", s.Step, err)
 	}
 	defer logf.Close()
-	logLine(logf, "step %s round %d started: %s", s.Step, s.Round, strings.Join(quoteArgs(argv), " "))
+	// The agent's stdout and stderr are copied into the log by two
+	// goroutines; stdout is also kept, to find the final message in.
+	var logMu sync.Mutex
+	log := lockedWriter{mu: &logMu, w: logf}
+	stdout := &tailBuffer{max: maxResultSize + 64<<10}
+	logLine(log, "step %s round %d started: %s", s.Step, s.Round, strings.Join(quoteArgs(argv), " "))
 
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = s.Worktree
 	cmd.Stdin = nil
-	cmd.Stdout = logf
-	cmd.Stderr = logf
+	cmd.Stdout = io.MultiWriter(log, stdout)
+	cmd.Stderr = log
+	// Children the agent leaves behind may hold its output open; don't let
+	// them keep the step waiting once the agent itself has exited.
+	cmd.WaitDelay = opts.StopGrace
 	cmd.Env = append(os.Environ(),
 		"TUCKERBOX_CHANGE="+s.Change,
 		"TUCKERBOX_STEP="+s.Step,
@@ -185,7 +212,7 @@ func Run(ctx context.Context, s Step, opts Options) (Outcome, error) {
 	cmd.Env = append(cmd.Env, s.Env...)
 	setProcAttr(cmd)
 	if err := cmd.Start(); err != nil {
-		logLine(logf, "step %s round %d: agent did not start: %v", s.Step, s.Round, err)
+		logLine(log, "step %s round %d: agent did not start: %v", s.Step, s.Round, err)
 		o.ExitCode = -1
 		return o, fmt.Errorf("step %s: starting agent %s: %w", s.Step, s.Agent.Name, err)
 	}
@@ -195,7 +222,7 @@ func Run(ctx context.Context, s Step, opts Options) (Outcome, error) {
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
 
-	w := watcher{path: o.ResultPath, want: want, log: logf}
+	w := watcher{path: o.ResultPath, want: want, log: log}
 	var waitErr error
 	var graceC <-chan time.Time
 	tick := time.NewTicker(opts.Poll)
@@ -207,11 +234,11 @@ loop:
 			break loop
 		case <-ctx.Done():
 			o.Stopped = true
-			logLine(logf, "step %s round %d: stopping agent", s.Step, s.Round)
+			logLine(log, "step %s round %d: stopping agent", s.Step, s.Round)
 			waitErr = stop(cmd, exited, opts.StopGrace)
 			break loop
 		case <-graceC:
-			logLine(logf, "step %s round %d: agent still running %s after its result; stopping it",
+			logLine(log, "step %s round %d: agent still running %s after its result; stopping it",
 				s.Step, s.Round, opts.ResultGrace)
 			waitErr = stop(cmd, exited, opts.StopGrace)
 			break loop
@@ -226,7 +253,13 @@ loop:
 	w.check()
 	o.Result = w.accepted
 	o.Ignored = w.ignored
-	logLine(logf, "step %s round %d finished: exit %d, status %s", s.Step, s.Round, o.ExitCode, o.Status())
+	if o.Result != nil {
+		o.Source = "result file"
+	}
+	if !o.Stopped {
+		o.fromMessage(want, stdout.Bytes(), log)
+	}
+	logLine(log, "step %s round %d finished: exit %d, status %s", s.Step, s.Round, o.ExitCode, o.Status())
 	if o.Result == nil {
 		o.Tail, _ = TailLog(o.LogPath, opts.TailBytes)
 	}
@@ -332,4 +365,46 @@ func quoteArgs(argv []string) []string {
 		}
 	}
 	return out
+}
+
+// fromMessage reads the agent's final message, from its {lastmessage} file or
+// its stdout, and reconciles it with any result file the agent wrote.
+func (o *Outcome) fromMessage(want Expect, stdout []byte, log io.Writer) {
+	var msg string
+	var ok bool
+	if o.MessagePath != "" {
+		var err error
+		msg, ok, err = ReadLastMessage(o.MessagePath)
+		if err != nil {
+			logLine(log, "reading final message: %v", err)
+		}
+	} else {
+		msg, ok = FinalMessage(stdout)
+	}
+	if !ok {
+		if o.Result == nil {
+			logLine(log, "no final message from the agent")
+		}
+		return
+	}
+	r, err := MessageResult(msg, want)
+	switch {
+	case err != nil && o.Result != nil:
+		// The result file stands; the message is only noted.
+		logLine(log, "final message holds no valid result (%v); using the result file", err)
+	case err != nil:
+		o.Ignored = append(o.Ignored, err.Error())
+		logLine(log, "ignored final message: %v", err)
+	case o.Result != nil:
+		if !sameResult(*o.Result, r) {
+			logLine(log, "result file and final message differ; using the result file (%s, %s) over the final message (%s, %s)",
+				o.Result.Status, oneLine(o.Result.Summary), r.Status, oneLine(r.Summary))
+		}
+	default:
+		o.Result, o.Source = &r, messageLabel
+		logLine(log, "accepted result from the final message: %s, %s", r.Status, oneLine(r.Summary))
+		if err := writeResult(o.ResultPath, r); err != nil {
+			logLine(log, "writing result file %s: %v", o.ResultPath, err)
+		}
+	}
 }

@@ -64,6 +64,13 @@ args = { claude = ["--permission-mode", "acceptEdits"] }
 
 A step in the repository then asks for it by name with `permissions = "edit"`.
 
+Agents report by ending with a small JSON result as their final message; Tuckerbox records it in the step's result file, so an agent needs no write access outside its worktree and a reviewer can run read-only (for Codex, `--sandbox read-only` in a machine profile). Tuckerbox reads Claude's final message from its stream-json output and Codex's from the file it writes with `-o`. A custom agent can pass `{lastmessage}`, a file its CLI writes the final message to; otherwise its standard output is read:
+
+```toml
+[agents.myagent]
+command = ["myagent", "--prompt-file", "{brief}", "--last-message", "{lastmessage}"]
+```
+
 `doctor` exits non-zero only when a required tool (`git` or `openspec`) is missing. Agent CLIs are optional. It does not yet check whether an agent is signed in, and says `sign-in not checked`.
 
 ## Develop

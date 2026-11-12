@@ -341,7 +341,7 @@ func TestRepoCannotRedefineBuiltin(t *testing.T) {
 func TestCustomAgent(t *testing.T) {
 	repo := strings.Replace(minimal, `agent = "codex"`, `agent = "omp"`, 1) + `
 [agents.omp]
-command = ["omp", "run", "--brief={brief}", "--cwd", "{workdir}", "--model", "{model}"]
+command = ["omp", "run", "--brief={brief}", "--cwd", "{workdir}", "--model", "{model}", "-o", "{lastmessage}"]
 model = "big"
 `
 	machine := `

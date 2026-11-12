@@ -38,8 +38,64 @@ func main() {
 	result := func(round int, status string) map[string]any {
 		return map[string]any{"change": change, "step": step, "round": round, "status": status, "summary": "fake " + mode}
 	}
+	asJSON := func(r map[string]any) string {
+		data, _ := json.MarshalIndent(r, "", "  ")
+		return string(data)
+	}
+	event := func(ev map[string]any) {
+		data, _ := json.Marshal(ev)
+		fmt.Println(string(data))
+	}
 	fmt.Println("fakeagent: mode", mode)
 	switch mode {
+	case "message":
+		// Plain text output ending with the bare result object.
+		fmt.Println("I did the work.")
+		fmt.Println(asJSON(result(round, "done")))
+	case "message-fenced":
+		r := result(round, "rejected")
+		r["findings"] = []map[string]string{{"severity": "high", "file": "login.go", "detail": "password is logged"}}
+		fmt.Printf("Review finished. Example of a finding: {\"severity\": \"low\"}.\n\n```json\n%s\n```\n", asJSON(r))
+	case "message-malformed":
+		fmt.Println("All done, the status is done. No JSON here.")
+	case "message-stale":
+		fmt.Println(asJSON(result(round-1, "done")))
+	case "message-wrong-step":
+		r := result(round, "done")
+		r["step"] = "other"
+		fmt.Println(asJSON(r))
+	case "stream-json":
+		// Claude Code's stream-json: events, then a result event whose
+		// result field is the final message.
+		event(map[string]any{"type": "system", "subtype": "init"})
+		event(map[string]any{"type": "assistant", "message": map[string]any{"content": "{\"change\": \"decoy\"}"}})
+		event(map[string]any{"type": "result", "subtype": "success", "is_error": false,
+			"result": "Done.\n\n```json\n" + asJSON(result(round, "done")) + "\n```"})
+	case "codex-jsonl":
+		// codex exec --json: the last agent_message item is the final message.
+		event(map[string]any{"type": "thread.started"})
+		event(map[string]any{"type": "item.completed", "item": map[string]any{"type": "agent_message", "text": "Looking."}})
+		event(map[string]any{"type": "item.completed", "item": map[string]any{"type": "agent_message", "text": asJSON(result(round, "done"))}})
+		event(map[string]any{"type": "turn.completed"})
+	case "lastmessage":
+		// codex -o <path>: the CLI writes the final message to the file;
+		// stdout holds nothing usable.
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "lastmessage needs a path")
+			os.Exit(2)
+		}
+		event(map[string]any{"type": "thread.started"})
+		r := result(round, "done")
+		r["summary"] = "from the last-message file"
+		must(os.WriteFile(os.Args[2], []byte(asJSON(r)+"\n"), 0o644))
+	case "both-same":
+		write(result(round, "done"))
+		fmt.Println(asJSON(result(round, "done")))
+	case "both-differ":
+		write(result(round, "done"))
+		r := result(round, "rejected")
+		r["summary"] = "the message disagrees"
+		fmt.Println(asJSON(r))
 	case "done":
 		write(result(round, "done"))
 	case "rejected":
