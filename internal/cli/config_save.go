@@ -144,8 +144,16 @@ func (a App) configSet(args []string) int {
 	// Honour --json even when it follows an invalid argument.
 	f.json = slices.Contains(args, "--json")
 	res := configsave.NewResult(f.machine, f.dry)
+	if f.machine {
+		res.Target = "machine"
+	} else if f.pr {
+		res.Target = "pr"
+	} else if f.local {
+		res.Target = "local"
+	}
 	finish := func(err error) int {
 		if err != nil {
+			res.Message = ""
 			code := "failed"
 			var se *configsave.SaveError
 			if errors.As(err, &se) {
@@ -310,11 +318,12 @@ func (a App) configSet(args []string) int {
 			res.Target = "local"
 			res.Reason = "no supported forge remote on this machine"
 		} else {
-			token, tokenErr := forge.LookupToken(ctx, target, cfg.Forges[host].Credentials(), env.Getenv, func(context.Context, string, ...string) (string, error) {
-				return "", fmt.Errorf("CLI token unavailable")
-			})
-			// Borrowing is opt-in. The real reader handles the CLI implementation.
-			if cfg.Forges[host].BorrowCLIToken {
+			creds := cfg.Forges[host].Credentials()
+			withoutCLI := creds
+			withoutCLI.BorrowCLIToken = false
+			token, tokenErr := forge.LookupToken(ctx, target, withoutCLI, env.Getenv, nil)
+			// Borrowing is opt-in, after environment and stored credentials.
+			if !token.Available() && creds.BorrowCLIToken {
 				token, tokenErr = forge.ReadToken(ctx, target, cfg.Forges[host].Credentials())
 			}
 			if tokenErr != nil && !f.pr {
@@ -329,6 +338,7 @@ func (a App) configSet(args []string) int {
 				res.Target = "local"
 				res.Reason = "no token for " + host + " on this machine"
 			} else {
+				req.Base = cfg.Worktree.Base
 				cfg.ForgeTarget = target
 				res.Target = "pr"
 				res.Reason = "forge token available for " + host

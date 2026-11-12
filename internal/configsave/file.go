@@ -23,9 +23,25 @@ func WithFileLock(ctx context.Context, stateDir, path string, fn func() error) e
 	if err != nil {
 		return err
 	}
-	// Resolve a symlinked parent so equivalent checkout paths share the lock.
-	if parent, e := filepath.EvalSymlinks(filepath.Dir(abs)); e == nil {
-		abs = filepath.Join(parent, filepath.Base(abs))
+	// Resolve the nearest existing ancestor, including on the first save
+	// when several parent folders do not exist yet. Creating those folders
+	// must not change the lock name for a later writer.
+	parent := filepath.Dir(abs)
+	missing := []string{filepath.Base(abs)}
+	for {
+		if resolved, e := filepath.EvalSymlinks(parent); e == nil {
+			abs = resolved
+			for i := len(missing) - 1; i >= 0; i-- {
+				abs = filepath.Join(abs, missing[i])
+			}
+			break
+		}
+		next := filepath.Dir(parent)
+		if next == parent {
+			break
+		}
+		missing = append(missing, filepath.Base(parent))
+		parent = next
 	}
 	dir := filepath.Join(stateDir, "config-locks")
 	if err = os.MkdirAll(dir, 0700); err != nil {

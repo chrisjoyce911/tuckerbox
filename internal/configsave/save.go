@@ -86,10 +86,10 @@ func Match(data []byte, want string) error {
 }
 
 type Request struct {
-	Options                      config.Options
-	StateDir, Path, IfMatch      string
-	Machine, DryRun, Credentials bool
-	Edits                        []Edit
+	Options                       config.Options
+	StateDir, Path, IfMatch, Base string
+	Machine, DryRun, Credentials  bool
+	Edits                         []Edit
 }
 
 // Save keeps comparison, check, and rename in one OS lock. It re-reads both
@@ -176,7 +176,7 @@ func Check(opts config.Options, before, after []byte, machine bool, result *Resu
 	added := false
 	for _, p := range ps {
 		file := "repo"
-		if p.File == opts.MachinePath {
+		if p.File == opts.MachinePath || p.File == config.CredentialsPath(opts.MachinePath) {
 			file = "machine"
 		}
 		isNew := !oldSet[id(p)]

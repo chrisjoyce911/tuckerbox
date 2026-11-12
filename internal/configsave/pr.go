@@ -45,7 +45,13 @@ func PullRequest(ctx context.Context, req Request, remote string, client forge.C
 		if !access.Push {
 			return fmt.Errorf("forge token cannot push to this repository")
 		}
-		base := access.DefaultBranch
+		base := req.Base
+		if base == "" {
+			base = access.DefaultBranch
+		}
+		base = strings.TrimPrefix(base, "refs/heads/")
+		base = strings.TrimPrefix(base, "refs/remotes/")
+		base = strings.TrimPrefix(base, remote+"/")
 		if base == "" {
 			return fmt.Errorf("forge returned no default branch")
 		}
@@ -116,7 +122,7 @@ func PullRequest(ctx context.Context, req Request, remote string, client forge.C
 		}
 		payload, _ := json.Marshal(req.Edits)
 		branch := "tuckerbox/config-" + time.Now().UTC().Format("20060102T150405Z") + "-" + Revision(payload)[:8] + "-" + tag[:8]
-		if branch == base {
+		if branch == base || branch == access.DefaultBranch {
 			return fmt.Errorf("refusing to push the base branch")
 		}
 		if _, err = git(wt, "switch", "-c", branch); err != nil {

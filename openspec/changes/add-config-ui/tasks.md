@@ -27,39 +27,39 @@
 
 - [x] 3.1 Line-level TOML rewrite for set and unset (key line, new key at table end, new table at file end, whole multi-line arrays, empty `[steps.<id>]` removed); write by temporary file and rename
 - [x] 3.2 Test "Comment kept"
-- [ ] 3.3 Check before saving: parse, merge with the other file, run the config checks, compare problems before and after; list problems a save causes in active changes without blocking
-- [ ] 3.4 Test "Removing a step another step needs"
-- [ ] 3.5 Test "Fixing one of two problems"
-- [ ] 3.6 Test "Narrowing the allow-list"
-- [ ] 3.7 Per-file OS lock in the machine state folder; `--if-match` compared under the lock; check and write from the file read under the lock
-- [ ] 3.8 Test "Two people edit at once"
-- [ ] 3.9 `tuckerbox config set` with several `key=value`, `--unset`, `--machine`, `--dry-run`, `--json`; values parsed by the key's type, lists comma-separated; document in README
-- [ ] 3.10 Test "Two keys in one save"
-- [ ] 3.11 Test "Back to the machine default"
-- [ ] 3.12 Test "Dry run"
-- [ ] 3.13 Refuse keys in the wrong file, naming the right one
-- [ ] 3.14 Test "Profile in repository config"
-- [ ] 3.15 Test "Approval rule on the machine"
-- [ ] 3.16 Machine saves: create the folder and file if needed; tokens into `credentials.toml` created with mode 0600; never commit
-- [ ] 3.17 Test "First token on a new machine"
-- [ ] 3.18 Token prompt without echo, or standard input when not a terminal; refuse a token in the arguments; `--unset` removes it
-- [ ] 3.19 Test "Token in the arguments" (the value is not printed)
-- [ ] 3.20 `tuckerbox config edit [--machine]` with the `tuckerbox edit` editor, then the check; no commit
-- [ ] 3.21 Test "Syntax error after an edit"
+- [x] 3.3 Check before saving: parse, merge with the other file, run the config checks, compare problems before and after; list problems a save causes in active changes without blocking
+- [x] 3.4 Test "Removing a step another step needs"
+- [x] 3.5 Test "Fixing one of two problems"
+- [x] 3.6 Test "Narrowing the allow-list"
+- [x] 3.7 Per-file OS lock in the machine state folder; `--if-match` compared under the lock; check and write from the file read under the lock
+- [x] 3.8 Test "Two people edit at once"
+- [x] 3.9 `tuckerbox config set` with several `key=value`, `--unset`, `--machine`, `--dry-run`, `--json`; values parsed by the key's type, lists comma-separated; document in README
+- [x] 3.10 Test "Two keys in one save"
+- [x] 3.11 Test "Back to the machine default"
+- [x] 3.12 Test "Dry run"
+- [x] 3.13 Refuse keys in the wrong file, naming the right one
+- [x] 3.14 Test "Profile in repository config"
+- [x] 3.15 Test "Approval rule on the machine"
+- [x] 3.16 Machine saves: create the folder and file if needed; tokens into `credentials.toml` created with mode 0600; never commit
+- [x] 3.17 Test "First token on a new machine"
+- [x] 3.18 Token prompt without echo, or standard input when not a terminal; refuse a token in the arguments; `--unset` removes it
+- [x] 3.19 Test "Token in the arguments" (the value is not printed)
+- [x] 3.20 `tuckerbox config edit [--machine]` with the `tuckerbox edit` editor, then the check; no commit
+- [x] 3.21 Test "Syntax error after an edit"
 - [x] 3.22 Run TLC on `formal/configsave.tla` and its broken variants `blindwrite` and `checkbeforelock` (`/opsx:tlc` locally, `scripts/tla-check.sh` in CI); the model passes and each variant is rejected
 
 ## 4. Where a repository save goes (config-save)
 
-- [ ] 4.1 Choose the target per save: `--local`, `--pr`, or a pull request when this machine has a forge token for the remote's host, else local; print the target and the reason
-- [ ] 4.2 Test "No token on this machine"
-- [ ] 4.3 Test "Pull request demanded but not possible"
-- [ ] 4.4 Local save into the repository's main checkout (as the board resolves it), no commit, note about committing and existing worktrees
-- [ ] 4.5 Test "Local save"
-- [ ] 4.6 Pull request save: fetch base, judge `--if-match` and the check against the base file, temporary worktree on `tuckerbox/config-<UTC time>-<hash>`, one commit, push without force, open a ready merge request through forge access, remove the worktree, print the link; document in README
-- [ ] 4.7 Test "Pull request" (fake forge; checkout files unchanged)
-- [ ] 4.8 Test "Base branch moved" (no branch pushed)
-- [ ] 4.9 Never merge a config pull request in any ship mode
-- [ ] 4.10 Test "Merge ship mode"
+- [x] 4.1 Choose the target per save: `--local`, `--pr`, or a pull request when this machine has a forge token for the remote's host, else local; print the target and the reason
+- [x] 4.2 Test "No token on this machine"
+- [x] 4.3 Test "Pull request demanded but not possible"
+- [x] 4.4 Local save into the repository's main checkout (as the board resolves it), no commit, note about committing and existing worktrees
+- [x] 4.5 Test "Local save"
+- [x] 4.6 Pull request save: fetch base, judge `--if-match` and the check against the base file, temporary worktree on `tuckerbox/config-<UTC time>-<hash>`, one commit, push without force, open a ready merge request through forge access, remove the worktree, print the link; document in README
+- [x] 4.7 Test "Pull request" (fake forge; checkout files unchanged)
+- [x] 4.8 Test "Base branch moved" (no branch pushed)
+- [x] 4.9 Never merge a config pull request in any ship mode
+- [x] 4.10 Test "Merge ship mode"
 
 ## 5. Settings view (settings-view)
 

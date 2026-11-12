@@ -146,6 +146,13 @@ func TestConfigTokenInput(t *testing.T) {
 	if strings.Contains(readFile(t, config.CredentialsPath(mp)), "sensitive-token") {
 		t.Fatal("token not removed")
 	}
+	opts, err := config.Discover(env, aGetwd(t, a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(opts); err != nil {
+		t.Fatalf("unset left invalid credentials: %v", err)
+	}
 }
 func TestConfigLocalResolvesMainCheckout(t *testing.T) {
 	a, root, _, errout := configSaveApp(t)
@@ -243,4 +250,14 @@ func TestConfigDefaultTokenUsesPR(t *testing.T) {
 	if readFile(t, filepath.Join(root, config.RepoFile)) != before {
 		t.Fatal("PR modified checkout")
 	}
+}
+
+func aGetwd(t *testing.T, a App) string {
+	t.Helper()
+	_, getwd := a.configEnv()
+	wd, err := getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wd
 }
