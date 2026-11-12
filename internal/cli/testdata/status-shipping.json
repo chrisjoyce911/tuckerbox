@@ -1,0 +1,1 @@
+{"version":1,"run":{"state":"shipping","mr":{"link":"https://github.com/example/shop/pull/12","number":12,"state":"open"},"ci":{"state":"pending","commit":"abc123"},"ship_round":2}}

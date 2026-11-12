@@ -4,9 +4,7 @@ Tuckerbox runs [OpenSpec](https://github.com/Fission-AI/OpenSpec) changes throug
 
 It's a single Go binary for macOS, Linux and Windows. It works on its own, and it fits into [Herdr](https://herdr.dev), where it shows a board of your changes and their agents.
 
-> **Status:** early development. Local runs work: `run`, `status`, `logs`, `stop`, `resume` and `rerun`, as well as `version`, `doctor`, `init` and `check`. Shipping (pushing, MRs) and Herdr come later. The plan is in [`openspec/changes/`](openspec/changes/):
-> - [`add-core-runner`](openspec/changes/add-core-runner/proposal.md): per-repo workflows, local runs, agents, status
-> - [`add-herdr-board`](openspec/changes/add-herdr-board/proposal.md): run history, dependencies, and a kanban board in Herdr
+> **Status:** early development. Local runs, the Herdr board and GitHub/GitLab shipping are available. The active plans and remaining integration work are in [`openspec/changes/`](openspec/changes/).
 
 ## Install
 
@@ -140,11 +138,9 @@ command = ["myagent", "--prompt-file", "{brief}", "--last-message", "{lastmessag
 
 ## Forge configuration
 
-Shipping configuration and API clients are available; the shipping engine is
-being implemented in `add-forge-shipping`. Keep production runs in `local`
-mode until that implementation is complete. The repository chooses the mode:
-`local` commits locally, `mr` will stop at a green merge request for a person to
-merge, and `merge` will merge the exact green head when forge protection allows.
+The repository chooses the shipping mode:
+`local` commits locally, `mr` stops at a green merge request for a person to
+merge, and `merge` merges the exact green head when forge protection allows.
 
 ```toml
 # Repository .tuckerbox/config.toml
@@ -202,6 +198,22 @@ five-second timeout. Borrowing is off by default; no login or refresh is run.
 Tokens are masked in forge text and are never added to agent environments.
 Git pushes retain git's own credentials. `tuckerbox doctor` reports the forge,
 project, token source and API read/push permissions in `mr` and `merge` repositories.
+A completed shipping run archives the change in its branch before pushing. It
+uses explicit leases for every push and pins every merge to the green head.
+Failed CI jobs and unresolved review threads from writers or named bots go to
+the configured fix steps, with bounded rounds. Logs are masked, stripped of
+colour codes and limited to the last 200 lines, 32 KiB per job and 128 KiB per
+round. Replies name the fix commit and leave resolving threads to people.
+
+`shipping` means archiving, pushing, waiting or fixing; waiting uses no parallel
+slot. `merged` is final and keeps the local worktree. In `mr` mode, `ready` keeps
+the open request link; `tuckerbox resume <change>` watches it again without
+restarting the workflow. Status JSON keeps version 1 and adds `mr`, `ci` and
+`ship_round`. The board adds Shipping before Ready, shows the MR link and CI
+badge, and offers Open merge request and Resume on ready MR cards. It offers
+no merge button. Compact layout places Shipping after In progress; steps
+layout places it after the last workflow step.
+
 GitHub tokens need repository contents and pull-request write access, plus checks
 and Actions read access. GitLab tokens need `api` scope and project Developer
 access or greater; branch protection can still restrict pushes and merges.

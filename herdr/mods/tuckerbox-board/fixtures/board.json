@@ -4,7 +4,11 @@
   "path": "/work/shop",
   "machine": "studio",
   "require_approval": true,
-  "steps": ["plan", "build", "review"],
+  "steps": [
+    "plan",
+    "build",
+    "review"
+  ],
   "columns": [
     {
       "id": "proposed",
@@ -69,7 +73,8 @@
       },
       "state": "",
       "reason": "",
-      "badge": "", "step": "",
+      "badge": "",
+      "step": "",
       "agent": "",
       "round": 0,
       "since": "",
@@ -98,7 +103,8 @@
       },
       "state": "",
       "reason": "",
-      "badge": "", "step": "",
+      "badge": "",
+      "step": "",
       "agent": "",
       "round": 0,
       "since": "",
@@ -126,7 +132,8 @@
       },
       "state": "",
       "reason": "",
-      "badge": "", "step": "",
+      "badge": "",
+      "step": "",
       "agent": "",
       "round": 0,
       "since": "",
@@ -154,7 +161,8 @@
       },
       "state": "queued",
       "reason": "waiting on add-users",
-      "badge": "queued", "step": "",
+      "badge": "queued",
+      "step": "",
       "agent": "",
       "round": 0,
       "since": "2026-11-12T09:02:11+10:00",
@@ -187,7 +195,8 @@
       },
       "state": "running",
       "reason": "",
-      "badge": "plan", "step": "plan",
+      "badge": "plan",
+      "step": "plan",
       "agent": "claude",
       "round": 1,
       "since": "2026-11-12T09:10:40+10:00",
@@ -215,7 +224,8 @@
       },
       "state": "running",
       "reason": "",
-      "badge": "build", "step": "build",
+      "badge": "build",
+      "step": "build",
       "agent": "codex",
       "round": 2,
       "since": "2026-11-12T08:41:05+10:00",
@@ -243,7 +253,8 @@
       },
       "state": "failed",
       "reason": "agent exited with code 1",
-      "badge": "build", "step": "build",
+      "badge": "build",
+      "step": "build",
       "agent": "claude",
       "round": 1,
       "since": "2026-11-12T07:58:00+10:00",
@@ -271,7 +282,8 @@
       },
       "state": "blocked",
       "reason": "review limit reached",
-      "badge": "review", "step": "review",
+      "badge": "review",
+      "step": "review",
       "agent": "codex",
       "round": 3,
       "since": "2026-11-12T08:15:30+10:00",
@@ -304,7 +316,8 @@
       },
       "state": "stopped",
       "reason": "",
-      "badge": "plan", "step": "plan",
+      "badge": "plan",
+      "step": "plan",
       "agent": "claude",
       "round": 1,
       "since": "2026-11-11T17:45:00+10:00",
@@ -332,7 +345,8 @@
       },
       "state": "ready",
       "reason": "",
-      "badge": "", "step": "",
+      "badge": "",
+      "step": "",
       "agent": "",
       "round": 1,
       "since": "2026-11-11T15:30:00+10:00",
@@ -341,7 +355,24 @@
       "machine": "studio",
       "edit_folder": "/work/shop-worktrees/cart-badge",
       "depends_on": [],
-      "scope": { "spec": "2", "tasks": ["2.1", "2.2"] }
+      "scope": {
+        "spec": "2",
+        "tasks": [
+          "2.1",
+          "2.2"
+        ]
+      },
+      "mr": {
+        "link": "https://github.com/example/shop/pull/12",
+        "number": 12,
+        "state": "open"
+      },
+      "ci": {
+        "state": "green",
+        "commit": "abc123"
+      },
+      "ship_round": 2,
+      "max_rounds": 3
     },
     {
       "change": "add-sitemap",
@@ -360,7 +391,8 @@
       },
       "state": "",
       "reason": "",
-      "badge": "", "step": "",
+      "badge": "",
+      "step": "",
       "agent": "",
       "round": 0,
       "since": "",
@@ -371,5 +403,6 @@
       "depends_on": [],
       "archived": "2026-11-08"
     }
-  ]
+  ],
+  "ship": "local"
 }

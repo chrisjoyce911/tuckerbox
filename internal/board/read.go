@@ -76,7 +76,11 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 		p, r, placeErr := locate(repo, cfg.Worktree, worktrees, id)
 		folder := p.ChangeDir()
 		if r != nil && r.ShippingStarted {
+			previous := folder
 			folder = shippingFolder(p.Dir, id, folder)
+			if previous != folder && errors.Is(placeErr, fs.ErrNotExist) {
+				placeErr = nil
+			}
 		}
 		c, err := readCard(ctx, id, folder, doc.Machine, false, refs)
 		c.addError(placeErr)
@@ -154,6 +158,10 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 			states[a.id] = r
 			places[a.id] = p
 			addShipping(&c, r, cfg)
+			c.Column = "done"
+			if r.State != runs.Merged {
+				c.Badge = ""
+			}
 		}
 		folders[a.id] = a.folder
 		doc.Cards = append(doc.Cards, c)
@@ -251,7 +259,7 @@ func columns(cfg *config.Config) []Column {
 	} else {
 		out = append(out, Column{ID: "in_progress", Kind: "in_progress", Name: "In progress"})
 	}
-	if cfg.Ship != config.ShipLocal {
+	if cfg.Ship == config.ShipMR || cfg.Ship == config.ShipMerge {
 		out = append(out, Column{ID: "shipping", Kind: "shipping", Name: "Shipping"})
 	}
 	return append(out, Column{ID: "ready", Kind: "ready", Name: "Ready"}, Column{ID: "done", Kind: "done", Name: "Done"})

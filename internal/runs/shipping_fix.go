@@ -17,7 +17,7 @@ func (e *Engine) shippingFix(ctx context.Context, ws Workspace, rs *Run, stepID 
 	if err := e.save(ws, rs); err != nil {
 		return nil, err
 	}
-	queue, err := JoinQueue(e.Repo.Common, rs.Change, ws.State.RunLock(), e.now().UnixNano())
+	queue, err := JoinQueue(e.Repo.Common, e.Repo.Checkout(), rs.Change, ws.State.RunLock(), e.now().UnixNano())
 	if err != nil {
 		return nil, err
 	}

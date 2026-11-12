@@ -192,7 +192,10 @@ func (e *Engine) watch(ctx context.Context, claim *Claim) Outcome {
 		case e.Config.Ship == config.ShipMerge && ci == "none":
 			return e.blocked(fmt.Errorf("no checks reported"))
 		case ci == "green" && mr.Mergeable && e.Config.Ship == config.ShipMerge:
-			if err := claim.Check(ctx, e.Forge); err != nil {
+			if err := e.checkClaim(ctx, claim); err != nil {
+				if errors.Is(err, errAlreadyMerged) {
+					return e.merged(ctx, r.LastPush)
+				}
 				return e.blocked(err)
 			}
 			if err := e.Forge.Merge(ctx, mr.Number, r.LastPush, e.Config.Shipping.MergeMethod); err != nil {
@@ -247,4 +250,23 @@ func (e *Engine) retryAction(ctx context.Context, action func() error) error {
 		}
 		interval = min(interval*2, 5*time.Minute)
 	}
+}
+
+var errAlreadyMerged = errors.New("merge request already merged")
+
+func (e *Engine) checkClaim(ctx context.Context, claim *Claim) error {
+	err := claim.Check(ctx, e.Forge)
+	if err == nil {
+		return nil
+	}
+	current, readErr := e.Forge.GetMR(ctx, e.Record.MR.Number)
+	if readErr == nil {
+		if current.State == "merged" {
+			return errAlreadyMerged
+		}
+		if current.State == "closed" {
+			return fmt.Errorf("merge request closed")
+		}
+	}
+	return err
 }

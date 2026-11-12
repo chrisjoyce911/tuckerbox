@@ -303,6 +303,18 @@ func TestFailedCIFixUsesSlotArchivedBriefAndNewHead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var ciStates []string
+	for _, event := range events {
+		if event.Kind == "ci_finished" {
+			ciStates = append(ciStates, event.CI)
+			if event.CI == "red" && len(event.Jobs) != 1 {
+				t.Fatal(event)
+			}
+		}
+	}
+	if strings.Join(ciStates, ",") != "red,green" {
+		t.Fatal(ciStates)
+	}
 	var kinds []string
 	for _, event := range events {
 		kinds = append(kinds, string(event.Kind))
@@ -313,5 +325,30 @@ func TestFailedCIFixUsesSlotArchivedBriefAndNewHead(t *testing.T) {
 	saved, err := ReadRun(f.state("add-login").RunFile())
 	if err != nil || saved.LastPush != api.pins[1] {
 		t.Fatal(saved, err)
+	}
+}
+
+func TestForeignClaimRecordsBlockedWithoutPushEvent(t *testing.T) {
+	f, e, api := shippingSetup(t, config.ShipMR, false, "add-login")
+	api.mr = &forge.MR{Number: 12, State: "open", URL: "https://forge.example/mr/12", Body: "<!-- tuckerbox: change=add-login machine=mini run=other -->"}
+	r, err := e.Run(context.Background(), Request{Change: "add-login"})
+	if err != nil || r.State != Blocked || !strings.Contains(r.Reason, "claimed by mini") {
+		t.Fatal(r, err)
+	}
+	events, err := history.Read(history.File(f.state("add-login")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked := false
+	for _, event := range events {
+		if event.Kind == "pushed" {
+			t.Fatal("lost claim recorded a push")
+		}
+		if event.Kind == history.Blocked && strings.Contains(event.Reason, "mini") {
+			blocked = true
+		}
+	}
+	if !blocked {
+		t.Fatal(events)
 	}
 }

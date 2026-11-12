@@ -18,10 +18,10 @@ A shipping run SHALL add these events to its history: `archived` (commit), `push
 - **THEN** the history has a `blocked` event whose reason names that machine, and no `pushed` event
 
 ### Requirement: Shipping column
-In a repository with `ship = "mr"` or `"merge"`, the board's columns SHALL include Shipping after the last workflow step's column and before Ready. A run in state `shipping` SHALL be in it, also while a fix step runs. A `blocked` or `failed` run that was shipping SHALL stay in Shipping. With `ship = "local"` there SHALL be no Shipping column.
+In a repository with `ship = "mr"` or `"merge"`, the board's columns SHALL include Shipping after the workflow columns (In progress in compact layout) and before Ready. A run in state `shipping` SHALL be in it, also while a fix step runs. A `blocked` or `failed` run that was shipping SHALL stay in Shipping. With `ship = "local"` there SHALL be no Shipping column.
 
 #### Scenario: Columns in mr mode
-- **WHEN** the workflow's steps are build and review, approval is required and `ship = "mr"`
+- **WHEN** the workflow's steps are build and review, approval is required, `board.columns = "steps"` and `ship = "mr"`
 - **THEN** the columns are Proposed, Approved, Queued, Build, Review, Shipping, Ready, Done
 
 #### Scenario: Fix step running

@@ -11,7 +11,7 @@ const list = (v) => (Array.isArray(v) ? v : []);
 
 // A run is queued or running: a process holds the change's run lock, so edits,
 // ticks and approval changes are refused (change-edits).
-export const ACTIVE_STATES = new Set(["queued", "running"]);
+export const ACTIVE_STATES = new Set(["queued", "running", "shipping"]);
 // States that need the person: the card is flagged and counted in the header.
 export const NEEDS_YOU_STATES = new Set(["blocked", "failed"]);
 
@@ -30,6 +30,9 @@ export function normaliseCard(c, src = {}) {
   const a = c?.approval ?? {};
   const t = c?.tasks ?? {};
   return {
+    mr: c?.mr && str(c.mr.link) ? {link:str(c.mr.link),number:num(c.mr.number),state:str(c.mr.state)} : null,
+    ci: c?.ci ? {state:str(c.ci.state),commit:str(c.ci.commit)} : null,
+    ship_round:num(c?.ship_round),max_rounds:num(c?.max_rounds),
     change: str(c?.change),
     title: str(c?.title) || str(c?.change).replace(/-/g, " "),
     column: str(c?.column),
@@ -71,6 +74,7 @@ export function normaliseBoard(doc, src = {}) {
   const s = { on: src.on ?? null, path };
   return {
     version: num(doc.version),
+    ship:str(doc.ship)||"local",
     repo: str(doc.repo) || path,
     path,
     machine: str(doc.machine),
@@ -111,6 +115,7 @@ export function normaliseDetail(d) {
       machine: str(h?.machine), result: str(h?.result), to: str(h?.to), summary: str(h?.summary),
       reason: str(h?.reason), findings: list(h?.findings).map(finding),
       scope: str(h?.scope), old_scope: str(h?.old_scope),
+      commit:str(h?.commit),branch:str(h?.branch),link:str(h?.link),number:num(h?.number),method:str(h?.method),ship_round:num(h?.ship_round),ci:str(h?.ci),jobs:list(h?.jobs).map(str),threads:list(h?.threads).map(str),
     })),
     // Task groups with ticked and total counts, ship tasks left out (add-task-scope).
     groups: list(d?.groups).map((g) => ({ number: num(g?.number), title: str(g?.title), ticked: num(g?.ticked), total: num(g?.total) })),
@@ -235,6 +240,8 @@ export function approvalBadge(approval) {
 // The run's state in words, and its theme color name.
 export function stateLook(card) {
   switch (card?.state) {
+    case "shipping": return {word:"shipping",tone:"working"};
+    case "merged": return {word:"merged",tone:"done"};
     case "running": return { word: "running", tone: "working" };
     case "queued": return { word: "queued", tone: "dim" };
     case "blocked": return { word: "blocked", tone: "blocked" };
@@ -258,16 +265,17 @@ export const EVENT_WORDS = {
   failed: "Failed",
   ready: "Ready",
   scope_started: "Started again",
+  archived:"Archived",pushed:"Pushed",mr_opened:"Merge request opened",ci_finished:"CI finished",review_findings:"Review findings",review_replied:"Review replied",merged:"Merged",branch_deleted:"Branch deleted",
 };
 
 // One history line in words: "Handed on build → review: summary".
 export function eventText(h) {
   const head = EVENT_WORDS[h.event] ?? h.event;
   const step = h.step ? (h.event === "handoff" && h.to ? ` ${h.step} → ${h.to}` : ` ${h.step}`) : "";
-  const tail = h.event === "step_finished" && h.result ? ` (${h.result})`
+  const tail = h.event === "ci_finished" && h.ci ? ` (${h.ci})` : h.event === "step_finished" && h.result ? ` (${h.result})`
     : h.event === "rejected" && h.findings.length ? ` with ${h.findings.length} finding${h.findings.length === 1 ? "" : "s"}`
       : "";
-  const note = h.summary || h.reason;
+  const note = h.summary || h.reason || (h.commit ? h.commit.slice(0, 12) : "");
   const scope = h.event === "scope_started" ? ` for tasks ${h.scope || "all"} (was ${h.old_scope || "all"})`
     : h.scope ? ` (tasks ${h.scope})` : "";
   return `${head}${step}${tail}${scope}${note ? `: ${note}` : ""}`;

@@ -49,7 +49,7 @@ export class CardView extends View {
         this.error = null;
         const card = d.cards.find((c) => c.change === this.change);
         if (card) this.card = { ...card, on: at.on, path: d.path || at.cwd };
-        this.board = { ...this.board, columns: d.columns, steps: d.steps, require_approval: d.require_approval, path: d.path };
+        this.board = { ...this.board, ship:d.ship,columns: d.columns, steps: d.steps, require_approval: d.require_approval, path: d.path };
         this.detail = d.detail && d.detail.change === this.change ? d.detail : null;
         if (!this.detail) this.error = `No detail for ${this.change} in what tuckerbox printed.`;
       }
@@ -82,7 +82,7 @@ export class CardView extends View {
     this.busy = action;
     cx.notify();
     cx.spawn(async (cx) => {
-      const r = await perform(inv, { dry: Boolean(this.board.fixtures) });
+      const r = await perform(inv, { dry: Boolean(this.board.fixtures),openURL:(url)=>cx.open_url(url) });
       this.busy = null;
       this.notice = r.message ? { text: r.message, kind: r.ok || r.dry ? "info" : "error" } : null;
       // A pane, tab or view opens beside the board: the dialog would cover it.
@@ -234,6 +234,12 @@ export class CardView extends View {
         .when(c.tasks.total > 0, (el) => el.child(progressBar(c.tasks, 70)))
         .child(div().flex_1())
         .when(Boolean(c.machine), (el) => el.child(div().text_color(tm.dim).child(c.machine))))
+      .when(Boolean(c.mr), (el)=>el.child(h_flex().items_center().gap(6).text_size(11)
+        .child(div().id(`mr-link-${c.change}`).cursor_pointer().text_color(tm.accent).hover(s=>s.underline())
+          .on_mouse_down("left",(_e,cx)=>cx.stop_propagation())
+          .on_click((_e,cx)=>{cx.stop_propagation();this.act("mr", {}, cx);}).child(`#${c.mr.number}`))
+        .when(Boolean(c.ci),(el)=>el.child(div().px(5).rounded(4).bg(tm.raised).text_color(c.ci.state==="red"?tm.blocked:c.ci.state==="green"?tm.working:tm.dim).child(`CI ${c.ci.state}`)))
+        .when(c.ship_round>0,(el)=>el.child(div().text_color(tm.dim).child(`ship round ${c.ship_round}`)))))
       .when(Boolean(c.reason), (el) => el.child(div().pt(6).text_size(12).text_color(c.state === "blocked" || c.state === "failed" ? tm.blocked : tm.muted).child(c.reason)))
       .child(div().pt(8).child(this.approvalRow(c)))
       .when(Boolean(this.validationBox(c)), (el) => el.child(div().pt(8).child(this.validationBox(c))))

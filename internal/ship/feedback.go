@@ -3,6 +3,7 @@ package ship
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -203,7 +204,10 @@ func (e *Engine) fix(ctx context.Context, claim *Claim, feedback Feedback) Outco
 	if current.State == "closed" {
 		return e.blocked(fmt.Errorf("merge request closed"))
 	}
-	if err := claim.Check(ctx, e.Forge); err != nil {
+	if err := e.checkClaim(ctx, claim); err != nil {
+		if errors.Is(err, errAlreadyMerged) {
+			return e.merged(ctx, r.LastPush)
+		}
 		return e.blocked(err)
 	}
 	if _, err := claim.Acquire(ctx, e.Forge, e.Request, e.persistPush); err != nil {
@@ -225,7 +229,7 @@ func (e *Engine) replyFeedback(ctx context.Context, claim *Claim, feedback Feedb
 			continue
 		}
 		if err := e.retryAction(ctx, func() error {
-			if err := claim.Check(ctx, e.Forge); err != nil {
+			if err := e.checkClaim(ctx, claim); err != nil {
 				return err
 			}
 			threads, err := e.Forge.Threads(ctx, r.MR.Number)
@@ -243,6 +247,9 @@ func (e *Engine) replyFeedback(ctx context.Context, claim *Claim, feedback Feedb
 			}
 			return e.Forge.Reply(ctx, r.MR.Number, thread.ID, reply)
 		}); err != nil {
+			if errors.Is(err, errAlreadyMerged) {
+				return e.merged(ctx, r.LastPush)
+			}
 			return e.blocked(err)
 		}
 

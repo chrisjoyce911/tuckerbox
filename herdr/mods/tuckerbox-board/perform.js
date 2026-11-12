@@ -38,6 +38,7 @@ export async function perform(inv, opts = {}) {
     const what = inv.argv ? shown(inv.argv) : `${inv.action} (a Herdr view)`;
     return { ok: false, dry: true, message: `Fixtures: would run ${what}${inv.on ? ` on ${inv.on}` : ""}` };
   }
+  if(inv.place==="browser"){try{if(!opts.openURL)throw new Error("browser action needs a click context");opts.openURL(inv.url);return {ok:true,message:""};}catch(e){return {ok:false,message:String(e?.message??e)};}}
   if (inv.place === "exec") {
     const r = outcome(await tuckerbox(inv));
     if (r.ok) bump();
