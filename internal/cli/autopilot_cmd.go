@@ -104,7 +104,12 @@ func (a App) autopilot(args []string) int {
 	}
 	fmt.Fprintf(a.Stdout, "autopilot: watching %s (a pass every %s; Ctrl-C stops autopilot, not the runs)\n", repo.Root, cfg.Autopilot.Interval)
 	last := time.Now()
-	t := time.NewTicker(autopilotWatch)
+	watch := autopilotWatch
+	// Tests read faster; nothing else sets this.
+	if d, err := time.ParseDuration(os.Getenv("TUCKERBOX_TEST_AUTOPILOT_WATCH")); err == nil && d > 0 {
+		watch = d
+	}
+	t := time.NewTicker(watch)
 	defer t.Stop()
 	for {
 		select {

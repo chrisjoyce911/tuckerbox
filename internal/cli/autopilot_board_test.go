@@ -60,6 +60,7 @@ func (f *cliFixture) startAutopilot() (*exec.Cmd, *syncBuf) {
 	f.t.Helper()
 	cmd := exec.Command(tools.Tuckerbox, "autopilot")
 	cmd.Dir = f.repo
+	cmd.Env = append(os.Environ(), "TUCKERBOX_TEST_AUTOPILOT_WATCH=200ms")
 	out := &syncBuf{}
 	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Start(); err != nil {
@@ -99,7 +100,7 @@ func TestAutopilotOnTheBoard(t *testing.T) {
 	}
 	f.waitState("a", "blocked", "")
 	f.waitState("b", "ready", "") // started by a later pass, after a's run ended
-	time.Sleep(6 * time.Second)   // at least one more pass
+	time.Sleep(time.Second)       // a few more reads and passes
 	if n := strings.Count(out.String(), "a needs you: blocked: "); n != 1 {
 		t.Errorf("a reported %d times:\n%s", n, out.String())
 	}
