@@ -378,3 +378,30 @@ func Admission(reqs []Request, all []Change) []Request {
 	}
 	return out
 }
+
+// RunAll orders the changes tuckerbox run --all starts. They are all
+// requested at once, so their age (created, then id) is their request
+// order; they are started in admission order, so the queue's ticket times
+// agree with it (change-priority: Run all order).
+func RunAll(ids []string, all []Change) []string {
+	byID := map[string]Change{}
+	for _, c := range all {
+		byID[c.ID] = c
+	}
+	aged := append([]string(nil), ids...)
+	sort.SliceStable(aged, func(i, j int) bool {
+		if c := olderFirst(byID[aged[i]].Created, byID[aged[j]].Created); c != 0 {
+			return c < 0
+		}
+		return aged[i] < aged[j]
+	})
+	reqs := make([]Request, len(aged))
+	for i, id := range aged {
+		reqs[i] = Request{ID: id, At: int64(i)}
+	}
+	out := make([]string, len(ids))
+	for i, r := range Admission(reqs, all) {
+		out[i] = r.ID
+	}
+	return out
+}

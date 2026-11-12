@@ -25,6 +25,16 @@ func sidecarRel(change string) string {
 	return approval.ChangeDir(change) + "/" + approval.SidecarName
 }
 
+// withSidecar runs fn holding the sidecar lock of the repository that
+// contains dir (change-priority: One writer for the sidecar).
+func withSidecar(ctx context.Context, dir string, fn func() error) error {
+	repo, err := runs.OpenRepo(ctx, dir)
+	if err != nil {
+		return err
+	}
+	return runs.WithSidecarLock(repo.Common, fn)
+}
+
 // approve: tuckerbox approve <change>
 func (a App) approve(args []string) int {
 	pos, err := parseArgs(args, nil, nil)
@@ -52,8 +62,12 @@ func (a App) approve(args []string) int {
 		if by == "" {
 			return fmt.Errorf("git user.name is not set in %s; set it (git config user.name \"Your Name\") so the approval says who approved", p.Dir)
 		}
-		ap, err = approval.Approve(approval.DirOf(p.Dir, change), by, time.Now())
-		return err
+		// The sidecar lock, after the change lock: priority and other
+		// writers of tuckerbox.toml can't lose this edit, nor it theirs.
+		return withSidecar(ctx, p.Dir, func() error {
+			ap, err = approval.Approve(approval.DirOf(p.Dir, change), by, time.Now())
+			return err
+		})
 	})
 	if err != nil {
 		return a.errf("approve", "%v", err)
@@ -79,10 +93,13 @@ func (a App) unapprove(args []string) int {
 		return 1
 	}
 	var removed bool
-	err = edits.WithChangeLock(context.Background(), p, "tuckerbox unapprove", func() error {
-		var err error
-		removed, err = approval.Unapprove(approval.DirOf(p.Dir, change))
-		return err
+	ctx := context.Background()
+	err = edits.WithChangeLock(ctx, p, "tuckerbox unapprove", func() error {
+		return withSidecar(ctx, p.Dir, func() error {
+			var err error
+			removed, err = approval.Unapprove(approval.DirOf(p.Dir, change))
+			return err
+		})
 	})
 	if err != nil {
 		return a.errf("unapprove", "%v", err)

@@ -109,7 +109,7 @@ func Approve(d Dir, by string, at time.Time) (Approval, error) {
 	if err != nil {
 		return a, err
 	}
-	return a, writeAtomic(d.SidecarPath(), data)
+	return a, WriteSidecar(d.SidecarPath(), data)
 }
 
 // Unapprove removes the [approval] table from d's tuckerbox.toml, keeping
@@ -130,7 +130,7 @@ func Unapprove(d Dir) (bool, error) {
 	if len(bytes.TrimSpace(data)) == 0 {
 		return true, os.Remove(d.SidecarPath())
 	}
-	return true, writeAtomic(d.SidecarPath(), data)
+	return true, WriteSidecar(d.SidecarPath(), data)
 }
 
 // SetApproval returns a tuckerbox.toml's contents with its [approval]
@@ -348,8 +348,10 @@ func tomlString(s string) string {
 
 func leftPad(h string) string { return strings.Repeat("0", 4-len(h)) + h }
 
-// writeAtomic replaces path with data through a temporary file beside it.
-func writeAtomic(path string, data []byte) error {
+// WriteSidecar replaces the tuckerbox.toml at path with data through a
+// temporary file beside it and a rename, so readers see the old file or the
+// new one, never part of it.
+func WriteSidecar(path string, data []byte) error {
 	f, err := os.CreateTemp(filepath.Dir(path), "."+SidecarName+".*")
 	if err != nil {
 		return err

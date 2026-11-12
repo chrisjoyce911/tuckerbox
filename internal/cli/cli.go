@@ -35,6 +35,10 @@ Commands:
   tasks <change> tick|untick <n.m>  Tick or untick one task in tasks.md
   approve <change>          Approve a change's text so runs may start it
   unapprove <change>        Withdraw a change's approval
+  priority [--json]         List the active changes in priority order
+  priority <change> <n|up|down|top>
+                            Move a change in the order (written in the
+                            repository checkout, not committed)
   herdr install [--keys [--key <key>]] [--drawer]
                             Install or update the board mod in the Herdr app;
                             --keys binds a key to open and hide it, --drawer
@@ -132,6 +136,8 @@ func (a App) Run(args []string) int {
 		return a.approve(rest)
 	case "unapprove":
 		return a.unapprove(rest)
+	case "priority":
+		return a.priority(rest)
 	case "herdr":
 		return a.herdr(rest)
 	default:

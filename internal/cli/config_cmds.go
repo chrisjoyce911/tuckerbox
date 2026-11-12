@@ -9,6 +9,7 @@ import (
 
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/deps"
+	"github.com/chrisjoyce911/tuckerbox/internal/priority"
 )
 
 func (a App) configEnv() (config.Env, func() (string, error)) {
@@ -55,17 +56,25 @@ func (a App) check() int {
 	if depErr != nil {
 		fmt.Fprintln(a.Stderr, "tuckerbox check: dependencies:", depErr)
 	}
+	prioProblems, prioErr := priority.Check(opts.RepoRoot)
+	if prioErr != nil {
+		fmt.Fprintln(a.Stderr, "tuckerbox check: priority:", prioErr)
+		depErr = errors.Join(depErr, prioErr)
+	}
 	var problems config.Problems
 	if err != nil && !errors.As(err, &problems) {
 		fmt.Fprintln(a.Stderr, "tuckerbox check:", err)
 		return 1
 	}
-	if n := len(problems) + len(depProblems); n > 0 {
+	if n := len(problems) + len(depProblems) + len(prioProblems); n > 0 {
 		for _, p := range problems {
 			p.File = displayPath(opts.RepoRoot, p.File)
 			fmt.Fprintln(a.Stderr, p)
 		}
 		for _, p := range depProblems {
+			fmt.Fprintln(a.Stderr, p)
+		}
+		for _, p := range prioProblems {
 			fmt.Fprintln(a.Stderr, p)
 		}
 		noun := "problems"
