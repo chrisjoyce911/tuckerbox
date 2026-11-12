@@ -47,4 +47,4 @@
 ## 7. Dogfood
 
 - [x] 7.1 Add `.tuckerbox/config.toml` to this repository and run a later change with `tuckerbox run`
-- [ ] 7.2 Archive this change after the implementation is accepted
+- [x] 7.2 Archive this change after the implementation is accepted
