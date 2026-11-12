@@ -28,6 +28,8 @@
 //	             says it ended the terminal but leaves it live
 //	run-delay    a Go duration: run waits that long after its terminal has
 //	             started, before it answers
+//	get-fail     a count: get answers that many more times, then fails
+//	             with a server error ("0" fails every get)
 //	run-reply    "garbage": run starts its terminal, then answers with
 //	             text that is not JSON
 package main
@@ -37,6 +39,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -154,6 +157,7 @@ func main() {
 		host(rest[0])
 	case "get":
 		name := lastPositional(rest)
+		getFault()
 		r, err := readRecord(name)
 		if err != nil {
 			notFound(name)
@@ -289,6 +293,25 @@ func run(args []string) {
 	}
 	data, _ := json.Marshal(map[string]any{"address": r.Address, "name": r.Name, "cwd": r.Cwd, "state": "live"})
 	fmt.Println(string(data))
+}
+
+// getFault counts down the get-fail fault, failing once it is spent.
+func getFault() {
+	if fault("get-fail") == "" {
+		// No fault: no lock, which run holds through its run-delay.
+		return
+	}
+	unlock := lock()
+	defer unlock()
+	n, err := strconv.Atoi(fault("get-fail"))
+	if err != nil {
+		return
+	}
+	if n <= 0 {
+		unlock()
+		hcError(1, "server", "fake get failure")
+	}
+	must(os.WriteFile(filepath.Join(dir(), "get-fail"), []byte(strconv.Itoa(n-1)), 0o644))
 }
 
 // fault returns the test fault file's content, or "".

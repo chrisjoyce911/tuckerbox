@@ -856,6 +856,44 @@ func TestStopWhileAdoptionTakesTheSlot(t *testing.T) {
 	}
 }
 
+// A resume that adopts an orphaned agent, but whose step cannot then look
+// its terminal up (herdr-core stops answering), does not record the step
+// failed and forget the terminal: the run stays running with its terminal
+// and slot, and tuckerbox stop ends the agent.
+func TestAdoptionLookupFailsThenStop(t *testing.T) {
+	f := newTermCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}, MaxParallel: 1})
+	f.plan(map[string]testenv.Action{"build": {WaitFor: f.gate("never")}})
+	f.start("add-login")
+	f.waitAgent("add-login", "build")
+	name := f.runOf("add-login").Terminal.Name
+	f.kill("add-login")
+
+	// One get answers (resume finds the agent to adopt), then none do.
+	f.fault("get-fail", "1")
+	res := f.tb("resume", "add-login")
+	st := mustState(t, f.worktreeOf("add-login"))
+	waitFor(t, "the resume to give up on the lookup", func() bool { return !runs.Active(st.RunLock()) })
+	f.fault("get-fail", "")
+	r := f.runOf("add-login")
+	if r.State != runs.Running || r.Terminal == nil || r.Terminal.Name != name || r.Slot == nil || r.Round != 1 {
+		t.Fatalf("run after the failed lookup: %s %q round %d terminal %+v slot %v\n%s%s",
+			r.State, r.Reason, r.Round, r.Terminal, r.Slot, res.stdout, res.stderr)
+	}
+	if term, _ := f.hc().Get(context.Background(), name); !term.Live() {
+		t.Fatal("the agent's terminal is not live")
+	}
+	if res := f.tb("stop", "add-login"); res.code != 0 {
+		t.Fatalf("stop: exit %d\n%s%s", res.code, res.stdout, res.stderr)
+	}
+	r = f.runOf("add-login")
+	if r.State != runs.Stopped || r.Terminal != nil {
+		t.Errorf("run %s %q terminal %+v", r.State, r.Reason, r.Terminal)
+	}
+	if n := f.liveTerminals(); n != 0 {
+		t.Errorf("%d live terminals after stop", n)
+	}
+}
+
 // stoppedEvents counts the change's stopped history events.
 func (f *cliFixture) stoppedEvents(id string) int {
 	f.t.Helper()

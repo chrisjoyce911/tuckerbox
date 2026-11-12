@@ -446,6 +446,56 @@ func TestAdoptLiveTerminal(t *testing.T) {
 	}
 }
 
+// A run that cannot look up the terminal it would adopt (herdr-core does
+// not answer, even to a second try) cannot tell whether its agent lives:
+// Run returns an *EndError naming the terminal, so the run keeps it for
+// stop and resume, and the agent is not left unfindable.
+func TestAdoptionLookupFails(t *testing.T) {
+	f := newTermFixture(t)
+	f.env.SetPlan(t, map[string]testenv.Action{"build": {WaitFor: filepath.Join(f.env.Home, "never")}})
+	s := f.step("build", "builder", 2, interactiveFake())
+	if err := s.State.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	pre := Outcome{BriefPath: s.State.Brief("build", 2), ResultPath: s.State.Result("build", 2), MessagePath: s.State.LastMessage("build", 2)}
+	if err := f.be.prepare(s, &pre); err != nil {
+		t.Fatal(err)
+	}
+	inner, err := s.Agent.ExpandInteractive(Values{Brief: "go", TurnHook: TurnHookArgv(termTools.Tuckerbox, s.State, "build", 2, HookArgv)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	argv := HoldArgv(termTools.Tuckerbox, s.Term, stepEnv(s, pre.BriefPath, pre.ResultPath), inner)
+	if _, err := f.hc.Start(context.Background(), HCStart{Name: s.Term.Name, Cwd: s.Worktree, Argv: argv,
+		Labels: [][2]string{{LabelChange, s.Change}, {LabelStep, "build"}, {LabelRound, "2"}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	f.setFault("get-fail", "0")
+	o, err := f.be.Run(context.Background(), s, termOpts)
+	var endErr *EndError
+	if !errors.As(err, &endErr) || endErr.Name != s.Term.Name {
+		t.Fatalf("Run with a failing lookup: %v (outcome %+v)", err, o)
+	}
+	if o.Stopped || o.Result != nil {
+		t.Errorf("outcome %+v", o)
+	}
+	if n := len(f.runCalls()); n != 1 {
+		t.Errorf("%d terminals started, want only the one to adopt", n)
+	}
+	f.setFault("get-fail", "")
+	if !f.get(s.Term.Name).Live() {
+		t.Fatal("the agent's terminal is not live")
+	}
+	// What stop does with the name the run kept: end the agent.
+	if err := f.be.EndAgent(context.Background(), s.Term.Name); err != nil {
+		t.Fatal(err)
+	}
+	if f.get(s.Term.Name).Live() {
+		t.Error("the agent's terminal is live after it was ended")
+	}
+}
+
 // Cancelling the run (stop) ends the agent's terminal.
 func TestStopEndsTerminal(t *testing.T) {
 	f := newTermFixture(t)
@@ -545,13 +595,17 @@ func TestAgentTurnCommand(t *testing.T) {
 	msgPath := s.State.LastMessage("build", 1)
 	tr := filepath.Join(t.TempDir(), "t.jsonl")
 	testenv.WriteFile(t, tr, `{"type":"assistant","message":{"id":"a","content":[{"type":"text","text":"from claude"}]}}`+"\n")
+	stop, err := json.Marshal(map[string]string{"transcript_path": tr})
+	if err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		style HookStyle
 		args  []string
 		stdin string
 		want  string
 	}{
-		{HookClaude, nil, `{"transcript_path":"` + tr + `"}`, "from claude"},
+		{HookClaude, nil, string(stop), "from claude"},
 		{HookCodex, []string{`{"type":"agent-turn-complete","last-assistant-message":"from codex"}`}, "", "from codex"},
 		{HookArgv, []string{"plain words"}, "", "plain words"},
 	}

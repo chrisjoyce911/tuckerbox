@@ -214,9 +214,25 @@ func (t Terminal) Run(ctx context.Context, s Step, opts Options) (Outcome, error
 	defer logf.Close()
 	log := io.Writer(logf)
 
-	cur, err := t.HC.Get(ctx, name)
+	cur, err := t.lookup(ctx, s, opts, log)
 	if err != nil {
-		return o, fmt.Errorf("step %s: looking for terminal %s: %w", s.Step, name, err)
+		o.ExitCode = -1
+		return o, fmt.Errorf("step %s: %w", s.Step, err)
+	}
+	if ctx.Err() != nil {
+		// Stopped before the step began: end whatever agent the terminal
+		// holds (one this run would adopt, or one left from earlier), and
+		// know it is gone, before the step reports stopped.
+		if cur.Live() {
+			bg, cancel := context.WithTimeout(context.Background(), opts.EndTimeout+10*time.Second)
+			err := t.HC.End(bg, name, opts.EndTimeout)
+			cancel()
+			if err != nil {
+				return o, fmt.Errorf("step %s: %w", s.Step, &EndError{Name: name, Err: err})
+			}
+		}
+		o.Stopped, o.ExitCode = true, -1
+		return o, nil
 	}
 	adopt := cur.Live() && MatchesStep(cur, s.Change, s.Step, s.Round)
 	if cur.Live() && !adopt {
@@ -441,6 +457,29 @@ func (t Terminal) reconcileStart(ctx context.Context, s Step, opts Options, log 
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// lookup returns the step's terminal, or nil when there is none. A lookup
+// that fails (a stop cancelling it, or herdr-core not answering) is tried
+// again with a context of its own; when that fails too, whether an agent
+// lives in the terminal is unknown, so the error is an *EndError: the run
+// keeps the terminal's name for stop and resume rather than recording an
+// end while a resumed run's adopted agent may still work.
+func (t Terminal) lookup(ctx context.Context, s Step, opts Options, log io.Writer) (*HCTerminal, error) {
+	name := s.Term.Name
+	cur, err := t.HC.Get(ctx, name)
+	if err == nil {
+		return cur, nil
+	}
+	logLine(log, "step %s round %d: looking for terminal %s: %v; trying again", s.Step, s.Round, name, err)
+	bg, cancel := context.WithTimeout(context.Background(), opts.EndTimeout+10*time.Second)
+	defer cancel()
+	cur, err2 := t.HC.Get(bg, name)
+	if err2 != nil {
+		logLine(log, "step %s round %d: cannot tell whether terminal %s is live: %v", s.Step, s.Round, name, err2)
+		return nil, &EndError{Name: name, Err: fmt.Errorf("looking for it: %w", err2)}
+	}
+	return cur, nil
 }
 
 // prepare writes a new terminal's brief and clears the round's leftover
