@@ -14,6 +14,7 @@ import (
 
 	"github.com/chrisjoyce911/tuckerbox/internal/agent"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
+	"github.com/chrisjoyce911/tuckerbox/internal/history"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 )
 
@@ -63,8 +64,9 @@ type Engine struct {
 	// Now returns the time; nil means time.Now.
 	Now func() time.Time
 
-	mu    sync.Mutex
-	saved Run
+	mu      sync.Mutex
+	saved   Run
+	machine string
 }
 
 // ActiveError means the change already has an active run.
@@ -183,6 +185,7 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	if err != nil {
 		return nil, err
 	}
+	prev := e.saved
 	pidPath := ws.State.PidFile()
 	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
 		return nil, err
@@ -196,6 +199,7 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	if err := e.save(ws, rs); err != nil {
 		return nil, err
 	}
+	e.startEvents(ws, rs, req.Mode, prev)
 	if e.StateHome != "" {
 		if err := Remember(e.StateHome, IndexEntry{Repo: e.Repo.Main, Change: req.Change, Worktree: ws.Path, State: string(ws.State)}); err != nil {
 			e.logf(req.Change, "warning: machine index: %v", err)
@@ -324,6 +328,7 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 		if err := e.save(ws, rs); err != nil {
 			return rs, err
 		}
+		e.event(ws, rs, history.Event{Kind: history.StepStarted})
 		tmpl, err := agent.Resolve(st.Agent, templates)
 		if err != nil {
 			return e.finish(ws, rs, Failed, err.Error())
@@ -362,8 +367,12 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 			Findings: res.Findings, ExitCode: out.ExitCode, Ended: e.now(),
 		})
 		e.logf(rs.Change, "step %s round %d: %s: %s", st.ID, rs.Round, res.Status, oneLine(res.Summary))
+		e.resultEvent(ws, rs, res, out.ExitCode)
 		switch res.Status {
 		case agent.Done:
+			if i+1 < len(steps) {
+				e.event(ws, rs, history.Event{Kind: history.Handoff, To: steps[i+1].ID, Summary: res.Summary})
+			}
 			i++
 		case agent.Rejected:
 			if rs.Rejections == nil {
@@ -371,6 +380,11 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 			}
 			rs.Rejections[st.ID]++
 			n := rs.Rejections[st.ID]
+			rej := history.Event{Kind: history.Rejected, Summary: res.Summary, Findings: res.Findings}
+			if st.OnReject != "" && n < st.MaxRounds {
+				rej.To = st.OnReject
+			}
+			e.event(ws, rs, rej)
 			if st.OnReject == "" {
 				return e.finish(ws, rs, Blocked, fmt.Sprintf("step %s rejected the change and has no on_reject: %s", st.ID, oneLine(res.Summary)))
 			}
@@ -428,6 +442,7 @@ func (e *Engine) finish(ws Workspace, rs *Run, s State, reason string) (*Run, er
 	if err := e.save(ws, rs); err != nil {
 		return rs, err
 	}
+	e.event(ws, rs, history.Event{Kind: finishKind(s), Reason: reason})
 	_ = os.Remove(StopFile(ws.State))
 	return rs, nil
 }
