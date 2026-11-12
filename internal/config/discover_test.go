@@ -37,7 +37,7 @@ func TestDiscover(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Options{RepoRoot: root, MachinePath: filepath.Join(cfgDir, "tuckerbox", "config.toml"), Remote: "git@github.com:me/repo.git"}
-	if opts != want {
+	if opts.RepoRoot != want.RepoRoot || opts.MachinePath != want.MachinePath || opts.Remote != want.Remote || opts.PushURL == nil {
 		t.Errorf("got %+v, want %+v", opts, want)
 	}
 }

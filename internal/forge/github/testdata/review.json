@@ -1,0 +1,171 @@
+[
+  {
+    "method": "POST",
+    "path": "/graphql",
+    "request": {
+      "query": "query($owner:String!,$repo:String!,$number:Int!,$after:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100,after:$after){nodes{id path line isResolved comments(first:100){nodes{id body url author{login} authorAssociation} pageInfo{hasNextPage endCursor}}}pageInfo{hasNextPage endCursor}}}}}",
+      "variables": {
+        "owner": "sam",
+        "repo": "app",
+        "number": 12,
+        "after": null
+      }
+    },
+    "response": {
+      "data": {
+        "repository": {
+          "pullRequest": {
+            "reviewThreads": {
+              "nodes": [
+                {
+                  "id": "thread1",
+                  "path": "internal/app/login.go",
+                  "line": 12,
+                  "isResolved": false,
+                  "comments": {
+                    "nodes": [
+                      {
+                        "id": "c1",
+                        "body": "please fix",
+                        "url": "https://github.com/sam/app/pull/12#discussion-c1",
+                        "author": {
+                          "login": "sam"
+                        },
+                        "authorAssociation": "OWNER"
+                      }
+                    ],
+                    "pageInfo": {
+                      "hasNextPage": true,
+                      "endCursor": "C1"
+                    }
+                  }
+                }
+              ],
+              "pageInfo": {
+                "hasNextPage": true,
+                "endCursor": "T1"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/graphql",
+    "request": {
+      "query": "query($id:ID!,$after:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$after){nodes{id body url author{login} authorAssociation}pageInfo{hasNextPage endCursor}}}}}",
+      "variables": {
+        "id": "thread1",
+        "after": "C1"
+      }
+    },
+    "response": {
+      "data": {
+        "node": {
+          "comments": {
+            "nodes": [
+              {
+                "id": "c2",
+                "body": "more detail",
+                "url": "https://github.com/sam/app/pull/12#discussion-c2",
+                "author": {
+                  "login": "sam"
+                },
+                "authorAssociation": "MEMBER"
+              }
+            ],
+            "pageInfo": {
+              "hasNextPage": false,
+              "endCursor": "C2"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/graphql",
+    "request": {
+      "query": "query($owner:String!,$repo:String!,$number:Int!,$after:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100,after:$after){nodes{id path line isResolved comments(first:100){nodes{id body url author{login} authorAssociation} pageInfo{hasNextPage endCursor}}}pageInfo{hasNextPage endCursor}}}}}",
+      "variables": {
+        "owner": "sam",
+        "repo": "app",
+        "number": 12,
+        "after": "T1"
+      }
+    },
+    "response": {
+      "data": {
+        "repository": {
+          "pullRequest": {
+            "reviewThreads": {
+              "nodes": [
+                {
+                  "id": "thread2",
+                  "path": "other.go",
+                  "line": 1,
+                  "isResolved": false,
+                  "comments": {
+                    "nodes": [
+                      {
+                        "id": "c3",
+                        "body": "external",
+                        "url": "https://github.com/sam/app/pull/12#discussion-c3",
+                        "author": {
+                          "login": "stranger"
+                        },
+                        "authorAssociation": "NONE"
+                      }
+                    ],
+                    "pageInfo": {
+                      "hasNextPage": false,
+                      "endCursor": "C3"
+                    }
+                  }
+                },
+                {
+                  "id": "thread3",
+                  "path": "done.go",
+                  "line": 2,
+                  "isResolved": true,
+                  "comments": {
+                    "nodes": [],
+                    "pageInfo": {
+                      "hasNextPage": false
+                    }
+                  }
+                }
+              ],
+              "pageInfo": {
+                "hasNextPage": false
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/graphql",
+    "request": {
+      "query": "mutation($thread:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$thread,body:$body}){comment{id}}}",
+      "variables": {
+        "thread": "thread1",
+        "body": "Fixed in def456: validation added"
+      }
+    },
+    "response": {
+      "data": {
+        "addPullRequestReviewThreadReply": {
+          "comment": {
+            "id": "reply1"
+          }
+        }
+      }
+    }
+  }
+]
