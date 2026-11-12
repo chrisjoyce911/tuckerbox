@@ -54,9 +54,9 @@ func (a App) edit(args []string) int {
 	if err != nil {
 		return a.errf("edit", "%v", err)
 	}
-	p, ok := a.editPlace("edit", pos[0])
-	if !ok {
-		return 1
+	p, err := edits.LocateWith(context.Background(), wd, pos[0], cfg.Worktree)
+	if err != nil {
+		return a.errf("edit", "%v", err)
 	}
 	path, err := file.Path(p)
 	if err != nil {

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/runs"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 )
@@ -46,10 +47,33 @@ func (p Place) Describe() string {
 	return "the repository checkout " + p.Dir
 }
 
-// Locate finds where change is edited, for the repository containing dir.
-// The change's worktree is the worktree of the repository whose run state
-// is for change. The change folder must exist there.
+// Locate finds where change is edited, for the repository containing dir,
+// with the worktree settings of that repository's config (the defaults when
+// it has none). See [LocateWith].
 func Locate(ctx context.Context, dir, change string) (Place, error) {
+	var wt config.Worktree
+	env := config.SystemEnv()
+	if opts, err := config.Discover(env, dir); err == nil {
+		// A config with problems still names its worktree settings; a run
+		// would refuse it anyway.
+		if cfg, _ := config.Load(opts); cfg != nil {
+			wt = cfg.Worktree
+		}
+	}
+	return LocateWith(ctx, dir, change, wt)
+}
+
+// LocateWith finds where change is edited, for the repository containing
+// dir. The change's worktree is the repository's worktree that:
+//
+//   - holds run state for change, or
+//   - is at the path wt gives change's runs, where a run makes or reuses
+//     its worktree (runs.Repo.EnsureWorktree),
+//
+// whether or not a run has recorded state there yet: a first run holds the
+// change lock before it writes any. Otherwise it is the checkout. The
+// change folder must exist in the place found.
+func LocateWith(ctx context.Context, dir, change string, wt config.Worktree) (Place, error) {
 	if err := statedir.CheckID("change", change); err != nil {
 		return Place{}, err
 	}
@@ -58,20 +82,48 @@ func Locate(ctx context.Context, dir, change string) (Place, error) {
 		return Place{}, err
 	}
 	p := Place{Change: change, Dir: repo.Root}
-	if wts, err := repo.Worktrees(ctx); err == nil {
-		for _, wt := range wts {
-			st, err := statedir.Resolve(ctx, wt)
-			if err != nil {
-				continue
-			}
-			if r, err := runs.ReadRun(st.RunFile()); err == nil && r.Change == change {
-				p = Place{Change: change, Dir: wt, Worktree: true, State: st}
+	wts, err := repo.Worktrees(ctx)
+	if err != nil {
+		return p, err
+	}
+	found := ""
+	for _, w := range wts {
+		st, err := statedir.Resolve(ctx, w)
+		if err != nil {
+			continue
+		}
+		if r, err := runs.ReadRun(st.RunFile()); err == nil && r.Change == change {
+			found = w
+			break
+		}
+	}
+	if found == "" {
+		path := repo.WorktreePath(wt, change)
+		for i, w := range wts {
+			if i > 0 && samePath(w, path) { // never the main worktree
+				found = w
 				break
 			}
 		}
+	}
+	if found != "" {
+		st, err := statedir.Resolve(ctx, found)
+		if err != nil {
+			return p, err
+		}
+		p = Place{Change: change, Dir: found, Worktree: true, State: st}
 	}
 	if fi, err := os.Stat(p.ChangeDir()); err != nil || !fi.IsDir() {
 		return p, fmt.Errorf("no change %s in %s (no folder openspec/changes/%s)", change, p.Describe(), change)
 	}
 	return p, nil
+}
+
+func samePath(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	fa, err1 := os.Stat(a)
+	fb, err2 := os.Stat(b)
+	return err1 == nil && err2 == nil && os.SameFile(fa, fb)
 }
