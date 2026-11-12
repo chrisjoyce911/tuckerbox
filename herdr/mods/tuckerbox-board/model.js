@@ -128,6 +128,16 @@ export function group(board) {
     }
     col.cards.push(card);
   }
+  // Sorted columns list their cards in priority order: by position, cards
+  // without one after them in board order (a merged card from another
+  // machine may land in a column it wasn't sorted in).
+  for (const col of cols) {
+    if (!sortedColumn(col.id)) continue;
+    col.cards = col.cards
+      .map((c, i) => ({ c, i }))
+      .sort((a, b) => (a.c.position || Infinity) - (b.c.position || Infinity) || a.i - b.i)
+      .map((x) => x.c);
+  }
   return cols;
 }
 
@@ -145,8 +155,10 @@ export function sortedColumn(id) {
 // above card B: B's position if the card came from below B, else one less.
 // Below the last card L: L's position if the card came from above L, else
 // one more. Null when the drop can't reorder (another column, an unsorted
-// column, no positions, or no move).
+// column, no positions, or no move). A drop on the dragged card itself, on
+// either half, is no move.
 export function dropPosition(cards, dragged, over, below = false) {
+  if (dragged === over) return null;
   const list = Array.isArray(cards) ? cards : [];
   const d = list.find((c) => c.change === dragged);
   let i = list.findIndex((c) => c.change === over);
@@ -163,6 +175,34 @@ export function dropPosition(cards, dragged, over, below = false) {
     n = d.position > b.position ? b.position : b.position - 1;
   }
   return n === d.position || n < 1 ? null : n;
+}
+
+// The window rectangle of the element a mouse event is over: its window
+// position less the position within the element, and the element's size.
+export function eventBox(e) {
+  const p = e?.position, l = e?.local_position;
+  if (!p || !l) return null;
+  return { x: p.x - l.x, y: p.y - l.y, w: e.bounds?.width ?? 0, h: e.bounds?.height ?? 0 };
+}
+
+// Whether a window point is inside a rectangle from eventBox.
+export function inBox(box, point) {
+  if (!box || !point) return false;
+  return point.x >= box.x && point.x <= box.x + box.w && point.y >= box.y && point.y <= box.y + box.h;
+}
+
+// The drop target still in force with the pointer at `point`: the target
+// only while the pointer is over its card, else none. A release elsewhere
+// (outside the card, another column, off the board) cancels the drag.
+export function liveDrop(drop, point) {
+  return drop && inBox(drop.box, point) ? drop : null;
+}
+
+// The card a reorder runs for: `tuckerbox priority` writes the checkout on
+// the board's machine (change-priority: Drag to reorder), so it runs there
+// whatever machine the card's run is on.
+export function priorityCard(card, board) {
+  return { ...card, on: board?.on ?? null, path: board?.path ?? "" };
 }
 
 export function counts(board) {
@@ -467,7 +507,10 @@ function weight(card) {
 // machine's cards merged in by change id. `others` holds { machine, board }
 // with a normalised board or { error }. A machine without a checkout of the
 // repository (repo_not_found) adds nothing; any other failure names the
-// machine in `unreachable` and hides no card.
+// machine in `unreachable` and hides no card. Priority and position are the
+// board machine's: they come from its checkout and its priority order, so a
+// card taken from another machine keeps the own copy's, and a card only
+// another machine has gets none (it can't be dragged).
 export function mergeBoards(own, others = []) {
   if (!own || own.error) return own;
   const cards = own.cards.slice();
@@ -482,8 +525,9 @@ export function mergeBoards(own, others = []) {
     }
     if (b.repo !== own.repo) continue;
     for (const c of b.cards) {
-      const card = { ...c, column: fitColumn(c, own.columns) };
-      const i = at.get(card.change);
+      const i = at.get(c.change);
+      const mine = i === undefined ? null : own.cards[i] ?? null;
+      const card = { ...c, column: fitColumn(c, own.columns), priority: mine?.priority ?? null, position: mine?.position ?? 0 };
       if (i === undefined) { at.set(card.change, cards.length); cards.push(card); }
       else if (weight(card) > weight(cards[i])) cards[i] = card;
     }

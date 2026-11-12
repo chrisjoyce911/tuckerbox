@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { normaliseBoard, normaliseCard, group, sortedColumn, dropPosition } from "../model.js";
+import { normaliseBoard, normaliseCard, group, sortedColumn, dropPosition, mergeBoards, eventBox, inBox, liveDrop, priorityCard } from "../model.js";
 import { commandLine, invocation } from "../actions.js";
 
 const fixture = JSON.parse(readFileSync(new URL("../fixtures/board.json", import.meta.url), "utf8"));
@@ -73,4 +73,71 @@ test("a drop that moves nothing, or can't reorder, runs nothing", () => {
 test("the priority command line takes a position from 1 only", () => {
   assert.deepEqual(commandLine("priority", "add-login", { position: 7 }), ["tuckerbox", "priority", "add-login", "7"]);
   for (const position of [0, -1, 1.5, "2", undefined]) assert.throws(() => commandLine("priority", "add-login", { position }));
+});
+
+// A small drag that ends on the dragged card itself, on either half, moves
+// nothing, even with gaps between the column's positions.
+test("a drop on the dragged card itself runs nothing", () => {
+  const cards = col("approved", ["a", 1], ["b", 4], ["c", 7]);
+  assert.equal(dropPosition(cards, "b", "b", false), null);
+  assert.equal(dropPosition(cards, "b", "b", true), null);
+  const last = col("approved", ["a", 1], ["b", 4]);
+  assert.equal(dropPosition(last, "b", "b", false), null);
+  assert.equal(dropPosition(last, "b", "b", true), null);
+  // A real move in the same column still works.
+  assert.equal(dropPosition(cards, "b", "a"), 1);
+});
+
+test("a drop target holds only while the pointer is over its card", () => {
+  const box = eventBox({ position: { x: 150, y: 260 }, local_position: { x: 50, y: 60 }, bounds: { width: 200, height: 100 } });
+  assert.deepEqual(box, { x: 100, y: 200, w: 200, h: 100 });
+  assert.ok(inBox(box, { x: 100, y: 200 }));
+  assert.ok(inBox(box, { x: 300, y: 300 }));
+  assert.ok(!inBox(box, { x: 301, y: 250 }));
+  const drop = { over: "b", below: false, box };
+  assert.equal(liveDrop(drop, { x: 150, y: 250 }), drop);
+  // Released in another column or off the board: cancelled.
+  assert.equal(liveDrop(drop, { x: 600, y: 250 }), null);
+  assert.equal(liveDrop(drop, { x: 150, y: 50 }), null);
+  assert.equal(liveDrop(drop, undefined), null);
+  assert.equal(liveDrop(null, { x: 150, y: 250 }), null);
+});
+
+// Priority is the board machine's: a merged card keeps the own copy's
+// priority and position, and the move runs on the board's machine.
+test("merged boards keep the board machine's priority order", () => {
+  const doc = (machine, path, cards) => ({ version: 1, repo: "github.com/owner/shop", path, machine, require_approval: true, steps: ["build"], columns: fixture.columns, cards });
+  const c = (change, column, priority, position, extra = {}) => ({ change, column, priority, position, tasks: { done: 0, total: 1 }, approval: { state: "approved" }, ...extra });
+  const own = normaliseBoard(doc("studio", "/work/shop", [
+    c("a", "approved", 1000, 1), c("b", "approved", 2000, 2), c("c", "approved", 3000, 3),
+  ]), { on: null });
+  // mini's checkout has its own (stale) priorities, and runs b.
+  const mini = normaliseBoard(doc("mini", "/Users/sam/shop", [
+    c("a", "approved", 3000, 3), c("b", "approved", 1000, 1, { state: "queued" }), c("c", "approved", 2000, 2), c("z", "approved", 500, 1),
+  ]), { on: "mini" });
+  const b = mergeBoards(own, [{ machine: "mini", board: mini }]);
+  const by = Object.fromEntries(b.cards.map((x) => [x.change, x]));
+  assert.equal(by.b.on, "mini"); // the run's copy wins for state
+  assert.equal(by.b.priority, 2000);
+  assert.equal(by.b.position, 2);
+  // A change only mini has gets no position here: it can't be dragged.
+  assert.equal(by.z.priority, null);
+  assert.equal(by.z.position, 0);
+  // Sorted by the board machine's order, not mini's.
+  assert.deepEqual(group(b).find((x) => x.id === "approved").cards.map((x) => x.change), ["a", "b", "c", "z"]);
+  // The move runs on the board's machine, in its checkout.
+  const moved = priorityCard(by.b, b);
+  assert.equal(moved.on, null);
+  assert.equal(moved.path, "/work/shop");
+  assert.equal(moved.change, "b");
+});
+
+test("sorted columns list cards by position, unpositioned last", () => {
+  const board = normaliseBoard({ ...fixture, cards: [
+    { change: "x", column: "approved" }, { change: "c", column: "approved", position: 3 },
+    { change: "a", column: "approved", position: 1 }, { change: "d", column: "done" }, { change: "e", column: "done" },
+  ] });
+  const g = group(board);
+  assert.deepEqual(g.find((x) => x.id === "approved").cards.map((x) => x.change), ["a", "c", "x"]);
+  assert.deepEqual(g.find((x) => x.id === "done").cards.map((x) => x.change), ["d", "e"]);
 });

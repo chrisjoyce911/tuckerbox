@@ -23,7 +23,7 @@ const div = node, h_flex = node, v_flex = node;
 const theme = () => ({}), needsYou = () => false, cardActions = () => [], defaultStep = () => "";
 const stateChip = node, approvalChip = node, progressBar = node, editOf = () => null, editNote = () => null;
 const ago = () => "recently", columnName = () => "In progress";
-const sortedColumn = () => true, dropPosition = () => null;
+const sortedColumn = () => true, dropPosition = () => null, eventBox = () => null, liveDrop = () => null, priorityCard = (c) => c;
 `;
 const { BoardView } = await import(`data:text/javascript;base64,${Buffer.from(stubs + source.replace(/^import .*;\n/gm, "")).toString("base64")}`);
 const fixture = JSON.parse(readFileSync(new URL("../fixtures/detail.json", import.meta.url), "utf8"));

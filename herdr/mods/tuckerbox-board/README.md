@@ -251,10 +251,15 @@ card (upper half) or below it (lower half). `dropPosition()` in `model.js`
 turns that into the position: above card B, B's position if the card came
 from below B, else one less; below the column's last card L, L's position if
 it came from above L, else one more. The board then runs
-`tuckerbox priority <id> <n>` on its own machine and shows its error, if
-any; the card moves only when the next read shows it. If positions changed
-between the read and the drop, the card may land one place off, and the next
-read shows where it is.
+`tuckerbox priority <id> <n>` on its own machine, in its own checkout (even
+for a card whose run is on another machine), and shows its error, if any;
+the card moves only when the next read shows it. Releasing anywhere but over
+the target card (outside it, in another column, off the board), or on the
+dragged card itself, moves nothing. Priority and position always come from
+the board's own machine: a card merged in from another machine keeps the own
+copy's, and a change only another machine has gets none and can't be
+dragged. If positions changed between the read and the drop, the card may
+land one place off, and the next read shows where it is.
 
 Commands run with `exec` on the card's Herdr machine, in the document's
 `path` there, with arguments as a list (no shell). A change id must be
