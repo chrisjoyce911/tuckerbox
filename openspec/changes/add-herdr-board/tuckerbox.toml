@@ -1,3 +1,5 @@
+title = "Herdr board"
+
 [approval]
 hash = "sha256:db1d00e813fcad425ba9e153742f69ab798292573f505b5da39c7660013dffcb"
 by = "Chris Joyce"
