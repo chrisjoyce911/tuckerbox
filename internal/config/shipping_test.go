@@ -139,7 +139,7 @@ func TestREADMEConfigExamples(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(data)
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
 	found := 0
 	for _, part := range strings.Split(text, "```toml\n")[1:] {
 		example, _, _ := strings.Cut(part, "```")
