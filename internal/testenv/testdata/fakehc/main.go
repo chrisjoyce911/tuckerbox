@@ -69,8 +69,8 @@ type record struct {
 	// StatusMs and OutputMs are filled in by get.
 	StatusMs *int64 `json:"status_ms,omitempty"`
 	OutputMs *int64 `json:"output_ms,omitempty"`
-	Pid     int               `json:"pid"`
-	Seq     int               `json:"seq"`
+	Pid      int    `json:"pid"`
+	Seq      int    `json:"seq"`
 }
 
 func dir() string {
