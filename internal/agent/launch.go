@@ -1,0 +1,335 @@
+package agent
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
+)
+
+// Step is everything needed to run one step's agent once.
+type Step struct {
+	Change string
+	Step   string
+	Role   string
+	Round  int
+	// Agent is the resolved agent definition (see Resolve).
+	Agent  Template
+	Model  string
+	Effort string
+	// Permissions are the flags of the step's machine permission profile,
+	// already resolved and checked against the repository's remote. Nil
+	// means no profile: the agent runs with its own defaults.
+	Permissions []string
+	// Worktree is the change's git worktree, the agent's working directory.
+	Worktree string
+	// State is the worktree's state directory (statedir.Resolve).
+	State statedir.Dir
+	// Base is the ref the branch started from, if known; it goes in the brief.
+	Base string
+	// Earlier are accepted results from earlier rounds whose findings this
+	// round must address.
+	Earlier []Result
+	// Env is extra environment for the agent, as KEY=value.
+	Env []string
+}
+
+// Options tune Run. The zero value is ready to use.
+type Options struct {
+	// Poll is how often the result file is checked while the agent runs
+	// (default 500ms).
+	Poll time.Duration
+	// ResultGrace is how long the agent may keep running after it wrote a
+	// valid result before it is stopped (default 2 minutes).
+	ResultGrace time.Duration
+	// StopGrace is how long the agent has to exit after it is asked to stop,
+	// before it is killed (default 10 seconds).
+	StopGrace time.Duration
+	// TailBytes is how much output is kept for a step without a result
+	// (default 4 KiB).
+	TailBytes int64
+	// OnStart is called with the agent's pid once it has started.
+	OnStart func(pid int)
+}
+
+// Outcome is what happened when a step's agent ran.
+type Outcome struct {
+	// Result is the accepted result, or nil when the agent left no valid
+	// result for this step and round. The step is then failed.
+	Result *Result
+	// ExitCode is the agent's exit status (-1 if it was killed by a signal
+	// or did not start).
+	ExitCode int
+	// Stopped is true when ctx ended before the agent finished. Result is
+	// still set if the agent wrote a valid one before it was stopped.
+	Stopped bool
+	// Ignored records each stale or malformed result file seen, and why.
+	Ignored []string
+	// Tail is the end of the step's log, set when Result is nil.
+	Tail string
+	// Argv is the command line that was run.
+	Argv []string
+	// BriefPath, ResultPath and LogPath are the step's files.
+	BriefPath, ResultPath, LogPath string
+}
+
+// Status is the step's outcome: the agent's reported status, or failed
+// when there is no valid result.
+func (o Outcome) Status() Status {
+	if o.Result == nil {
+		return Failed
+	}
+	return o.Result.Status
+}
+
+// FailureReason describes a step without a valid result, for run state.
+func (o Outcome) FailureReason() string {
+	if o.Result != nil {
+		return ""
+	}
+	if o.Stopped {
+		return "stopped before the agent wrote a result"
+	}
+	msg := fmt.Sprintf("agent exited with status %d without a valid result", o.ExitCode)
+	if len(o.Ignored) > 0 {
+		msg += " (ignored: " + strings.Join(o.Ignored, "; ") + ")"
+	}
+	return msg
+}
+
+// promptFor is the short instruction passed to agents as {prompt}.
+func promptFor(brief string) string {
+	return "Read the Tuckerbox brief at " + brief +
+		" and follow it. It ends with the result file you must write before you exit."
+}
+
+// Run writes the step's brief, starts its agent headless in the worktree with
+// output appended to the step's log, and waits for it. It accepts only a
+// well-formed result naming this change, step and round; stale and malformed
+// result files are logged, recorded in Outcome.Ignored and waited past.
+//
+// Cancelling ctx stops the agent (stop): it is asked to exit, then killed
+// after StopGrace. An error is returned only when the agent could not be
+// started; an agent that runs and fails is reported in the Outcome.
+func Run(ctx context.Context, s Step, opts Options) (Outcome, error) {
+	opts = withDefaults(opts)
+	var o Outcome
+	if err := statedir.CheckID("step", s.Step); err != nil {
+		return o, err
+	}
+	if s.Round < 1 {
+		return o, fmt.Errorf("step %s: round must be 1 or more, got %d", s.Step, s.Round)
+	}
+	if s.State == "" || s.Worktree == "" {
+		return o, errors.New("step needs a worktree and a state directory")
+	}
+	if err := s.State.Ensure(); err != nil {
+		return o, err
+	}
+	o.BriefPath = s.State.Brief(s.Step, s.Round)
+	o.ResultPath = s.State.Result(s.Step, s.Round)
+	o.LogPath = s.State.Log(s.Step)
+	want := Expect{Change: s.Change, Step: s.Step, Round: s.Round}
+
+	brief := Brief{
+		Change: s.Change, Step: s.Step, Role: s.Role, Round: s.Round,
+		Root: s.Worktree, ResultPath: o.ResultPath, Base: s.Base, Earlier: s.Earlier,
+	}
+	if err := brief.Write(o.BriefPath); err != nil {
+		return o, fmt.Errorf("step %s: brief: %w", s.Step, err)
+	}
+	// A result file already at this round's path was not written by this
+	// run of the step; move it aside so it can't be taken as fresh.
+	if _, err := os.Stat(o.ResultPath); err == nil {
+		old := o.ResultPath + ".old-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+		if err := os.Rename(o.ResultPath, old); err != nil {
+			return o, fmt.Errorf("step %s: moving old result aside: %w", s.Step, err)
+		}
+	}
+
+	argv, err := s.Agent.Expand(Values{
+		Prompt: promptFor(o.BriefPath), Brief: o.BriefPath, Result: o.ResultPath,
+		Workdir: s.Worktree, Model: s.Model, Effort: s.Effort, Permissions: s.Permissions,
+	})
+	if err != nil {
+		return o, err
+	}
+	o.Argv = argv
+
+	logf, err := openLog(o.LogPath)
+	if err != nil {
+		return o, fmt.Errorf("step %s: log: %w", s.Step, err)
+	}
+	defer logf.Close()
+	logLine(logf, "step %s round %d started: %s", s.Step, s.Round, strings.Join(quoteArgs(argv), " "))
+
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Dir = s.Worktree
+	cmd.Stdin = nil
+	cmd.Stdout = logf
+	cmd.Stderr = logf
+	cmd.Env = append(os.Environ(),
+		"TUCKERBOX_CHANGE="+s.Change,
+		"TUCKERBOX_STEP="+s.Step,
+		"TUCKERBOX_ROUND="+strconv.Itoa(s.Round),
+		"TUCKERBOX_BRIEF="+o.BriefPath,
+		"TUCKERBOX_RESULT="+o.ResultPath,
+	)
+	cmd.Env = append(cmd.Env, s.Env...)
+	setProcAttr(cmd)
+	if err := cmd.Start(); err != nil {
+		logLine(logf, "step %s round %d: agent did not start: %v", s.Step, s.Round, err)
+		o.ExitCode = -1
+		return o, fmt.Errorf("step %s: starting agent %s: %w", s.Step, s.Agent.Name, err)
+	}
+	if opts.OnStart != nil {
+		opts.OnStart(cmd.Process.Pid)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+
+	w := watcher{path: o.ResultPath, want: want, log: logf}
+	var waitErr error
+	var graceC <-chan time.Time
+	tick := time.NewTicker(opts.Poll)
+	defer tick.Stop()
+loop:
+	for {
+		select {
+		case waitErr = <-exited:
+			break loop
+		case <-ctx.Done():
+			o.Stopped = true
+			logLine(logf, "step %s round %d: stopping agent", s.Step, s.Round)
+			waitErr = stop(cmd, exited, opts.StopGrace)
+			break loop
+		case <-graceC:
+			logLine(logf, "step %s round %d: agent still running %s after its result; stopping it",
+				s.Step, s.Round, opts.ResultGrace)
+			waitErr = stop(cmd, exited, opts.StopGrace)
+			break loop
+		case <-tick.C:
+			if graceC == nil && w.check() != nil {
+				graceC = time.After(opts.ResultGrace)
+			}
+		}
+	}
+	o.ExitCode = exitCode(cmd, waitErr)
+	// The agent may write its result just before it exits; read once more.
+	w.check()
+	o.Result = w.accepted
+	o.Ignored = w.ignored
+	logLine(logf, "step %s round %d finished: exit %d, status %s", s.Step, s.Round, o.ExitCode, o.Status())
+	if o.Result == nil {
+		o.Tail, _ = TailLog(o.LogPath, opts.TailBytes)
+	}
+	return o, nil
+}
+
+func withDefaults(o Options) Options {
+	if o.Poll <= 0 {
+		o.Poll = 500 * time.Millisecond
+	}
+	if o.ResultGrace <= 0 {
+		o.ResultGrace = 2 * time.Minute
+	}
+	if o.StopGrace <= 0 {
+		o.StopGrace = 10 * time.Second
+	}
+	if o.TailBytes <= 0 {
+		o.TailBytes = 4 << 10
+	}
+	return o
+}
+
+// watcher polls a result file, accepting only the expected step and round.
+type watcher struct {
+	path     string
+	want     Expect
+	log      io.Writer
+	accepted *Result
+	ignored  []string
+	lastSeen string // size and mtime of the last ignored file, to log it once
+}
+
+func (w *watcher) check() *Result {
+	if w.accepted != nil {
+		return w.accepted
+	}
+	fi, err := os.Stat(w.path)
+	if err != nil {
+		return nil
+	}
+	stamp := fmt.Sprintf("%d/%d", fi.Size(), fi.ModTime().UnixNano())
+	if stamp == w.lastSeen {
+		return nil
+	}
+	r, err := ReadResult(w.path, w.want)
+	switch {
+	case err == nil:
+		w.accepted = &r
+		logLine(w.log, "accepted result: %s, %s", r.Status, oneLine(r.Summary))
+	case IsIgnored(err):
+		w.lastSeen = stamp
+		w.ignored = append(w.ignored, err.Error())
+		logLine(w.log, "ignored result file: %v", err)
+	case errors.Is(err, ErrNoResult):
+	default:
+		logLine(w.log, "reading result file: %v", err)
+	}
+	return w.accepted
+}
+
+// stop asks the agent to exit, kills it after grace, and returns its wait
+// error.
+func stop(cmd *exec.Cmd, exited <-chan error, grace time.Duration) error {
+	_ = interrupt(cmd)
+	select {
+	case err := <-exited:
+		return err
+	case <-time.After(grace):
+	}
+	_ = kill(cmd)
+	return <-exited
+}
+
+func exitCode(cmd *exec.Cmd, err error) int {
+	if cmd.ProcessState != nil {
+		return cmd.ProcessState.ExitCode()
+	}
+	if err != nil {
+		return -1
+	}
+	return 0
+}
+
+func logLine(w io.Writer, format string, args ...any) {
+	fmt.Fprintf(w, "\n[tuckerbox %s] %s\n", time.Now().Format(time.RFC3339), fmt.Sprintf(format, args...))
+}
+
+func oneLine(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > 200 {
+		s = s[:200] + "…"
+	}
+	return s
+}
+
+func quoteArgs(argv []string) []string {
+	out := make([]string, len(argv))
+	for i, a := range argv {
+		if a == "" || strings.ContainsAny(a, " \t\"'") {
+			out[i] = strconv.Quote(a)
+		} else {
+			out[i] = a
+		}
+	}
+	return out
+}
