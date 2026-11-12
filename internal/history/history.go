@@ -56,6 +56,12 @@
 //     task scope (tuckerbox run --tasks): scope is the new scope, old_scope
 //     the one it had ("" or absent for the whole change). It comes where
 //     started, resumed or rerun would, and is followed by queued.
+//   - task_ticked, task_unticked: while step ran, the box of task (its
+//     number, such as "2.3") in the worktree's tasks.md was ticked or
+//     unticked. The run process reads tasks.md at least every 10 seconds
+//     during a step and writes one event per task whose box changed since
+//     it last looked, so time is when the change was seen, at most that
+//     long after it was made.
 //
 // started, resumed and scope_started carry by = "autopilot" when tuckerbox
 // autopilot started the run; it is absent when a person did.
@@ -116,6 +122,8 @@ const (
 	Stopped      Kind = "stopped"
 	Ready        Kind = "ready"
 	ScopeStarted Kind = "scope_started"
+	TaskTicked   Kind = "task_ticked"
+	TaskUnticked Kind = "task_unticked"
 )
 
 // Event is one line of history.jsonl.
@@ -161,6 +169,8 @@ type Event struct {
 	Scope string `json:"scope,omitempty"`
 	// OldScope is the scope before, for scope_started.
 	OldScope string `json:"old_scope,omitempty"`
+	// Task is the task number, for task_ticked and task_unticked.
+	Task string `json:"task,omitempty"`
 	// By is "autopilot" on started, resumed and scope_started events that
 	// tuckerbox autopilot asked for; absent when a person did.
 	By string `json:"by,omitempty"`

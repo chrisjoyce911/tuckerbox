@@ -126,6 +126,10 @@ type Engine struct {
 	OnLocked func(ws Workspace, r *Run)
 	// Now returns the time; nil means time.Now.
 	Now func() time.Time
+	// TickEvery is how often the run process reads the worktree's tasks.md
+	// while a step runs, for task_ticked and task_unticked history events
+	// (default TickEvery, 10 seconds).
+	TickEvery time.Duration
 	// Gate, when set, may refuse a Start request (the approval run gate).
 	// It judges the commit a new worktree will be made at, before it is
 	// made, and the worktree's files again once the change lock is held,
@@ -768,6 +772,7 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 		rs.AgentBackend = backend.Name()
 		e.logf(rs.Change, "step %s round %d: starting agent %s (%s)", st.ID, rs.Round, st.Agent, backend.Name())
 		opts := e.agentOptions(ws, rs)
+		stopTicks := e.watchTicks(ws, rs, st.ID, rs.Round)
 		out, err := backend.Run(ctx, agent.Step{
 			Change: rs.Change, Step: st.ID, Role: st.Role, Round: rs.Round,
 			Agent: tmpl, Model: model, Effort: effort,
@@ -775,6 +780,7 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 			Worktree:    ws.Path, State: ws.State, Base: rs.Base,
 			Earlier: rs.Earlier(), Scope: rs.Scope, Term: e.term,
 		}, opts)
+		stopTicks()
 		// The backend has had the adopted agent: it ends it on a stop.
 		e.adopting = nil
 		var endErr *agent.EndError
