@@ -27,6 +27,16 @@ func sidecarRel(change string) string {
 	return approval.ChangeDir(change) + "/" + approval.SidecarName
 }
 
+// withSidecar runs fn holding the sidecar lock of the repository that
+// contains dir (change-priority: One writer for the sidecar).
+func withSidecar(ctx context.Context, dir string, fn func() error) error {
+	repo, err := runs.OpenRepo(ctx, dir)
+	if err != nil {
+		return err
+	}
+	return runs.WithSidecarLock(repo.Common, fn)
+}
+
 // approve: tuckerbox approve <change>
 func (a App) approve(args []string) int {
 	pos, err := parseArgs(args, nil, nil)

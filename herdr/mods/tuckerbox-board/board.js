@@ -4,7 +4,7 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, props, openOverlay, closeOverlay, spaces, panes, focused, run, notify } from "herdr";
 import { MOD, loadAll, locate, candidates, fixturesFolder } from "./data.js";
-import { group, counts, columnName, due, isShown, ago, needsYou, candidatesKey, openGate, NO_CONFIG } from "./model.js";
+import { group, counts, columnName, due, isShown, ago, needsYou, candidatesKey, openGate, NO_CONFIG, sortedColumn, dropPosition, eventBox, liveDrop, priorityCard } from "./model.js";
 import { cardActions, invocation, actionLabel, defaultStep, ACTIONS, dockCall, undockCalls } from "./actions.js";
 import { perform, watchEdits, changed } from "./perform.js";
 import { editOf, editNote } from "./edits.js";
@@ -137,6 +137,37 @@ export class BoardView extends View {
     });
   }
 
+  // A release over a card of the same sorted column runs tuckerbox priority
+  // <change> <n> on the board's machine, in its checkout, whichever machine
+  // the card's run is on; the card moves when the next read shows it. A
+  // release anywhere else cancels the drag.
+  endDrag(e, cx) {
+    const { drag, dragColumn } = this;
+    const drop = liveDrop(this.drop, e?.position);
+    this.press = null; this.drag = null; this.drop = null; this.dragColumn = null;
+    if (!drag) return;
+    this.dragged = true; // the release is not a click on the card
+    cx.notify();
+    if (!drop || !this.board || this.board.error) return;
+    const col = group(this.board).find((c) => c.id === dragColumn);
+    const n = dropPosition(col?.cards ?? [], drag, drop.over, drop.below);
+    const card = col?.cards.find((c) => c.change === drag);
+    if (n && card) this.act("priority", priorityCard(card, this.board), { position: n }, cx);
+  }
+
+  // The pointer moved while dragging: over a card of the dragged card's
+  // column it becomes the target; anywhere else the old target goes.
+  dragMove(e, cx, c) {
+    if (!this.drag) return;
+    if (c && this.dragColumn === c.column) {
+      const below = e.local_position.y > (e.bounds?.height ?? 0) / 2;
+      if (this.drop?.over !== c.change || this.drop?.below !== below) { this.drop = { over: c.change, below, box: eventBox(e) }; cx.notify(); }
+      else this.drop.box = eventBox(e);
+      return;
+    }
+    if (this.drop && !liveDrop(this.drop, e.position)) { this.drop = null; cx.notify(); }
+  }
+
   // ---- drawing ----
 
   card(c) {
@@ -145,14 +176,25 @@ export class BoardView extends View {
     const flag = needsYou(c);
     const acts = cardActions(c, b);
     const step = defaultStep(c, b);
+    const dragging = this.drag === c.change;
+    const target = this.drop?.over === c.change ? this.drop : null;
     return v_flex().id(`card-${c.change}`).w_full().p(10).gap(7).rounded(8).flex_none()
-      .bg(tm.surface).border_1().border_color(flag ? tm.blocked : tm.border)
+      .bg(tm.surface).border_1().border_color(target || dragging ? tm.accent : flag ? tm.blocked : tm.border)
+      .when(dragging, (el) => el.opacity(0.4))
+      .when(Boolean(target), (el) => (target.below ? el.border_b(3) : el.border_t(3)))
       .cursor_pointer().hover((s) => s.border_color(flag ? tm.blocked : tm.accent))
-      .on_click(() => this.openCard(c))
+      // Drag to reorder (change-priority: Drag to reorder): a press starts it
+      // once the pointer moves; the card under the pointer, and which half of
+      // it, says where it lands.
+      .when(sortedColumn(c.column) && c.position > 0, (el) => el
+        .on_mouse_down("left", (e) => { this.press = { change: c.change, column: c.column, x: e.position.x, y: e.position.y }; })
+        .on_mouse_move((e, cx) => this.dragMove(e, cx, c)))
+      .on_click(() => { if (!this.dragged) this.openCard(c); this.dragged = false; })
       .child(h_flex().items_start().gap(8)
         .child(v_flex().flex_1().min_w(0)
           .child(div().text_size(12.5).font_medium().text_color(tm.foreground).child(c.title))
           .when(c.title !== c.change, (el) => el.child(div().text_size(10.5).text_color(tm.dim).truncate().child(c.change))))
+        .when(c.position > 0, (el) => el.child(div().text_size(10.5).text_color(tm.dim).tooltip(c.priority ? `priority ${c.priority}` : "no priority set").child(`#${c.position}`)))
         .child(stateChip(c) ?? div()))
       .child(h_flex().items_center().gap(6)
         .child(approvalChip(c.approval, { short: true }))
@@ -252,6 +294,14 @@ export class BoardView extends View {
     this.self();
     return v_flex().id("tuckerbox-board").size_full().bg(tm.canvas).text_color(tm.foreground)
       .track_focus(this.handle)
+      .on_mouse_move((e, cx) => {
+        if (this.drag) { this.dragMove(e, cx, null); return; }
+        if (!this.press) return;
+        if (Math.hypot(e.position.x - this.press.x, e.position.y - this.press.y) > 6) {
+          this.drag = this.press.change; this.dragColumn = this.press.column; this.drop = null; cx.notify();
+        }
+      })
+      .on_mouse_up("left", (e, cx) => this.endDrag(e, cx))
       .on_key_down((e, cx) => { if (e.key === "escape" && props()?.overlay) { closeOverlay(props().overlay); cx.stop_propagation(); } })
       .child(this.header())
       .when(Boolean(this.notice), (el) => el.child(h_flex().px(14).pt(8).gap(8).items_center()

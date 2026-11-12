@@ -21,6 +21,7 @@ import (
 	"github.com/chrisjoyce911/tuckerbox/internal/approval"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/forge"
+	"github.com/chrisjoyce911/tuckerbox/internal/priority"
 	"github.com/chrisjoyce911/tuckerbox/internal/runs"
 	"github.com/chrisjoyce911/tuckerbox/internal/scope"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
@@ -145,6 +146,13 @@ func (a App) run(args []string) int {
 			fmt.Fprintln(a.Stdout, "no valid active changes to run")
 			return 0
 		}
+		// Requested oldest first, started in admission order (each waits
+		// for the one before to join the queue), so the queue agrees.
+		all, err := priority.Load(repo.Checkout())
+		if err != nil {
+			return a.errf("run", "%v", err)
+		}
+		changes = priority.RunAll(changes, all)
 	} else {
 		bad := false
 		gate := &runGate{a: a, repo: repo, cfg: cfg}

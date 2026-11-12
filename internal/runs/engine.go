@@ -334,8 +334,8 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 			return e.finish(ws, rs, Failed, fail)
 		}
 
-		// TakeSlot: wait in queue order for one of max_parallel slots.
-		q, err := JoinQueue(e.Repo.Common, req.Change, ws.State.RunLock(), e.now().UnixNano())
+		// TakeSlot: wait in admission order for one of max_parallel slots.
+		q, err := JoinQueue(e.Repo.Common, e.Repo.Checkout(), req.Change, ws.State.RunLock(), e.now().UnixNano())
 		if err != nil {
 			return e.finish(ws, rs, Failed, "joining the queue: "+err.Error())
 		}

@@ -53,6 +53,8 @@
   "cards": [
     {
       "change": "add-search",
+      "priority": null,
+      "position": 8,
       "title": "add search",
       "column": "proposed",
       "tasks": {
@@ -80,6 +82,8 @@
     },
     {
       "change": "refund-flow",
+      "priority": null,
+      "position": 9,
       "title": "Refunds from the order page",
       "column": "proposed",
       "tasks": {
@@ -106,6 +110,8 @@
     },
     {
       "change": "add-wishlist",
+      "priority": 5000,
+      "position": 5,
       "title": "add wishlist",
       "column": "approved",
       "tasks": {
@@ -132,6 +138,8 @@
     },
     {
       "change": "checkout-v2",
+      "priority": 4000,
+      "position": 4,
       "title": "Checkout v2",
       "column": "queued",
       "tasks": {
@@ -163,6 +171,8 @@
     },
     {
       "change": "fix-tax-rounding",
+      "priority": 3000,
+      "position": 3,
       "title": "fix tax rounding",
       "column": "step:plan",
       "tasks": {
@@ -189,6 +199,8 @@
     },
     {
       "change": "add-users",
+      "priority": 1000,
+      "position": 1,
       "title": "add users",
       "column": "step:build",
       "tasks": {
@@ -215,6 +227,8 @@
     },
     {
       "change": "image-cdn",
+      "priority": null,
+      "position": 6,
       "title": "image cdn",
       "column": "step:build",
       "tasks": {
@@ -241,6 +255,8 @@
     },
     {
       "change": "add-login-page",
+      "priority": 2000,
+      "position": 2,
       "title": "add login page",
       "column": "step:review",
       "tasks": {
@@ -272,6 +288,8 @@
     },
     {
       "change": "order-emails",
+      "priority": null,
+      "position": 7,
       "title": "order emails",
       "column": "step:plan",
       "tasks": {
@@ -298,6 +316,8 @@
     },
     {
       "change": "cart-badge",
+      "priority": null,
+      "position": 10,
       "title": "cart badge",
       "column": "ready",
       "tasks": {
@@ -325,6 +345,7 @@
     },
     {
       "change": "add-sitemap",
+      "priority": null,
       "title": "add sitemap",
       "column": "done",
       "tasks": {

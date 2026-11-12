@@ -64,6 +64,11 @@ func OpenRepo(ctx context.Context, dir string) (Repo, error) {
 	return Repo{Root: root, Main: main, Common: common}, nil
 }
 
+// Checkout is the repository checkout on this machine, whose change folders
+// hold the priorities (change-priority: Where priority is written): the
+// main worktree, never a change's worktree.
+func (r Repo) Checkout() string { return r.Main }
+
 // Worktrees lists the repository's worktree roots, the main one first.
 func (r Repo) Worktrees(ctx context.Context) ([]string, error) {
 	out, err := git(ctx, r.Root, "worktree", "list", "--porcelain")
