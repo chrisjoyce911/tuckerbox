@@ -129,12 +129,18 @@ type Engine struct {
 	// Gate, when set, may refuse a Start request (the approval run gate).
 	// It judges the commit a new worktree will be made at, before it is
 	// made, and the worktree's files again once the change lock is held,
-	// before the run state changes. Resume and Rerun are not gated.
+	// before the run state changes. Resume and Rerun are not gated on the
+	// text (see SettingsGate).
 	Gate func(ctx context.Context, change string, at StartPoint) error
 	// ResumeGate, when set, judges a conditional (Expect) Resume under the
 	// change lock: autopilot resumes a crashed run only while the change's
 	// approval is not withdrawn (approved or stale, not none).
 	ResumeGate func(ctx context.Context, change, worktree string) error
+	// SettingsGate, when set, judges every Resume and Rerun under the
+	// change lock, before the run state changes: it refuses a change whose
+	// approved agent or permissions overrides changed (change-settings:
+	// Resume checks approved settings).
+	SettingsGate func(ctx context.Context, change, worktree string) error
 
 	mu      sync.Mutex
 	saved   Run
@@ -273,6 +279,16 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 			return nil, err
 		}
 	}
+	if req.Mode != Start && e.SettingsGate != nil {
+		if err := e.SettingsGate(ctx, req.Change, ws.Path); err != nil {
+			return nil, err
+		}
+	}
+	// The change's overrides, for every mode: the allow-list may have
+	// been narrowed since they were set. Before any run state changes.
+	if err := CheckOverrides(ctx, e.Config, e.Repo.Root, req.Change, StartPoint{Worktree: ws.Path}); err != nil {
+		return nil, err
+	}
 	if err := ws.State.Ensure(); err != nil {
 		return nil, err
 	}
@@ -381,25 +397,29 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 
 func (e *Engine) gated(req Request) bool { return e.Gate != nil && req.Mode == Start }
 
-// ensureWorktree finds or makes req's worktree. With a Gate, a new one is
-// made at a commit the gate has judged.
+// ensureWorktree finds or makes req's worktree. A new one is made at a
+// commit whose change overrides were checked, and that the Gate, if any,
+// has judged.
 func (e *Engine) ensureWorktree(ctx context.Context, req Request) (Workspace, error) {
 	warn := func(msg string) { e.logf(req.Change, "%s", msg) }
-	if !e.gated(req) {
-		return e.Repo.EnsureWorktree(ctx, e.Config.Worktree, req.Change, warn)
-	}
 	sp, err := e.Repo.ResolveStart(ctx, e.Config.Worktree, req.Change, "", warn)
 	if err != nil {
 		return Workspace{}, err
 	}
 	if sp.Worktree == "" {
-		if req.StartRev != "" {
-			if sp.Branch && sp.Rev != req.StartRev {
-				return Workspace{}, fmt.Errorf("branch %s moved since change %s was checked; run it again", sp.Ref, req.Change)
+		if e.gated(req) {
+			if req.StartRev != "" {
+				if sp.Branch && sp.Rev != req.StartRev {
+					return Workspace{}, fmt.Errorf("branch %s moved since change %s was checked; run it again", sp.Ref, req.Change)
+				}
+				sp.Rev = req.StartRev
 			}
-			sp.Rev = req.StartRev
+			if err := e.Gate(ctx, req.Change, sp); err != nil {
+				return Workspace{}, err
+			}
 		}
-		if err := e.Gate(ctx, req.Change, sp); err != nil {
+		// The new worktree is made at the commit judged here.
+		if err := CheckOverrides(ctx, e.Config, e.Repo.Root, req.Change, sp); err != nil {
 			return Workspace{}, err
 		}
 	}
@@ -520,20 +540,25 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 		if ctx.Err() != nil {
 			return e.finish(ws, rs, Stopped, stopReason(stopReq, "before step "+st.ID))
 		}
+		// The change's own settings, read as the step starts, so a stopped
+		// or blocked run takes values set since from its next step.
+		st, recorded, why := e.stepSettings(ctx, ws, rs.Change, st)
+		if why != "" {
+			rs.Step = st.ID
+			return e.finish(ws, rs, Blocked, why)
+		}
 		rs.State, rs.Step, rs.Reason, rs.Tail = Running, st.ID, "", ""
+		rs.StepSettings = &StepSettings{Step: st.ID, Round: rs.Round, Settings: *recorded}
 		if err := e.save(ws, rs); err != nil {
 			return rs, err
 		}
-		e.event(ws, rs, history.Event{Kind: history.StepStarted})
+		e.event(ws, rs, history.Event{Kind: history.StepStarted, Agent: st.Agent, Settings: recorded})
 		tmpl, err := agent.Resolve(st.Agent, templates)
 		if err != nil {
 			return e.finish(ws, rs, Failed, err.Error())
 		}
+		// The effective settings hold the agent's defaults already.
 		model, effort := st.Model, st.Effort
-		if a, ok := e.Config.Agents[st.Agent]; ok {
-			model = firstNonEmpty(model, a.Model)
-			effort = firstNonEmpty(effort, a.Effort)
-		}
 		e.logf(rs.Change, "step %s round %d: starting agent %s", st.ID, rs.Round, st.Agent)
 		opts := e.Agent
 		opts.OnStart = func(pid int) {

@@ -80,8 +80,48 @@ type Card struct {
 	Position int    `json:"position,omitempty"`
 	// Scope is the card's run's task scope; absent for the whole change.
 	Scope *scope.Scope `json:"scope,omitempty"`
+	// Settings is what each workflow step runs with, in workflow order,
+	// with the source of each value (settings-board: Effective settings on
+	// cards). A running step shows what it started with. Empty for
+	// archived cards.
+	Settings []StepSettings `json:"settings"`
+	// Machines is the change's machines list from its tuckerbox.toml.
+	Machines []string `json:"machines"`
 	// NeedsYou says why the card needs a person; absent when it doesn't.
 	NeedsYou string `json:"needs_you,omitempty"`
+}
+
+// StepSettings is one workflow step's effective settings on a card.
+type StepSettings struct {
+	Step        string  `json:"step"`
+	Agent       Setting `json:"agent"`
+	Model       Setting `json:"model"`
+	Effort      Setting `json:"effort"`
+	Permissions Setting `json:"permissions"`
+	// Started is true when these are the values the run's current step
+	// started with, recorded in run.json, rather than what the step
+	// would run with now.
+	Started bool `json:"started,omitempty"`
+}
+
+// Setting is one effective value and where it came from: "change",
+// "repo", "machine" or "default". Value is "" when the agent's own
+// default applies (or, for permissions, no profile).
+type Setting struct {
+	Value  string `json:"value"`
+	Source string `json:"source"`
+}
+
+// Choices is what card detail may offer a change's settings pickers: the
+// repository's [overrides] allow-list, and the step keys whose change
+// voids an approval. All empty when the repository has no [overrides].
+type Choices struct {
+	Agents []string `json:"agents"`
+	// Models lists the allowed models per agent name.
+	Models        map[string][]string `json:"models"`
+	Efforts       []string            `json:"efforts"`
+	Permissions   []string            `json:"permissions"`
+	VoidsApproval []string            `json:"voids_approval"`
 }
 
 // Autopilot is tuckerbox autopilot for the board's repository on this
@@ -100,6 +140,8 @@ type Detail struct {
 	History  []Event `json:"history"`
 	// Groups are tasks.md's task groups, in order.
 	Groups []Group `json:"groups"`
+	// Choices is the allow-list for the change's settings pickers.
+	Choices Choices `json:"choices"`
 }
 
 // Group is a task group in card detail. Ticked and Total count its tasks

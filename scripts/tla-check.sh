@@ -26,6 +26,8 @@ TLA_MODEL_TIMEOUT="${TLA_MODEL_TIMEOUT:-300}"
 
 cd "$(dirname "$0")/.."
 
+# Java on Windows needs native paths; Git Bash's cygpath gives them (C:/...).
+native() { if command -v cygpath >/dev/null; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
 digest() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
 
 work="" dl=""
@@ -68,8 +70,8 @@ record() {  # record <file> <role> <ok|fail> <message>
 }
 tlc() {  # tlc <dir> <base>: run TLC in <dir>, keep the log, return its exit code
   local code=0
-  (cd "$1" && $limit java -XX:+UseParallelGC -cp "$jar" tlc2.TLC -workers auto \
-    -metadir "$work/meta/$2" -cleanup -config "$2.cfg" "$2.tla") > "$work/$2.log" 2>&1 || code=$?
+  (cd "$1" && $limit java -XX:+UseParallelGC -cp "$(native "$jar")" tlc2.TLC -workers auto \
+    -metadir "$(native "$work/meta/$2")" -cleanup -config "$2.cfg" "$2.tla") > "$work/$2.log" 2>&1 || code=$?
   return "$code"
 }
 
@@ -106,10 +108,15 @@ done < <(find formal -name '*.cfg' | LC_ALL=C sort)
 while IFS= read -r tla; do
   grep -qE -- '--(fair )?algorithm' "$tla" || continue
   rel="${tla#formal/}"; mkdir -p "$work/pcal/$(dirname "$rel")"; cp "$tla" "$work/pcal/$rel"
-  code=0; (cd "$work/pcal" && java -cp "$jar" pcal.trans -nocfg "$rel") > "$work/pcal.log" 2>&1 || code=$?
+  code=0; (cd "$work/pcal" && java -cp "$(native "$jar")" pcal.trans -nocfg "$rel") > "$work/pcal.log" 2>&1 || code=$?
   if [ "$code" != 0 ]; then cat "$work/pcal.log" >&2; record "$tla" pluscal fail "PlusCal translation failed (exit $code)"
-  elif diff -u "$tla" "$work/pcal/$rel" >&2; then record "$tla" pluscal ok "committed translation is current"
-  else record "$tla" pluscal fail "committed TLA+ differs from the PlusCal translation (diff above)"; fi
+  else
+    # Compare without carriage returns: a Windows checkout may have CRLF lines
+    # and the translator writes the platform's line separator.
+    tr -d '\r' < "$tla" > "$work/pcal.committed"; tr -d '\r' < "$work/pcal/$rel" > "$work/pcal.translated"
+    if diff -u "$work/pcal.committed" "$work/pcal.translated" >&2; then record "$tla" pluscal ok "committed translation is current"
+    else record "$tla" pluscal fail "committed TLA+ differs from the PlusCal translation (diff above)"; fi
+  fi
 done < <(find formal -name '*.tla' | LC_ALL=C sort)
 
 if [ -n "${TLA_REPORT:-}" ]; then
