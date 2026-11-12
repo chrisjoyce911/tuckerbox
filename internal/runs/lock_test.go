@@ -207,3 +207,54 @@ func TestSlotFence(t *testing.T) {
 		t.Error("Fence of a released slot succeeded")
 	}
 }
+
+// RevokeClaim replaces a dead run's claim on a free slot, leaves a claim
+// another run has already replaced, and waits while the slot's run lock is
+// held under the old claim, giving up when ctx ends.
+func TestRevokeClaim(t *testing.T) {
+	common := t.TempDir()
+	s, err := TrySlot(common, 1)
+	if err != nil || s == nil {
+		t.Fatalf("TrySlot: %v %v", s, err)
+	}
+	old := s.Owner
+	s.Release()
+	if err := RevokeClaim(context.Background(), common, 0, old, 10*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if got := SlotOwner(common, 0); got == old || got == "" {
+		t.Errorf("claim after revoking %q: %q", old, got)
+	}
+
+	// Another run claimed the slot meanwhile: its claim stays.
+	s, _ = TrySlot(common, 1)
+	other := s.Owner
+	if err := RevokeClaim(context.Background(), common, 0, old, 10*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if got := SlotOwner(common, 0); got != other {
+		t.Errorf("claim %q, want the other run's %q kept", got, other)
+	}
+
+	// Held under the claim being revoked (an admission yet to write its
+	// own): RevokeClaim waits, and gives up with ctx.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if err := RevokeClaim(ctx, common, 0, other, 10*time.Millisecond); err == nil {
+		t.Error("RevokeClaim returned while the slot is held under the old claim")
+	}
+	done := make(chan error, 1)
+	go func() { done <- RevokeClaim(context.Background(), common, 0, other, 10*time.Millisecond) }()
+	time.Sleep(50 * time.Millisecond)
+	if err := s.Fence(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Errorf("RevokeClaim after the holder claimed: %v", err)
+	}
+	s.Release()
+
+	if err := RevokeClaim(context.Background(), common, 0, "", time.Millisecond); err != nil {
+		t.Errorf("empty token: %v", err)
+	}
+}

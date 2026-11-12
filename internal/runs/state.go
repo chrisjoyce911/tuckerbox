@@ -115,6 +115,12 @@ type TerminalRef struct {
 	Name string `json:"name"`
 	// Address is herdr-core's address of the terminal, such as t7.
 	Address string `json:"address,omitempty"`
+	// Owner is the slot claim the terminal's agent-hold checks, and Common
+	// the repository's common Tuckerbox directory where the slot's owner
+	// file is: whoever settles the run after its process died revokes that
+	// claim (RevokeClaim), so a launch still on its way starts no agent.
+	Owner  string `json:"owner,omitempty"`
+	Common string `json:"common,omitempty"`
 }
 
 // ErrNoRun means there is no run.json.

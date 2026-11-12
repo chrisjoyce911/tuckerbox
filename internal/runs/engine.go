@@ -219,7 +219,13 @@ func (e *Engine) agentOptions(ws Workspace, rs *Run) agent.Options {
 		_ = e.save(ws, rs)
 	}
 	opts.OnTerminal = func(name, address string) {
-		rs.Terminal = &TerminalRef{Name: name, Address: address}
+		ref := &TerminalRef{Name: name, Address: address, Owner: e.term.Owner, Common: e.term.Common}
+		if address != "" && rs.Terminal != nil && rs.Terminal.Name == name && rs.Terminal.Owner != "" {
+			// The claim the terminal's agent-hold was started with: a fence
+			// while starting it may have moved e.term.Owner on since.
+			ref.Owner = rs.Terminal.Owner
+		}
+		rs.Terminal = ref
 		_ = e.save(ws, rs)
 	}
 	opts.OnAgentState = func(state string) {
@@ -275,16 +281,30 @@ func (e *Engine) adoptable(ctx context.Context, req Request, ws Workspace) *adop
 // agent still holds its slot's agent lock, and with max_parallel = 1 the
 // run would otherwise wait for that slot forever (formal/terminals.tla,
 // Launch: adopt or end the live agent first).
-func (e *Engine) endLeftover(ctx context.Context, ws Workspace, change, name string) error {
+//
+// recorded is whether run.json still names the terminal: then no one has
+// saved its session yet, so a terminal whose agent already ended (while no
+// run process watched it) has its history appended to the step log too,
+// before the next start replaces it.
+func (e *Engine) endLeftover(ctx context.Context, ws Workspace, change, name string, recorded bool) error {
 	b, ok := e.backend().(agent.Adopter)
 	if !ok {
 		return nil
 	}
-	t, err := b.LiveAgent(ctx, name)
+	t, err := b.FindAgent(ctx, name)
 	if err != nil {
 		return fmt.Errorf("change %s: looking for its agent's terminal %s: %w", change, name, err)
 	}
 	if t == nil {
+		return nil
+	}
+	if !t.Live() {
+		if recorded {
+			round, _ := strconv.Atoi(t.Labels[agent.LabelRound])
+			e.logf(change, "saving the session of the ended agent in terminal %s (step %s round %s)",
+				name, t.Labels[agent.LabelStep], t.Labels[agent.LabelRound])
+			e.saveHistory(ws, b, change, t.Labels[agent.LabelStep], round, name)
+		}
 		return nil
 	}
 	e.logf(change, "ending the agent left in terminal %s (step %s round %s) before this run starts",
@@ -412,7 +432,15 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	}
 	termName := agent.TerminalName(e.Repo.Identity(ctx), req.Change)
 	if adopt == nil {
-		if err := e.endLeftover(ctx, ws, req.Change, termName); err != nil {
+		// A launch the dead process left on its way (it never saw hc run
+		// answer) must start no agent once this run lets its terminal go:
+		// revoke its slot claim first, then end whatever terminal is there.
+		if ref := e.saved.Terminal; ref != nil && ref.Address == "" && e.saved.Slot != nil {
+			if err := RevokeClaim(ctx, firstNonEmpty(ref.Common, e.Repo.Common), *e.saved.Slot, ref.Owner, e.poll()); err != nil {
+				return nil, fmt.Errorf("change %s: %w", req.Change, err)
+			}
+		}
+		if err := e.endLeftover(ctx, ws, req.Change, termName, e.saved.Terminal != nil); err != nil {
 			return nil, err
 		}
 		// Nothing of an earlier process's agent is left to find.

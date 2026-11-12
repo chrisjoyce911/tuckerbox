@@ -62,6 +62,27 @@ func (b *fakeAdopter) LiveAgent(ctx context.Context, name string) (*agent.HCTerm
 	return &agent.HCTerminal{Name: name, State: "live", Labels: b.labels}, nil
 }
 
+func (b *fakeAdopter) FindAgent(ctx context.Context, name string) (*agent.HCTerminal, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.labels == nil {
+		return nil, nil
+	}
+	state := "exited"
+	if b.live {
+		state = "live"
+	}
+	return &agent.HCTerminal{Name: name, State: state, Labels: b.labels}, nil
+}
+
+// exit ends the fake agent by itself, as an agent that finishes while no
+// run process watches it: its terminal stays, ended.
+func (b *fakeAdopter) exit() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.live = false
+}
+
 func (b *fakeAdopter) EndAgent(ctx context.Context, name string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -136,5 +157,35 @@ func TestStopAfterAdoptionTakesTheSlot(t *testing.T) {
 				t.Errorf("histories saved %v, want [%s]", b.saved, want)
 			}
 		})
+	}
+}
+
+// An orphaned agent that ended by itself before resume: resume does not
+// adopt it, and saves its terminal's session to the step log before the
+// new round's agent replaces the terminal.
+func TestResumeSavesAnEndedOrphansSession(t *testing.T) {
+	f := setup(t, testenv.RepoOptions{Changes: []string{"add-login"}, Interactive: true})
+	b := &fakeAdopter{}
+	e := f.engine()
+	e.Backend = b
+	r, err := e.Run(context.Background(), Request{Change: "add-login"})
+	var endErr *agent.EndError
+	if !errors.As(err, &endErr) || r.Terminal == nil {
+		t.Fatalf("first run: %v %+v", err, r)
+	}
+	name := r.Terminal.Name
+	b.exit()
+
+	e = f.engine()
+	e.Backend = b
+	_, _ = e.Run(context.Background(), Request{Change: "add-login", Mode: Resume})
+	if b.runs != 2 {
+		t.Errorf("backend ran %d steps, want a new round", b.runs)
+	}
+	if want := "build 1 " + name; len(b.saved) != 1 || b.saved[0] != want {
+		t.Errorf("histories saved %v, want [%s]", b.saved, want)
+	}
+	if cur := f.current("add-login"); cur.Round != 2 {
+		t.Errorf("round %d, want 2", cur.Round)
 	}
 }

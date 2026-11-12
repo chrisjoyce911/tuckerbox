@@ -1141,3 +1141,92 @@ func TestStopBeforeALateLaunch(t *testing.T) {
 		t.Errorf("%d live terminals", n)
 	}
 }
+
+// The run process dies while herdr-core has yet to launch the agent's
+// terminal, and tuckerbox stop settles the run before the terminal
+// appears: stop revokes the slot claim the late terminal's agent-hold
+// checks before it records stopped, so no agent runs after the stop.
+func TestStopOrphanBeforeALateLaunch(t *testing.T) {
+	f := newTermCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}, MaxParallel: 1})
+	f.plan(map[string]testenv.Action{"build": {ExitAfter: true}})
+	f.fault("launch-later", "5s")
+	began := time.Now()
+	f.start("add-login")
+	var name string
+	waitFor(t, "run.json to name the terminal before hc run answers", func() bool {
+		r := f.runOf("add-login")
+		if r.State == runs.Running && r.Terminal != nil && r.Terminal.Address == "" && r.Slot != nil {
+			name = r.Terminal.Name
+			return true
+		}
+		return false
+	})
+	if r := f.runOf("add-login"); r.Terminal.Owner == "" || r.Terminal.Common == "" {
+		t.Fatalf("run.json does not record the terminal's slot claim: %+v", r.Terminal)
+	}
+	f.kill("add-login")
+	if res := f.tb("stop", "add-login"); res.code != 0 {
+		t.Fatalf("stop: exit %d\n%s%s", res.code, res.stdout, res.stderr)
+	}
+	f.fault("launch-later", "")
+	if term, _ := f.hc().Get(context.Background(), name); term != nil || time.Since(began) > 5*time.Second {
+		t.Fatalf("the terminal launched (%+v) before stop settled the run; the test missed a late launch", term)
+	}
+	if r := f.runOf("add-login"); r.State != runs.Stopped || r.Terminal != nil || r.Slot != nil {
+		t.Errorf("run after stop: %s terminal %+v slot %v", r.State, r.Terminal, r.Slot)
+	}
+	waitFor(t, "the late terminal to launch and end", func() bool {
+		term, _ := f.hc().Get(context.Background(), name)
+		return term != nil && !term.Live()
+	})
+	out, _ := os.ReadFile(filepath.Join(f.env.HCDir, name+".out"))
+	if !strings.Contains(string(out), "given to another run") {
+		t.Errorf("the late terminal's output %q; want agent-hold to refuse", out)
+	}
+	if got := f.startsOf("add-login"); len(got) != 0 {
+		t.Errorf("agent starts after the stop: %v", got)
+	}
+	if n := f.liveTerminals(); n != 0 {
+		t.Errorf("%d live terminals", n)
+	}
+}
+
+// The run process dies, and its agent then ends by itself while no
+// process watches it. resume starts a new round in a terminal of the same
+// name, and first appends the ended terminal's history to the step log,
+// so the orphan's session is not lost when the new terminal replaces it.
+func TestOrphanEndsThenResumeKeepsItsSession(t *testing.T) {
+	f := newTermCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}, MaxParallel: 1})
+	f.plan(map[string]testenv.Action{"build": {WaitFor: f.gate("orphan"), Status: "none", ExitAfter: true}})
+	f.start("add-login")
+	f.waitAgent("add-login", "build")
+	name := f.runOf("add-login").Terminal.Name
+	f.kill("add-login")
+	f.open("orphan")
+	waitFor(t, "the orphaned agent to end", func() bool {
+		term, _ := f.hc().Get(context.Background(), name)
+		return term != nil && !term.Live()
+	})
+
+	f.plan(map[string]testenv.Action{"build": {WaitFor: f.gate("build2"), ExitAfter: true}})
+	if res := f.tb("resume", "add-login"); res.code != 0 {
+		t.Fatalf("resume: %s%s", res.stdout, res.stderr)
+	}
+	waitFor(t, "the resumed build agent", func() bool { return len(f.startsOf("add-login")) == 2 })
+	f.waitAgent("add-login", "build")
+	if r := f.runOf("add-login"); r.Round != 2 {
+		t.Errorf("resumed round %d, want 2", r.Round)
+	}
+	log := readLog(t, mustState(t, f.worktreeOf("add-login")).Log("build"))
+	for _, w := range []string{"history of terminal " + name, "fakeagent: add-login build round 1"} {
+		if !strings.Contains(log, w) {
+			t.Errorf("build log after resume lacks %q:\n%s", w, log)
+		}
+	}
+	f.open("build2")
+	waitFor(t, "the resumed build to finish", func() bool { return len(f.runOf("add-login").History) > 0 })
+	res := f.tb("logs", "add-login", "build")
+	if !strings.Contains(res.stdout, "fakeagent: add-login build round 1") {
+		t.Errorf("logs after the step lacks the orphan's session:\n%s%s", res.stdout, res.stderr)
+	}
+}

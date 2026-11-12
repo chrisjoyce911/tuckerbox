@@ -273,6 +273,45 @@ func (s *Slot) Fence() error {
 	return nil
 }
 
+// RevokeClaim makes sure slot n's owner file no longer holds token, the
+// claim a run whose process died gave its agent's terminal: an agent-hold
+// of a terminal whose launch was still on its way then refuses to start
+// its agent. When the owner file holds token, it takes the slot's run lock
+// and writes a fresh claim. A run holding that lock has claimed the slot
+// or is about to (an admission claims before it tests the agent lock), so
+// while it is held RevokeClaim waits, polling, until the claim changes or
+// the lock is free; it gives up with ctx's error. An agent-hold that took
+// the agent lock and checked the claim before it was revoked runs in a
+// terminal that already exists, so the caller looks for the terminal once
+// more afterwards. An empty token is nothing to revoke.
+func RevokeClaim(ctx context.Context, common string, n int, token string, poll time.Duration) error {
+	if token == "" || n < 0 {
+		return nil
+	}
+	for {
+		if SlotOwner(common, n) != token {
+			return nil
+		}
+		f := flock.New(SlotLock(common, n))
+		ok, err := f.TryLock()
+		if err != nil {
+			return fmt.Errorf("locking slot %d: %w", n, err)
+		}
+		if ok {
+			if SlotOwner(common, n) == token {
+				_, err = claimSlot(common, n)
+			}
+			_ = f.Unlock()
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("revoking slot %d's claim: %w", n, ctx.Err())
+		case <-time.After(poll):
+		}
+	}
+}
+
 // Release frees the slot.
 func (s *Slot) Release() error {
 	if s == nil || s.f == nil {

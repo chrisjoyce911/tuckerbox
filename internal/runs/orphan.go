@@ -28,6 +28,14 @@ var ErrNoOrphan = errors.New("the run has no agent terminal to stop")
 // when end fails. Once the terminal has ended, save (when not nil) appends
 // its history to the step's log, before run.json lets the terminal go, so
 // logs shows the agent's session.
+//
+// A terminal whose start the run never saw answered (run.json has no
+// address for it) may still be on its way: the dead process's hc run may
+// not have reached herdr-core yet. Before it records anything,
+// StopOrphan revokes the slot claim that terminal's agent-hold checks
+// (RevokeClaim), so a late terminal starts no agent, and then ends the
+// terminal once more, in case one appeared and passed its check first.
+// When the claim can't be revoked nothing is recorded.
 func StopOrphan(ctx context.Context, st statedir.Dir, end func(ctx context.Context, name string) error,
 	save func(logPath, step string, round int, name string) error) (*Run, error) {
 	lock, err := TryChangeLock(st.RunLock())
@@ -44,6 +52,14 @@ func StopOrphan(ctx context.Context, st statedir.Dir, end func(ctx context.Conte
 	}
 	if err := end(ctx, rs.Terminal.Name); err != nil {
 		return rs, err
+	}
+	if rs.Slot != nil && rs.Terminal.Address == "" && rs.Terminal.Owner != "" && rs.Terminal.Common != "" {
+		if err := RevokeClaim(ctx, rs.Terminal.Common, *rs.Slot, rs.Terminal.Owner, 100*time.Millisecond); err != nil {
+			return rs, err
+		}
+		if err := end(ctx, rs.Terminal.Name); err != nil {
+			return rs, err
+		}
 	}
 	if save != nil && rs.Step != "" {
 		_ = save(st.Log(rs.Step), rs.Step, rs.Round, rs.Terminal.Name)
