@@ -29,12 +29,12 @@
 
 ## 3. `tuckerbox set` (change-settings)
 
-- [ ] 3.1 `tuckerbox set <change> <key>=<value>` and `--unset <key>` with `--json`, in the worktree else the checkout, under the change lock (`edits.WithChangeLock`), line-level TOML rewrite, no commit, "not committed" note; document it in README
-- [ ] 3.2 Test "Set an agent" (comments and other keys kept)
-- [ ] 3.3 Test "Set a value not allowed"
-- [ ] 3.4 Test "Back to the repository default" (empty table removed)
-- [ ] 3.5 Test "Set during a run" (lock held by a run process)
-- [ ] 3.6 Test "Set while blocked"
+- [x] 3.1 `tuckerbox set <change> <key>=<value>` and `--unset <key>` with `--json`, in the worktree else the checkout, under the change lock (`edits.WithChangeLock`), line-level TOML rewrite, no commit, "not committed" note; document it in README
+- [x] 3.2 Test "Set an agent" (comments and other keys kept)
+- [x] 3.3 Test "Set a value not allowed"
+- [x] 3.4 Test "Back to the repository default" (empty table removed)
+- [x] 3.5 Test "Set during a run" (lock held by a run process)
+- [x] 3.6 Test "Set while blocked"
 
 ## 4. Approval (change-settings)
 
