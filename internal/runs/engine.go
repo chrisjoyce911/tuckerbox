@@ -57,7 +57,8 @@ type Engine struct {
 	// Agent tunes agent.Run.
 	Agent agent.Options
 	// OnLocked is called once the change lock is held, run.json exists and
-	// the run has joined the slot queue. tuckerbox run starts changes one
+	// the run has joined the slot queue, or has started waiting on its
+	// dependencies (it joins the queue once they are met). tuckerbox run starts changes one
 	// by one and waits for this before starting the next, so queued runs
 	// start in the order they were requested.
 	OnLocked func(ws Workspace, r *Run)
@@ -208,24 +209,63 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stopReq := e.watchStop(ctx, cancel, ws)
-
-	// TakeSlot: wait in queue order for one of max_parallel slots.
-	q, err := JoinQueue(e.Repo.Common, req.Change, ws.State.RunLock(), e.now().UnixNano())
-	if err != nil {
-		return e.finish(ws, rs, Failed, "joining the queue: "+err.Error())
-	}
-	if e.OnLocked != nil {
-		e.OnLocked(ws, rs)
-	}
-	slot, err := WaitSlot(ctx, e.Repo.Common, e.Config.MaxParallel, q, e.poll(), func() {
-		e.logf(req.Change, "queued: all %d slots are taken", e.Config.MaxParallel)
-	})
-	q.Leave()
-	if err != nil {
-		if ctx.Err() != nil {
-			return e.finish(ws, rs, Stopped, stopReason(stopReq, "while queued"))
+	notified := false
+	notify := func() {
+		if !notified && e.OnLocked != nil {
+			e.OnLocked(ws, rs)
 		}
-		return e.finish(ws, rs, Failed, "waiting for a slot: "+err.Error())
+		notified = true
+	}
+
+	dw, fail := e.newDepWait(ws, rs)
+	if fail != "" {
+		return e.finish(ws, rs, Failed, fail)
+	}
+	var slot *Slot
+	for slot == nil {
+		// Wait for dependencies before joining the slot queue, so a
+		// waiting run holds neither a slot nor a place in the queue.
+		if fail, err := dw.wait(ctx, notify); ctx.Err() != nil {
+			return e.finish(ws, rs, Stopped, stopReason(stopReq, "while waiting on dependencies"))
+		} else if err != nil {
+			return rs, err
+		} else if fail != "" {
+			return e.finish(ws, rs, Failed, fail)
+		}
+
+		// TakeSlot: wait in queue order for one of max_parallel slots.
+		q, err := JoinQueue(e.Repo.Common, req.Change, ws.State.RunLock(), e.now().UnixNano())
+		if err != nil {
+			return e.finish(ws, rs, Failed, "joining the queue: "+err.Error())
+		}
+		notify()
+		s, err := WaitSlot(ctx, e.Repo.Common, e.Config.MaxParallel, q, e.poll(), func() {
+			e.logf(req.Change, "queued: all %d slots are taken", e.Config.MaxParallel)
+		})
+		q.Leave()
+		if err != nil {
+			if ctx.Err() != nil {
+				return e.finish(ws, rs, Stopped, stopReason(stopReq, "while queued"))
+			}
+			return e.finish(ws, rs, Failed, "waiting for a slot: "+err.Error())
+		}
+		// A dependency may have left ready while this run waited for the
+		// slot (it was rerun): look again, and if so give the slot back
+		// and wait for the dependencies once more.
+		met, fail, err := dw.check(ctx)
+		switch {
+		case err != nil:
+			s.Release()
+			return rs, err
+		case fail != "":
+			s.Release()
+			return e.finish(ws, rs, Failed, fail)
+		case !met:
+			s.Release()
+			e.logf(req.Change, "a dependency is no longer ready; gave the slot back")
+			continue
+		}
+		slot = s
 	}
 	// Release: the slot is freed after the final state is written (the
 	// deferred lock release runs after this one).

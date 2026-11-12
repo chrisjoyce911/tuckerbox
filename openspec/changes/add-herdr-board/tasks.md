@@ -8,9 +8,9 @@
 
 ## 2. Dependencies (change-dependencies)
 
-- [ ] 2.1 Read `depends_on` from `openspec/changes/<id>/tuckerbox.toml`; check unknown ids and cycles in `tuckerbox check`
-- [ ] 2.2 Wait for dependencies before taking a slot; queued reason names unmet dependencies
-- [ ] 2.3 Tests for each change-dependencies scenario
+- [x] 2.1 Read `depends_on` from `openspec/changes/<id>/tuckerbox.toml`; check unknown ids and cycles in `tuckerbox check`
+- [x] 2.2 Wait for dependencies before taking a slot; queued reason names unmet dependencies
+- [x] 2.3 Tests for each change-dependencies scenario
 
 ## 3. Change edits (change-edits)
 
