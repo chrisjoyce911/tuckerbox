@@ -4,7 +4,7 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, props, openOverlay, closeOverlay, spaces, panes, focused, run, notify } from "herdr";
 import { MOD, loadBoard, locate, candidates, fixturesFolder } from "./data.js";
-import { group, counts, columnName, due, isShown, ago, needsYou, candidatesKey, openGate, NO_CONFIG } from "./model.js";
+import { group, counts, columnName, due, isShown, ago, needsYou, candidatesKey, openGate, showsApproval, NO_CONFIG } from "./model.js";
 import { cardActions, invocation, actionLabel, defaultStep, ACTIONS, dockCall, undockCalls } from "./actions.js";
 import { perform, watchEdits, changed } from "./perform.js";
 import { editOf, editNote } from "./edits.js";
@@ -17,23 +17,39 @@ export class BoardView extends View {
     // `board` may be handed in (a test harness); otherwise it is read.
     this.board = p?.board ?? null;
     this.last = this.board ? Date.now() : 0;
-    this.loading = false;
+    // want: the candidates key (space, machine, folders) this copy shows;
+    // loading: the keys with a read running (board-view: Stale reads are dropped).
+    this.want = null;
+    this.loading = new Set();
     this.notice = null; // { text, kind } from the last action
     this.handle = cx.focus_handle();
     // The first read from a timer: a spawn straight from init can stall in an overlay.
     cx.timer.after(30, (cx) => this.refresh(cx));
     this.seen = changed();
-    cx.timer.every(1000, (cx) => {
-      // Edits whose pane closed are validated here (and by any open dialog).
-      const validating = watchEdits();
-      if (validating.length) cx.spawn(async (cx) => { await Promise.all(validating); cx.notify(); });
-      // An action in this or another copy changed something: read again now.
-      if (changed() !== this.seen) { this.seen = changed(); this.last = 0; }
-      // The space or its folders changed (a window follows the shown space): look again now.
-      const key = candidatesKey(candidates(this.self()));
-      if (key !== this.where) { this.where = key; this.last = 0; }
-      if (due(this.last, Date.now(), this.shown())) this.refresh(cx);
-    });
+    cx.timer.every(1000, (cx) => this.tick(cx));
+  }
+
+  tick(cx) {
+    // Edits whose pane closed are validated here (and by any open dialog).
+    const validating = watchEdits();
+    if (validating.length) cx.spawn(async (cx) => { await Promise.all(validating); cx.notify(); });
+    // An action in this or another copy changed something: read again now.
+    if (changed() !== this.seen) { this.seen = changed(); this.last = 0; }
+    // The space or its folders changed (a window follows the shown space): look again now.
+    const key = candidatesKey(candidates(this.self()));
+    if (this.want !== null && key !== this.want) this.follow(key, cx);
+    if (due(this.last, Date.now(), this.shown())) this.refresh(cx);
+  }
+
+  // The space or its folders changed: stop showing the old repository's
+  // board and actions at once; the loading state shows until the new read.
+  follow(key, cx) {
+    this.want = key;
+    this.board = null;
+    this.at = null;
+    this.readError = null;
+    this.last = 0;
+    cx.notify();
   }
 
   // This copy's pane: Herdr's `pane` prop, else the board pane that is
@@ -52,17 +68,22 @@ export class BoardView extends View {
   }
 
   refresh(cx) {
-    if (this.loading) return;
-    this.loading = true;
     const self = this.self();
+    const c = candidates(self);
+    const key = candidatesKey(c);
+    if (this.want !== null && key !== this.want) this.follow(key, cx);
+    this.want = key;
+    if (this.loading.has(key)) return;
+    this.loading.add(key);
     cx.spawn(async (cx) => {
       let b, at;
       try {
         // The fixtures need no repository; otherwise find this space's (herdr-board: Which repository).
-        at = (await fixturesFolder()) ? { found: true, root: "", cwd: "", on: null, space: null } : await locate(self);
+        at = (await fixturesFolder()) ? { found: true, root: "", cwd: "", on: null, space: null } : await locate(self, c);
         b = at.found ? await loadBoard(at) : { error: { code: "no_config", message: "" } };
       } catch (e) { b = { error: { code: "failed", message: String(e?.message ?? e) } }; }
-      this.loading = false;
+      this.loading.delete(key);
+      if (key !== this.want) return; // a read for folders no longer shown: dropped
       this.last = Date.now();
       const same = at && this.at && at.root === this.at.root && at.on === this.at.on;
       this.at = at ?? this.at;
@@ -155,8 +176,8 @@ export class BoardView extends View {
           .when(c.title !== c.change, (el) => el.child(div().text_size(10.5).text_color(tm.dim).truncate().child(c.change))))
         .child(stateChip(c) ?? div()))
       .child(h_flex().items_center().gap(6)
-        .child(approvalChip(c.approval, { short: true }))
-        .when(!c.approval.committed && c.approval.state !== "none", (el) => el.child(div().text_size(10.5).text_color(tm.blocked).child("not committed")))
+        .when(showsApproval(c), (el) => el.child(approvalChip(c.approval, { short: true }))
+          .when(!c.approval.committed && c.approval.state !== "none", (el) => el.child(div().text_size(10.5).text_color(tm.blocked).child("not committed"))))
         .child(div().flex_1())
         .when(c.tasks.total > 0, (el) => el.child(progressBar(c.tasks, 46))))
       .when(Boolean(c.badge || c.step || c.agent), (el) => el.child(h_flex().items_center().gap(6).text_size(10.5).text_color(tm.dim)
