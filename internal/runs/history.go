@@ -40,6 +40,7 @@ func (e *Engine) event(ws Workspace, rs *Run, ev history.Event) {
 // wrote. Called once the run is saved as queued, then queued itself.
 func (e *Engine) startEvents(ws Workspace, rs *Run, mode Mode, prev Run) {
 	kind := history.Started
+	sc := rs.Scope.SpecOrEmpty()
 	if prev.Change != "" {
 		if prev.State == Queued || prev.State == Running {
 			e.event(ws, rs, history.Event{Kind: history.Stopped, Step: prev.Step, Round: prev.Round, Reason: Crashed})
@@ -51,7 +52,11 @@ func (e *Engine) startEvents(ws Workspace, rs *Run, mode Mode, prev Run) {
 	} else if mode == Rerun {
 		kind = history.Rerun
 	}
-	e.event(ws, rs, history.Event{Kind: kind})
+	ev := history.Event{Kind: kind, Scope: sc}
+	if prev.Change != "" && mode == Start && prev.Scope.SpecOrEmpty() != sc {
+		ev = history.Event{Kind: history.ScopeStarted, Scope: sc, OldScope: prev.Scope.SpecOrEmpty()}
+	}
+	e.event(ws, rs, ev)
 	e.event(ws, rs, history.Event{Kind: history.Queued})
 }
 

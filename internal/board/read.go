@@ -86,6 +86,7 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 			states[id] = r
 			c.State, c.Reason, c.Step, c.Round = string(r.State), r.Reason, r.Step, r.Round
 			c.Since, c.Branch, c.Worktree = timestamp(r.Since), r.Branch, r.Worktree
+			c.Scope = r.Scope
 			if step, ok := cfg.Step(r.Step); ok {
 				c.Agent = step.Agent
 			}

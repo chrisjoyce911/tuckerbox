@@ -83,8 +83,6 @@ type Engine struct {
 	mu      sync.Mutex
 	saved   Run
 	machine string
-	// scopeFrom is the scope a run had before this Start gave it another.
-	scopeFrom *scope.Scope
 }
 
 // ActiveError means the change already has an active run.
@@ -373,7 +371,6 @@ func (e *Engine) prepare(req Request, ws Workspace) (*Run, int, error) {
 		if !same {
 			// Another scope: the run starts again from the first step,
 			// in the same worktree, with its own max_rounds.
-			e.scopeFrom = rs.Scope
 			rs.Scope = sc
 			rs.Step = steps[0].ID
 			rs.Rejections = nil
@@ -458,7 +455,7 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 			Agent: tmpl, Model: model, Effort: effort,
 			Permissions: e.Config.PermissionArgs(st),
 			Worktree:    ws.Path, State: ws.State, Base: rs.Base,
-			Earlier: rs.Earlier(),
+			Earlier: rs.Earlier(), Scope: rs.Scope,
 		}, opts)
 		rs.AgentPid = 0
 		switch {
@@ -571,7 +568,11 @@ func (e *Engine) finish(ws Workspace, rs *Run, s State, reason string) (*Run, er
 	if err := e.save(ws, rs); err != nil {
 		return rs, err
 	}
-	e.event(ws, rs, history.Event{Kind: finishKind(s), Reason: reason})
+	ev := history.Event{Kind: finishKind(s), Reason: reason}
+	if s == Ready || s == Blocked {
+		ev.Scope = rs.Scope.SpecOrEmpty()
+	}
+	e.event(ws, rs, ev)
 	_ = os.Remove(StopFile(ws.State))
 	return rs, nil
 }

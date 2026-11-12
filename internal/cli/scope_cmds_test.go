@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -123,6 +125,91 @@ func TestRunScopes(t *testing.T) {
 	if r := f.runOf("next"); scopeString(r) != "6 6.1" || !r.Complete {
 		t.Errorf("next group 6: scope %s complete %v", scopeString(r), r.Complete)
 	}
+	// History shows the resolved scope, not next.
+	res := f.tb("history", "next", "--json")
+	if res.code != 0 || !strings.Contains(res.stdout, `"scope": "2"`) || strings.Contains(res.stdout, `"scope": "next"`) {
+		t.Errorf("history: %d %s", res.code, res.stdout)
+	}
+	if res := f.tb("history", "next"); !strings.Contains(res.stdout, "tasks 2 -> 6") || !strings.Contains(res.stdout, "tasks 2") {
+		t.Errorf("history table:\n%s", res.stdout)
+	}
+
+	// Scenario: Groups in card detail. Rounds carry the scope they ran
+	// with; the card carries the run's scope.
+	res = f.tb("board", "--change", "next", "--json")
+	if res.code != 0 {
+		t.Fatalf("board: %d %s", res.code, res.stderr)
+	}
+	var doc struct {
+		Cards []struct {
+			Change string
+			Scope  *struct {
+				Spec  string
+				Tasks []string
+			}
+		}
+		Detail struct {
+			Groups []struct {
+				Number        int
+				Title         string
+				Ticked, Total int
+			}
+			Rounds []struct {
+				Round int
+				Scope string
+			}
+		}
+	}
+	if err := json.Unmarshal([]byte(res.stdout), &doc); err != nil {
+		t.Fatal(err)
+	}
+	groups := fmt.Sprint(doc.Detail.Groups)
+	if groups != "[{1 First 4 4} {2 Second 3 3} {6 Wrap-up 1 1}]" {
+		t.Errorf("groups %s", groups)
+	}
+	if rounds := fmt.Sprint(doc.Detail.Rounds); rounds != "[{1 2} {2 6}]" {
+		t.Errorf("rounds %s", rounds)
+	}
+	for _, c := range doc.Cards {
+		if c.Change == "next" && (c.Scope == nil || c.Scope.Spec != "6") {
+			t.Errorf("card scope %+v", c.Scope)
+		}
+	}
+}
+
+// Scenario: Status of a scoped run: status --json has scope with the
+// scope as typed and its tasks, and the format version is unchanged; the
+// table shows it too.
+func TestStatusOfAScopedRun(t *testing.T) {
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}})
+	f.tasks("add-login", scopeTasks)
+	f.env.SetPlan(t, map[string]testenv.Action{"build": {WaitFor: f.gate("build")}})
+	if res := f.tb("run", "add-login", "--tasks", "2.1-2.2"); res.code != 0 {
+		t.Fatalf("run: %d %s", res.code, res.stderr)
+	}
+	f.waitState("add-login", "running", "build")
+	res := f.tb("status", "--json")
+	var doc struct {
+		Version int
+		Runs    []struct {
+			Change string
+			Scope  struct {
+				Spec  string
+				Tasks []string
+			}
+		}
+	}
+	if err := json.Unmarshal([]byte(res.stdout), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Version != StatusVersion || len(doc.Runs) != 1 || doc.Runs[0].Scope.Spec != "2.1-2.2" ||
+		strings.Join(doc.Runs[0].Scope.Tasks, " ") != "2.1 2.2" {
+		t.Errorf("status --json: %s", res.stdout)
+	}
+	if res := f.tb("status"); !strings.Contains(res.stdout, "TASKS") || !strings.Contains(res.stdout, " 2.1-2.2 ") {
+		t.Errorf("status table:\n%s", res.stdout)
+	}
+	f.open("build")
 }
 
 // Scenario: Second scope while running: refused, pointing at the active

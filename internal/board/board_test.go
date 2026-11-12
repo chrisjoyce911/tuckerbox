@@ -348,8 +348,9 @@ func assertShape(t *testing.T, d *Document, fixture string) {
 	want, got := map[string]string{}, map[string]string{}
 	shape(original, "", want)
 	shape(actual, "", got)
-	optional := map[string]bool{".cards[].archived": true, ".cards[].error": true, ".columns[].step": true}
-	for _, k := range []string{"result", "to", "summary", "findings", "reason"} {
+	optional := map[string]bool{".cards[].archived": true, ".cards[].error": true, ".columns[].step": true,
+		".cards[].scope": true, ".cards[].scope.spec": true, ".cards[].scope.tasks": true, ".cards[].scope.tasks[]": true}
+	for _, k := range []string{"result", "to", "summary", "findings", "reason", "scope", "old_scope"} {
 		optional[".detail.history[]."+k] = true
 	}
 	for k, v := range want {

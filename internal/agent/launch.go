@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chrisjoyce911/tuckerbox/internal/scope"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 )
 
@@ -40,6 +41,8 @@ type Step struct {
 	Earlier []Result
 	// Env is extra environment for the agent, as KEY=value.
 	Env []string
+	// Scope is the run's task scope, or nil; it goes in the brief.
+	Scope *scope.Scope
 }
 
 // Options tune Run. The zero value is ready to use.
@@ -155,6 +158,7 @@ func Run(ctx context.Context, s Step, opts Options) (Outcome, error) {
 	brief := Brief{
 		Change: s.Change, Step: s.Step, Role: s.Role, Round: s.Round,
 		Root: s.Worktree, ResultPath: o.ResultPath, Base: s.Base, Earlier: s.Earlier,
+		Scope: s.Scope,
 	}
 	if err := brief.Write(o.BriefPath); err != nil {
 		return o, fmt.Errorf("step %s: brief: %w", s.Step, err)

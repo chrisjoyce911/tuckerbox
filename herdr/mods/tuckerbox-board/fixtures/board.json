@@ -320,7 +320,8 @@
       "worktree": "/work/shop-worktrees/cart-badge",
       "machine": "studio",
       "edit_folder": "/work/shop-worktrees/cart-badge",
-      "depends_on": []
+      "depends_on": [],
+      "scope": { "spec": "2", "tasks": ["2.1", "2.2"] }
     },
     {
       "change": "add-sitemap",
