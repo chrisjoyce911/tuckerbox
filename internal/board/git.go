@@ -3,11 +3,13 @@ package board
 import (
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"net/url"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"time"
 
@@ -20,9 +22,17 @@ import (
 // host remains the best available identity.
 func RepoKey(ctx context.Context, remote string) string {
 	return repoKey(ctx, remote, func(ctx context.Context, host string) (string, error) {
-		return output(ctx, "", "ssh", "-G", "--", host)
+		c := exec.CommandContext(ctx, "ssh", "-G", "--", host)
+		c.WaitDelay = 500 * time.Millisecond
+		c.Stderr = io.Discard
+		configureSSH(c)
+		out, err := c.Output()
+		return string(out), err
 	})
 }
+
+var sshHost = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
 func repoKey(ctx context.Context, remote string, ssh func(context.Context, string) (string, error)) string {
 	key := config.NormalizeRemote(remote)
 	var host string
@@ -36,7 +46,7 @@ func repoKey(ctx context.Context, remote string, ssh func(context.Context, strin
 			host = host[j+1:]
 		}
 	}
-	if host == "" {
+	if !sshHost.MatchString(host) {
 		return key
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)

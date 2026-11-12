@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +31,17 @@ func TestMain(m *testing.M) {
 	testTools, err = testenv.Build(false)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	sshName := "ssh"
+	if runtime.GOOS == "windows" {
+		sshName += ".exe"
+	}
+	cmd := exec.Command("go", "build", "-o", filepath.Join(testTools.Bin, sshName), "./testdata/fakessh")
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	if data, err := cmd.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "building fake ssh: %v: %s", err, data)
+		testTools.Remove()
 		os.Exit(1)
 	}
 	code := m.Run()
@@ -74,7 +87,7 @@ func TestNoRunsAndApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := card(t, read(t, root, ""), "add-login-page")
-	if c.Column != "approved" || c.Title != "Login page" || c.Approval.Committed || c.Approval.At != "2026-11-12T10:00:00+10:00" {
+	if c.Column != "approved" || c.Title != "Login page" || c.Approval.Committed || c.Approval.At != timestamp(time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("approval %+v", c)
 	}
 	testenv.Git(t, root, "add", "-A")
@@ -286,7 +299,7 @@ func assertShape(t *testing.T, d *Document, fixture string) {
 	want, got := map[string]string{}, map[string]string{}
 	shape(original, "", want)
 	shape(actual, "", got)
-	optional := map[string]bool{".cards[].archived": true, ".columns[].step": true}
+	optional := map[string]bool{".cards[].archived": true, ".cards[].error": true, ".columns[].step": true}
 	for _, k := range []string{"result", "to", "summary", "findings", "reason"} {
 		optional[".detail.history[]."+k] = true
 	}
