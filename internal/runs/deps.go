@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/deps"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 )
@@ -15,7 +16,11 @@ import (
 // looking in each of its worktrees. State directories are cached, so a
 // poll costs one git call plus a read of each run.json.
 type depLookup struct {
-	repo   Repo
+	repo Repo
+	// archiveOnly is set outside ship = "local": there a dependency is met
+	// only once archived, whatever its run says (task-scope: Partial runs
+	// don't ship).
+	archiveOnly bool
 	states map[string]statedir.Dir // worktree -> state dir
 	runs   map[string]Run          // change -> effective run, this poll
 }
@@ -41,6 +46,9 @@ func (l *depLookup) refresh(ctx context.Context) error {
 			l.states[wt] = st
 		}
 		r, err := ReadRun(st.RunFile())
+		if depReadHook != nil {
+			depReadHook()
+		}
 		if err != nil {
 			continue
 		}
@@ -55,13 +63,36 @@ func (l *depLookup) refresh(ctx context.Context) error {
 	return nil
 }
 
+// lookup gives deps.Pending a dependency's state from the one read of its
+// run.json in refresh, never from its tasks.md (formal/scope.tla,
+// DependentSeesReviewedWork). A ready run counts as ready only when it has
+// no scope or recorded the change as complete. A scoped run's scope is
+// added to what the queued reason shows: "a (ready, tasks 1)".
 func (l *depLookup) lookup(id string) (string, string) {
 	r, ok := l.runs[id]
 	if !ok {
 		return "", ""
 	}
-	return string(r.State), r.Step
+	if l.archiveOnly && r.State == Ready {
+		return string(r.State) + ", not archived", r.Step
+	}
+	if r.Scope == nil {
+		return string(r.State), r.Step
+	}
+	tasks := ", tasks " + r.Scope.Spec
+	switch {
+	case r.State == Ready && r.Complete:
+		return string(r.State), r.Step
+	case r.State == Running && r.Step != "":
+		return string(r.State), r.Step + tasks
+	}
+	return string(r.State) + tasks, r.Step
 }
+
+// depReadHook, when set by a test, runs right after each read of a
+// dependency's run.json, so a test can move the dependency on between a
+// dependent's reads.
+var depReadHook func()
 
 // depWait holds a run until its dependencies are met.
 type depWait struct {
@@ -84,7 +115,9 @@ func (e *Engine) newDepWait(ws Workspace, rs *Run) (*depWait, string) {
 	if filepath.Clean(e.Repo.Root) != filepath.Clean(ws.Path) {
 		roots = append(roots, e.Repo.Root)
 	}
-	return &depWait{e: e, ws: ws, rs: rs, ids: ids, roots: roots, l: newDepLookup(e.Repo)}, ""
+	l := newDepLookup(e.Repo)
+	l.archiveOnly = e.Config.Ship != "" && e.Config.Ship != config.ShipLocal
+	return &depWait{e: e, ws: ws, rs: rs, ids: ids, roots: roots, l: l}, ""
 }
 
 // check looks once: every dependency must be ready on this machine or

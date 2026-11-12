@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -17,8 +18,10 @@ import (
 	"time"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/agent"
+	"github.com/chrisjoyce911/tuckerbox/internal/approval"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/runs"
+	"github.com/chrisjoyce911/tuckerbox/internal/scope"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 )
 
@@ -78,14 +81,21 @@ func (a App) loadRepo(cmd, dir string) (runs.Repo, *config.Config, bool) {
 	return repo, cfg, true
 }
 
-// run: tuckerbox run [--foreground] <change>... | --all
+// run: tuckerbox run [--foreground] [--tasks <scope>] <change>... | --all
 func (a App) run(args []string) int {
 	var all, fg bool
-	pos, err := parseArgs(args, map[string]*bool{"all": &all, "foreground": &fg}, nil)
+	var tasks string
+	pos, err := parseArgs(args, map[string]*bool{"all": &all, "foreground": &fg}, map[string]*string{"tasks": &tasks})
 	if err != nil {
 		return a.usageErr("run", err.Error())
 	}
 	switch {
+	case tasks != "" && (all || len(pos) != 1):
+		return a.usageErr("run", "--tasks takes one change, not --all or several")
+	case tasks != "":
+		if err := scope.Valid(tasks); err != nil {
+			return a.usageErr("run", err.Error())
+		}
 	case all && len(pos) > 0:
 		return a.usageErr("run", "give change ids or --all, not both")
 	case !all && len(pos) == 0:
@@ -152,8 +162,15 @@ func (a App) run(args []string) int {
 			if err != nil {
 				a.errf("run", "%v", err)
 				bad = true
+				continue
 			}
 			startRevs[id] = rev
+			if tasks != "" {
+				if tasks, err = a.runScope(ctx, gate, id, tasks); err != nil {
+					a.errf("run", "%v", err)
+					bad = true
+				}
+			}
 		}
 		if bad {
 			fmt.Fprintln(a.Stderr, "tuckerbox run: nothing started")
@@ -161,13 +178,16 @@ func (a App) run(args []string) int {
 		}
 	}
 	if fg {
-		return a.foreground(repo, cfg, runs.Request{Change: changes[0], Mode: runs.Start, StartRev: startRevs[changes[0]]})
+		return a.foreground(repo, cfg, runs.Request{Change: changes[0], Mode: runs.Start, StartRev: startRevs[changes[0]], Scope: tasks})
 	}
 	code := 0
 	for _, id := range changes {
 		engineArgs := []string{"--mode", "start", id}
 		if rev := startRevs[id]; rev != "" {
 			engineArgs = append([]string{"--start-rev", rev}, engineArgs...)
+		}
+		if tasks != "" {
+			engineArgs = append([]string{"--tasks", tasks}, engineArgs...)
 		}
 		err := a.spawn(repo.Root, engineArgs)
 		var se *runs.StateError
@@ -282,16 +302,16 @@ func (s *switchWriter) set(w io.Writer) {
 // engine runs one run in this process. Users reach it through run, resume
 // and rerun; --handshake is for the detached process they start.
 //
-//	tuckerbox engine [--handshake] --mode start|resume|rerun [--step s] [--worktree p] [--start-rev c] <change>
+//	tuckerbox engine [--handshake] --mode start|resume|rerun [--step s] [--worktree p] [--start-rev c] [--tasks scope] <change>
 func (a App) engine(args []string) int {
 	var handshake bool
-	var mode, step, worktree, startRev string
+	var mode, step, worktree, startRev, tasks string
 	pos, err := parseArgs(args, map[string]*bool{"handshake": &handshake},
-		map[string]*string{"mode": &mode, "step": &step, "worktree": &worktree, "start-rev": &startRev})
+		map[string]*string{"mode": &mode, "step": &step, "worktree": &worktree, "start-rev": &startRev, "tasks": &tasks})
 	if err != nil || len(pos) != 1 {
 		return a.usageErr("engine", "usage: tuckerbox engine --mode start|resume|rerun [--step s] [--worktree p] <change>")
 	}
-	req := runs.Request{Change: pos[0], Step: step, Worktree: worktree, StartRev: startRev}
+	req := runs.Request{Change: pos[0], Step: step, Worktree: worktree, StartRev: startRev, Scope: tasks}
 	switch mode {
 	case "start":
 		req.Mode = runs.Start
@@ -762,4 +782,41 @@ func writeTable(w io.Writer, rows [][]string) {
 		}
 		fmt.Fprintln(w, strings.TrimRight(b.String(), " "))
 	}
+}
+
+// runScope judges the task scope spec of tuckerbox run --tasks in the
+// tasks.md the run will use (its worktree, else the commit a new worktree
+// would be made at), before any worktree or run is made, and returns it
+// with next resolved to a group number.
+func (a App) runScope(ctx context.Context, g *runGate, change, spec string) (string, error) {
+	sp, err := g.start(ctx, change)
+	if err != nil {
+		return "", err
+	}
+	var data []byte
+	var cur *runs.Run
+	if sp.Worktree != "" {
+		data, err = os.ReadFile(runs.TasksFile(sp.Worktree, change))
+		if st, serr := statedir.Resolve(ctx, sp.Worktree); serr == nil {
+			if r, rerr := runs.ReadRun(st.RunFile()); rerr == nil {
+				cur = r
+			}
+		}
+	} else {
+		var rev *approval.Rev
+		if rev, err = approval.NewRev(ctx, g.repo.Root, sp.Rev, change); err == nil {
+			data, err = rev.Read("tasks.md")
+		}
+	}
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("change %s: reading tasks.md: %v", change, err)
+	}
+	sc, same, err := runs.ScopeFor(spec, string(data), cur)
+	if err != nil {
+		return "", fmt.Errorf("change %s: %v", change, err)
+	}
+	if same {
+		return cur.Scope.Spec, nil
+	}
+	return sc.Spec, nil
 }

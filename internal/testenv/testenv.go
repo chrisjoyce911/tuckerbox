@@ -119,6 +119,12 @@ type Action struct {
 	Exit       int       `json:"exit,omitempty"`
 	StaleFirst bool      `json:"stale_first,omitempty"`
 	Message    bool      `json:"message,omitempty"`
+	// Tick ticks these task numbers in the change's tasks.md in the
+	// worktree before reporting.
+	Tick []string `json:"tick,omitempty"`
+	// Edit appends a line to this file (relative to the change folder in
+	// the worktree) before reporting.
+	Edit string `json:"edit,omitempty"`
 }
 
 // Finding is a fake agent finding.

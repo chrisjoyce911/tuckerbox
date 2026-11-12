@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/agent"
+	"github.com/chrisjoyce911/tuckerbox/internal/scope"
 )
 
 // State is a run's state.
@@ -62,6 +63,14 @@ type Run struct {
 	// Rejections counts each step's rejections since the last resume or
 	// rerun, for max_rounds.
 	Rejections map[string]int `json:"rejections,omitempty"`
+	// Scope is the run's task scope, or nil for the whole change. resume
+	// and rerun keep it; run with another scope starts the run again.
+	Scope *scope.Scope `json:"scope,omitempty"`
+	// Complete records, in the write that makes the run ready, whether
+	// every task of the change other than ship tasks was ticked. Any
+	// write that leaves ready clears it. Dependents read it from this one
+	// file, never from tasks.md (formal/scope.tla).
+	Complete bool `json:"complete"`
 	// History holds every accepted step result, oldest first.
 	History []Entry `json:"history,omitempty"`
 	// Pid is the engine process, AgentPid the running step's agent.

@@ -19,7 +19,9 @@ Usage:
 Commands:
   run <change>... | --all   Run OpenSpec changes through the workflow, one
                             background process per change (--foreground:
-                            one change, attached to this terminal)
+                            one change, attached to this terminal;
+                            --tasks <scope>: one change's group 2, task 2.3,
+                            range 2.1-2.4 or next group)
   board [--json] [--change <id>]  Show this repository’s change board
   status [--json]           Show every run on this machine
   logs <change> [step]      Show a step's agent output (--follow to watch)
