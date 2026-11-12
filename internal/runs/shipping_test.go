@@ -271,8 +271,8 @@ func TestResumeAfterHumanPushPreservesUncommittedWork(t *testing.T) {
 	}
 }
 
-func (f *shippingForge) Log(context.Context, forge.Job) (string, error) {
-	return "\x1b[31mprivate-token\x1b[0m test failed\n", nil
+func (f *shippingForge) Log(context.Context, forge.Job) (forge.Log, error) {
+	return forge.Log{Text: "\x1b[31mprivate-token\x1b[0m test failed\n"}, nil
 }
 func TestFailedCIFixUsesSlotArchivedBriefAndNewHead(t *testing.T) {
 	f, e, api := shippingSetup(t, config.ShipMR, true, "add-login")

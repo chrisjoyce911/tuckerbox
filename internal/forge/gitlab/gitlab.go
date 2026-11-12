@@ -178,14 +178,14 @@ func (c *Client) Checks(ctx context.Context, sha, _ string) (forge.Checks, error
 	}
 	return out, nil
 }
-func (c *Client) Log(ctx context.Context, j forge.Job) (string, error) {
+func (c *Client) Log(ctx context.Context, j forge.Job) (forge.Log, error) {
 	if j.LogID == "" {
-		return j.Summary + "\n" + j.URL, nil
+		return forge.Log{Text: j.Summary + "\n" + j.URL}, nil
 	}
 	if _, err := strconv.ParseInt(j.LogID, 10, 64); err != nil {
-		return "", fmt.Errorf("invalid GitLab job id")
+		return forge.Log{}, fmt.Errorf("invalid GitLab job id")
 	}
-	var log string
+	var log forge.Log
 	_, err := c.http.Do(ctx, "GET", c.project+"/jobs/"+j.LogID+"/trace", nil, &log)
 	return log, err
 }

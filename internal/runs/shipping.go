@@ -44,7 +44,7 @@ func (e *Engine) forgeShip(ctx context.Context, ws Workspace, rs *Run, resume bo
 	}, Config: e.Config, Git: g, Identity: ship.Identity{Change: rs.Change, Machine: machine, Run: strconv.FormatInt(rs.Created.UnixNano(), 10)}, Forge: client, Record: &rs.Record, Now: e.Now, Mask: mask, Sleep: e.ShipSleep,
 		Save: func() error { return e.save(ws, rs) }, Commit: func(ctx context.Context, msg string) (bool, error) { return CommitAll(ctx, ws.Path, msg) },
 		Event: func(ev ship.Event) {
-			e.event(ws, rs, history.Event{Kind: history.Kind(ev.Kind), Commit: ev.Commit, Branch: ev.Branch, Link: ev.Link, Number: ev.Number, Method: ev.Method, ShipRound: ev.Round})
+			e.event(ws, rs, history.Event{Kind: history.Kind(ev.Kind), Commit: ev.Commit, Branch: ev.Branch, Link: ev.Link, Number: ev.Number, Method: ev.Method, ShipRound: ev.Round, CI: ev.CI, Jobs: ev.Jobs, Threads: ev.Threads})
 		},
 		ReleaseSlot: func() error {
 			if e.workflowSlot != nil {

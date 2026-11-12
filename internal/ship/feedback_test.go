@@ -21,7 +21,9 @@ type feedbackForge struct {
 	onReply func(string, string)
 }
 
-func (f *feedbackForge) Log(context.Context, forge.Job) (string, error) { return f.log, nil }
+func (f *feedbackForge) Log(context.Context, forge.Job) (forge.Log, error) {
+	return forge.Log{Text: f.log}, nil
+}
 func (f *feedbackForge) Reply(_ context.Context, _ int, thread, text string) error {
 	f.replies = append(f.replies, thread+":"+text)
 	if f.onReply != nil {
@@ -253,5 +255,13 @@ func TestNetworkErrorBackoffAndPermanentRejection(t *testing.T) {
 	}
 	if _, retry := e.retryDelay(&forge.APIError{Status: 401}, time.Minute); retry {
 		t.Fatal("authentication rejection retried")
+	}
+}
+
+func TestTransportOmissionCountSurvivesLogTrimming(t *testing.T) {
+	raw := forge.Log{Text: strings.Repeat("retained line\n", 300), OmittedLines: 19700, Truncated: true}
+	text := trimLog(raw, nil)
+	if !strings.HasPrefix(text, "[omitted 19800 lines]") {
+		t.Fatal(text)
 	}
 }

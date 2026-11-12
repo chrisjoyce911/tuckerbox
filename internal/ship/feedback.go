@@ -28,7 +28,9 @@ var terminalCodes = regexp.MustCompile("\\x1b(?:\\[[0-?]*[ -/]*[@-~]|\\][^\\a]*(
 const jobLogLimit = 32 << 10
 const roundLogLimit = 128 << 10
 
-func TrimLog(raw string, mask func(string) string) string {
+func TrimLog(raw string, mask func(string) string) string { return trimLog(forge.Log{Text: raw}, mask) }
+func trimLog(log forge.Log, mask func(string) string) string {
+	raw := log.Text
 	raw = terminalCodes.ReplaceAllString(raw, "")
 	if mask != nil {
 		raw = mask(raw)
@@ -39,6 +41,7 @@ func TrimLog(raw string, mask func(string) string) string {
 		lines = lines[omitted:]
 	}
 	tail := strings.Join(lines, "\n") + "\n"
+	omitted += log.OmittedLines
 	prefix := ""
 	if omitted > 0 {
 		prefix = fmt.Sprintf("[omitted %d lines]\n", omitted)
@@ -65,7 +68,7 @@ func (e *Engine) ciFeedback(ctx context.Context, checks forge.Checks) (Feedback,
 			if err != nil {
 				return feedback, err
 			}
-			text := TrimLog(raw, e.text)
+			text := trimLog(raw, e.text)
 			if len(text) > remaining {
 				text = text[len(text)-remaining:]
 				for !utf8.ValidString(text) {
@@ -157,7 +160,7 @@ func (e *Engine) fix(ctx context.Context, claim *Claim, feedback Feedback) Outco
 		return e.blocked(err)
 	}
 	if len(feedback.Threads) > 0 {
-		e.emit(Event{Kind: "review_findings", Number: len(feedback.Threads)})
+		e.emit(Event{Kind: "review_findings", Number: len(feedback.Threads), Threads: threadLinks(feedback.Threads)})
 	}
 	before, err := e.Git.Head(ctx)
 	if err != nil {
@@ -252,7 +255,7 @@ func (e *Engine) replyFeedback(ctx context.Context, claim *Claim, feedback Feedb
 		}
 	}
 	if len(feedback.Threads) > 0 {
-		e.emit(Event{Kind: "review_replied", Commit: feedback.FixedCommit, Number: len(feedback.Threads)})
+		e.emit(Event{Kind: "review_replied", Commit: feedback.FixedCommit, Number: len(feedback.Threads), Threads: threadLinks(feedback.Threads)})
 	}
 	r.Pending = nil
 	if err := e.save(); err != nil {
@@ -267,4 +270,14 @@ func (e *Engine) ownReply(thread, text string) bool {
 		}
 	}
 	return false
+}
+
+func threadLinks(threads []forge.Thread) []string {
+	var links []string
+	for _, thread := range threads {
+		if len(thread.Comments) > 0 {
+			links = append(links, thread.Comments[0].URL)
+		}
+	}
+	return links
 }

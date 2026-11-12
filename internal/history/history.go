@@ -64,6 +64,12 @@
 // scope as typed with next resolved (such as "2" or "2.1-2.4"); it is
 // absent for a run of the whole change.
 //
+// Shipping adds archived (commit), pushed (branch, commit, ship_round),
+// mr_opened (link, number), ci_finished (commit, ci, jobs), review_findings
+// (number, threads), review_replied (commit, threads), merged (commit, method)
+// and branch_deleted (branch). Every event retains the common fields above.
+// Lost claims and moved branches are blocked events with their reason.
+//
 // After a rejection that loops back, the next event is step_started for
 // the to step in the next round.
 package history
@@ -114,12 +120,15 @@ const (
 
 // Event is one line of history.jsonl.
 type Event struct {
-	Commit    string `json:"commit,omitempty"`
-	Branch    string `json:"branch,omitempty"`
-	Link      string `json:"link,omitempty"`
-	Number    int    `json:"number,omitempty"`
-	Method    string `json:"method,omitempty"`
-	ShipRound int    `json:"ship_round,omitempty"`
+	CI        string   `json:"ci,omitempty"`
+	Jobs      []string `json:"jobs,omitempty"`
+	Threads   []string `json:"threads,omitempty"`
+	Commit    string   `json:"commit,omitempty"`
+	Branch    string   `json:"branch,omitempty"`
+	Link      string   `json:"link,omitempty"`
+	Number    int      `json:"number,omitempty"`
+	Method    string   `json:"method,omitempty"`
+	ShipRound int      `json:"ship_round,omitempty"`
 	// V is the line's format version (Version); Append sets it.
 	V int `json:"v"`
 	// Time is when the event happened, with the writer's offset.

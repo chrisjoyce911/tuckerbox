@@ -38,7 +38,7 @@ type Client interface {
 	OpenMR(context.Context, OpenRequest) (*MR, error)
 	GetMR(context.Context, int) (*MR, error)
 	Checks(context.Context, string, string) (Checks, error)
-	Log(context.Context, Job) (string, error)
+	Log(context.Context, Job) (Log, error)
 	Threads(context.Context, int) ([]Thread, error)
 	Reply(context.Context, int, string, string) error
 	Merge(context.Context, int, string, string) error

@@ -64,7 +64,7 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 		return nil, err
 	}
 	refs := refApprovals(ctx, repo.Root)
-	doc := &Document{Version: Version, Repo: key, Path: repo.Root, Machine: history.Machine(), RequireApproval: cfg.RequireApproval, Columns: columns(cfg), Cards: []Card{}}
+	doc := &Document{Version: Version, Ship: string(cfg.Ship), Repo: key, Path: repo.Root, Machine: history.Machine(), RequireApproval: cfg.RequireApproval, Columns: columns(cfg), Cards: []Card{}}
 	doc.Steps = make([]string, 0, len(cfg.Steps))
 	for _, step := range cfg.Steps {
 		doc.Steps = append(doc.Steps, step.ID)
@@ -74,7 +74,11 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 	places := map[string]edits.Place{}
 	for _, id := range ids {
 		p, r, placeErr := locate(repo, cfg.Worktree, worktrees, id)
-		c, err := readCard(ctx, id, p.ChangeDir(), doc.Machine, false, refs)
+		folder := p.ChangeDir()
+		if r != nil && r.ShippingStarted {
+			folder = shippingFolder(p.Dir, id, folder)
+		}
+		c, err := readCard(ctx, id, folder, doc.Machine, false, refs)
 		c.addError(placeErr)
 		c.addError(err)
 		c.EditFolder = p.Dir
@@ -97,8 +101,14 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 				c.Column = "queued"
 			case runs.Ready:
 				c.Column = "ready"
+			case runs.Shipping:
+				c.Column = "shipping"
+			case runs.Merged:
+				c.Column = "done"
 			default:
-				if _, ok := cfg.Step(r.Step); ok {
+				if r.ShippingStarted {
+					c.Column = "shipping"
+				} else if _, ok := cfg.Step(r.Step); ok {
 					c.Column = "step:" + r.Step
 				} else {
 					c.Column = "queued"
@@ -110,13 +120,14 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 				if c.Column == "queued" {
 					c.Badge = "queued"
 				}
-				if cfg.BoardColumns != config.BoardSteps {
+				if cfg.BoardColumns != config.BoardSteps && !r.ShippingStarted && r.State != runs.Merged {
 					c.Column = "in_progress"
 				}
 			}
 		}
+		addShipping(&c, r, cfg)
 		places[id] = p
-		folders[id] = p.ChangeDir()
+		folders[id] = folder
 		doc.Cards = append(doc.Cards, c)
 	}
 	setPriorities(doc.Cards, repo.Checkout())
@@ -139,6 +150,11 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 		c, err := readCard(ctx, a.id, a.folder, doc.Machine, true, nil)
 		c.addError(err)
 		c.Column, c.Archived = "done", a.date
+		if p, r, err := locate(repo, cfg.Worktree, worktrees, a.id); err == nil && r != nil {
+			states[a.id] = r
+			places[a.id] = p
+			addShipping(&c, r, cfg)
+		}
 		folders[a.id] = a.folder
 		doc.Cards = append(doc.Cards, c)
 	}
@@ -234,6 +250,9 @@ func columns(cfg *config.Config) []Column {
 		}
 	} else {
 		out = append(out, Column{ID: "in_progress", Kind: "in_progress", Name: "In progress"})
+	}
+	if cfg.Ship != config.ShipLocal {
+		out = append(out, Column{ID: "shipping", Kind: "shipping", Name: "Shipping"})
 	}
 	return append(out, Column{ID: "ready", Kind: "ready", Name: "Ready"}, Column{ID: "done", Kind: "done", Name: "Done"})
 }

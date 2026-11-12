@@ -269,7 +269,7 @@ func TestSignedJobLogDownloadNeverGetsCredentials(t *testing.T) {
 	// httptest certificates share their CA, so the local API client trusts both servers.
 	h, _ := NewHTTP(api.URL, token, api.Client())
 	got, err := h.JobLog(context.Background(), "/logs")
-	if err != nil || got != "job log: ***" {
+	if err != nil || got.Text != "job log: ***" {
 		t.Fatal(got, err)
 	}
 	if _, err := h.JobLog(context.Background(), "/again"); err == nil {
@@ -312,5 +312,19 @@ func TestRetryAfterAndGitLabRateFloorPreventRequests(t *testing.T) {
 				t.Fatal(h.RetryAt())
 			}
 		})
+	}
+}
+
+func TestLargeJobLogStreamsBoundedTailAndCountsLines(t *testing.T) {
+	line := strings.Repeat("x", 511) + "\n"
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, strings.Repeat(line, 20000)) }))
+	defer server.Close()
+	h, err := NewHTTP(server.URL, Token{}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	log, err := h.JobLog(context.Background(), "/log")
+	if err != nil || !log.Truncated || len(log.Text) > 256<<10 || log.OmittedLines+strings.Count(log.Text, "\n") != 20000 {
+		t.Fatal(len(log.Text), log.OmittedLines, err)
 	}
 }

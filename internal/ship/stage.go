@@ -41,6 +41,7 @@ type Record struct {
 }
 type Outcome struct{ State, Reason string }
 type Event struct {
+	Jobs, Threads                      []string
 	CI                                 string
 	Kind, Commit, Branch, Link, Method string
 	Number, Round                      int

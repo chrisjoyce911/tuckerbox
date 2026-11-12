@@ -146,7 +146,13 @@ func (e *Engine) watch(ctx context.Context, claim *Claim) Outcome {
 		}
 		r.CI = &CIInfo{State: ci, Commit: r.LastPush}
 		if oldCI != ci && ci != "pending" {
-			e.emit(Event{Kind: "ci_finished", Commit: r.LastPush, CI: ci})
+			var jobs []string
+			for _, job := range checks.Jobs {
+				if job.State == "red" {
+					jobs = append(jobs, job.Name)
+				}
+			}
+			e.emit(Event{Kind: "ci_finished", Commit: r.LastPush, CI: ci, Jobs: jobs})
 		}
 		if err := e.save(); err != nil {
 			return e.blocked(err)
