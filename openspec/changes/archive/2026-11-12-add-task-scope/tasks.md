@@ -70,4 +70,4 @@
 
 - [x] 6.1 README: `--tasks`, `next`, and that approval covers the whole change
 - [x] 6.2 `go vet ./...`, `go test -race ./...` and `scripts/tla-check.sh` pass
-- [ ] 6.3 (ship) Archive after `add-herdr-board`, once the implementation is accepted; fold the board, history and mod requirements into `board-data`, `run-history` and `herdr-board`
+- [x] 6.3 (ship) Archive after `add-herdr-board`, once the implementation is accepted; fold the board, history and mod requirements into `board-data`, `run-history` and `herdr-board`

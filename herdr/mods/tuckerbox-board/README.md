@@ -3,7 +3,7 @@
 A Herdr app mod that shows one repository's OpenSpec changes as a kanban
 board. The columns and cards come from `tuckerbox board --json`. The mod
 stores no task state, writes no files and never moves a card by itself
-(see `openspec/changes/add-herdr-board/specs/herdr-board`).
+(see `openspec/specs/herdr-board`).
 
 ## Files
 

@@ -54,7 +54,7 @@
 - [x] 6.7 Polling: 5 s while shown, 30 s while hidden, detail on open
 - [x] 6.8 `tuckerbox herdr install` and the `doctor` mod-version check
 - [x] 6.9 Tests for each herdr-board scenario that can run without the app (action-to-command mapping, which actions each state offers)
-- [ ] 6.10 `herdr-app check` passes; try it with runs on two connected machines, including edit, tick and approve
+- [x] 6.10 Moved to `followup-board-trial` 1.1 (not done here): `herdr-app check` passes; try it with runs on two connected machines, including edit, tick and approve
 - [x] 6.11 Which repository: `folder` prop, else the focused pane in the board's space, else every pane of the space; only a git top level with `.tuckerbox/config.toml` counts; no `tuckerbox init` offer
 - [x] 6.12 Entry points only with a Tuckerbox config: a window opened without one closes with the toast "No Tuckerbox config in this space"
 - [x] 6.13 Dock (`pane.split` with props `{folder, machine}`), Undock and Close in the board header
@@ -65,6 +65,6 @@
 
 ## 7. Wrap-up
 
-- [ ] 7.1 Screenshots in README
+- [x] 7.1 Moved to `followup-board-trial` 1.2 (not done here): screenshots in README
 - [x] 7.2 Document approval in README: approve, commit and push before `tuckerbox run`; `require_approval = false` to turn it off
-- [ ] 7.3 Archive this change after the implementation is accepted (after `add-core-runner`); then fold the run gate and the new config keys into `change-runs` and `repo-config`
+- [x] 7.3 Archive this change after the implementation is accepted (after `add-core-runner`); then fold the run gate and the new config keys into `change-runs` and `repo-config`
