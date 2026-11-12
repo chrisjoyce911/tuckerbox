@@ -712,8 +712,8 @@ func (a App) logs(args []string) int {
 		return a.errf("logs", "%v", err)
 	}
 	// A step whose agent works in a live terminal: read the terminal.
-	if hc, name, ok := a.liveTerminal(l.Run, step); ok {
-		return a.terminalLogs(hc, name, l, follow)
+	if hc, pin, ok := a.liveTerminal(l.Run, step); ok {
+		return a.terminalLogs(hc, pin, l.Run.Terminal.Name, l, follow)
 	}
 	if !follow {
 		if err := agent.ReadLog(l.State.Log(step), a.Stdout); err != nil {
@@ -781,66 +781,138 @@ func (a App) logs(args []string) int {
 }
 
 // liveTerminal returns the terminal of r's agent when step is r's current
-// step and its terminal lives.
-func (a App) liveTerminal(r *runs.Run, step string) (agent.HC, string, bool) {
+// step and its terminal lives, as it was then: its address and labels pin
+// it, so logs can tell when the next step's terminal replaces it.
+func (a App) liveTerminal(r *runs.Run, step string) (agent.HC, *agent.HCTerminal, bool) {
 	if r == nil || r.Terminal == nil || r.State != runs.Running || r.Step != step {
-		return agent.HC{}, "", false
+		return agent.HC{}, nil, false
 	}
 	hc, ok := a.hc()
 	if !ok {
-		return agent.HC{}, "", false
+		return agent.HC{}, nil, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	t, err := hc.Get(ctx, r.Terminal.Name)
 	if err != nil || !t.Live() || !agent.MatchesStep(t, r.Change, r.Step, r.Round) {
-		return agent.HC{}, "", false
+		return agent.HC{}, nil, false
 	}
-	return hc, r.Terminal.Name, true
+	if t.Name == "" {
+		t.Name = r.Terminal.Name
+	}
+	return hc, t, true
+}
+
+// termSource is what logs needs of herdr-core to show a terminal.
+type termSource interface {
+	Get(ctx context.Context, name string) (*agent.HCTerminal, error)
+	Read(ctx context.Context, name string) ([]byte, error)
 }
 
 // terminalLogs shows a live agent terminal's history through hc read and,
 // with follow, what it writes next until it ends. Its history goes into
 // the step's log file when the step ends, where logs reads it after.
-func (a App) terminalLogs(hc agent.HC, name string, l located, follow bool) int {
+func (a App) terminalLogs(hc agent.HC, pin *agent.HCTerminal, name string, l located, follow bool) int {
 	ctx, stop := signal.NotifyContext(context.Background(), stopSignals...)
 	defer stop()
-	out, err := hc.Read(ctx, name)
+	step := l.Run.Step
+	err := followTerminal(ctx, hc, name, pin, l.Run.Change, step, l.Run.Round, a.Stdout, follow, 500*time.Millisecond,
+		func() bool {
+			r, _ := runs.ReadRun(l.State.RunFile())
+			return r != nil && r.Terminal != nil && r.Terminal.Name == name && r.Step == step && r.Round == l.Run.Round
+		})
 	if err != nil {
 		return a.errf("logs", "%v", err)
 	}
-	a.Stdout.Write(out)
+	if follow && ctx.Err() == nil {
+		fmt.Fprintf(a.Stdout, "\n==> tuckerbox: the agent's terminal %s ended; tuckerbox logs %s %s shows its session <==\n",
+			name, l.Run.Change, step)
+	}
+	return 0
+}
+
+// followTerminal writes the history of the terminal called name, pinned
+// to pin's address and to change, step and round, to w; with follow, it
+// polls every interval and writes what is new until the terminal ends,
+// is replaced by another (the next step's terminal under the same name),
+// or still says the run has let it go. Output is written only when the
+// pinned terminal is there both before and after it is read, so another
+// step's terminal is never shown as this one's.
+func followTerminal(ctx context.Context, src termSource, name string, pin *agent.HCTerminal, change, step string, round int,
+	w io.Writer, follow bool, interval time.Duration, still func() bool) error {
+	same := func(t *agent.HCTerminal) bool {
+		return t != nil && t.Address == pin.Address && agent.MatchesStep(t, change, step, round)
+	}
+	// read reads the terminal and reports whether it is still the pinned
+	// one afterwards (ok), and whether it lives. rerr is hc read's error:
+	// there is nothing to show this time.
+	read := func() (out []byte, rerr error, ok, live bool, err error) {
+		out, rerr = src.Read(ctx, name)
+		t, err := src.Get(ctx, name)
+		if err != nil {
+			return nil, nil, false, false, err
+		}
+		if !same(t) {
+			return nil, nil, false, false, nil
+		}
+		return out, rerr, true, t.Live(), nil
+	}
+	quiet := func(err error) error {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
+	out, rerr, ok, live, err := read()
+	switch {
+	case err != nil:
+		return quiet(err)
+	case !ok:
+		return nil
+	case rerr != nil:
+		return quiet(rerr)
+	}
+	_, _ = w.Write(out)
 	if !follow {
-		return 0
+		return nil
 	}
 	prev := out
-	for {
+	for live {
 		select {
 		case <-ctx.Done():
-			return 0
-		case <-time.After(500 * time.Millisecond):
+			return nil
+		case <-time.After(interval):
 		}
-		t, err := hc.Get(ctx, name)
-		if err != nil && ctx.Err() == nil {
-			return a.errf("logs", "%v", err)
+		t, err := src.Get(ctx, name)
+		if err != nil {
+			return quiet(err)
 		}
-		cur, rerr := hc.Read(ctx, name)
-		if rerr == nil {
-			// Only what is new since the last read.
-			n := 0
-			for n < len(prev) && n < len(cur) && prev[n] == cur[n] {
-				n++
-			}
-			a.Stdout.Write(cur[n:])
-			prev = cur
+		if !same(t) {
+			return nil
 		}
-		r, _ := runs.ReadRun(l.State.RunFile())
-		if !t.Live() || r == nil || r.Terminal == nil || r.Terminal.Name != name {
-			fmt.Fprintf(a.Stdout, "\n==> tuckerbox: the agent's terminal %s ended; tuckerbox logs %s %s shows its session <==\n",
-				name, l.Run.Change, l.Run.Step)
-			return 0
+		cur, rerr, ok, l, err := read()
+		if err != nil {
+			return quiet(err)
+		}
+		if !ok {
+			return nil
+		}
+		live = l
+		if rerr != nil {
+			continue
+		}
+		// Only what is new since the last read.
+		n := 0
+		for n < len(prev) && n < len(cur) && prev[n] == cur[n] {
+			n++
+		}
+		_, _ = w.Write(cur[n:])
+		prev = cur
+		if live && still != nil && !still() {
+			return nil
 		}
 	}
+	return nil
 }
 
 // displayTime is how status shows a time: the machine's local time zone.
