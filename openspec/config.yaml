@@ -30,3 +30,15 @@ schema: awfa-spec-tla
 #     archive:
 #       guidance:
 #         - Summarize the archive outcome before finishing
+
+rules:
+  tasks:
+    - >-
+      A task only shipping can do, such as archiving the change, starts with
+      `(ship)`: Tuckerbox ticks it when it ships the change, never a step.
+    - >-
+      A task only CI can do, such as "Go tests pass on Linux, macOS and Windows
+      CI", starts with `(ci)` (text saying it passes on or in CI counts too).
+      When shipping to a forge it doesn't hold the change back; shipping ticks
+      it in a commit "Tick <change> task N.M" once CI is green on the merge
+      request. In local ship mode it must be ticked like any other task.

@@ -160,23 +160,28 @@ func (e *Engine) Run(ctx context.Context, resume bool) Outcome {
 			if err := TickShipTasks(e.Git.Worktree, e.Identity.Change); err != nil {
 				return e.blocked(err)
 			}
-			archive := e.Archive
-			if archive == nil {
-				archive = e.archive
+			if folder, ok := archivedAlready(e.Git.Worktree, e.Identity.Change); ok {
+				// A step archived the change on its branch: don't archive it again.
+				r.ArchivePath = folder
+			} else {
+				archive := e.Archive
+				if archive == nil {
+					archive = e.archive
+				}
+				folder, err := archive(ctx, e.Identity.Change)
+				if err != nil {
+					return e.blocked(err)
+				}
+				r.ArchivePath = folder
+				if _, err := e.Commit(ctx, "Archive "+e.Identity.Change); err != nil {
+					return e.blocked(err)
+				}
+				sha, err := e.Git.Head(ctx)
+				if err != nil {
+					return e.blocked(err)
+				}
+				e.emit(Event{Kind: "archived", Commit: sha})
 			}
-			folder, err := archive(ctx, e.Identity.Change)
-			if err != nil {
-				return e.blocked(err)
-			}
-			r.ArchivePath = folder
-			if _, err := e.Commit(ctx, "Archive "+e.Identity.Change); err != nil {
-				return e.blocked(err)
-			}
-			sha, err := e.Git.Head(ctx)
-			if err != nil {
-				return e.blocked(err)
-			}
-			e.emit(Event{Kind: "archived", Commit: sha})
 		}
 		r.ArchiveDone = true
 		if err := e.save(); err != nil {
