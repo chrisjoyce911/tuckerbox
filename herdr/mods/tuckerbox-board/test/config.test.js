@@ -288,7 +288,7 @@ test("Save as a pull request", async () => {
   assert.equal(v.settings.pending.repo.size, 0);
 });
 
-test("Edits made while a save runs are kept", async () => {
+test("A section is read-only while its save runs", async () => {
   shop();
   setReply = (args) => args.includes("--dry-run")
     ? { code: 0, stdout: JSON.stringify({ ok: true, dry_run: true, file: "repo", target: "local", reason: "", problems: [], changes: [] }) }
@@ -298,27 +298,33 @@ test("Edits made while a save runs are kept", async () => {
   v.settings.editing.box.set_value("3");
   await click(v.render(), "field-repo-max_parallel-apply", cx);
   await checks(cx);
-  // Hold the save's command.
+  // An open text field in the section closes when Save starts.
+  await click(v.render(), "field-repo-require_approval-change", cx);
+  await click(v.render(), "field-repo-board.columns-change", cx);
   const exec = state.exec;
   const g = gate();
   state.exec = async (cmd, args, opts) => { if (args[1] === "set" && !args.includes("--dry-run")) await g.p; return exec(cmd, args, opts); };
   await click(v.render(), "save-repo", cx);
-  // While it runs: the same field again, and another field.
-  await click(v.render(), "field-repo-max_parallel-change", cx);
-  v.settings.editing.box.set_value("5");
-  await click(v.render(), "field-repo-max_parallel-apply", cx);
-  await click(v.render(), "field-repo-ship-change", cx);
-  await click(v.render(), "field-repo-ship-pick-merge", cx);
+  const ui = v.render();
+  assert.equal(v.settings.picking, null);
+  // No way to change the section while it saves: fields, pickers, Unset, workflow.
+  for (const id of ["field-repo-max_parallel-change", "field-repo-max_parallel-undo", "field-repo-ship-change", "field-repo-ship-unset",
+    "field-repo-steps.review.on_reject-change"]) assert.equal(find(ui, id), null, id);
+  for (const id of ["step-up-review", "step-down-plan", "step-remove-build", "step-add"]) {
+    assert.equal(callsOf(find(ui, id), "on_click").length, 0, `${id} is disabled`);
+  }
+  // Calls that slip through change nothing either.
+  assert.equal(v.settings.change("repo", (pm) => pm.set("max_parallel", "2"), cx), false);
+  v.settings.editing = { section: "repo", key: "max_parallel", box: { value: () => "2" }, error: "" };
+  v.settings.applyText(v.settings.config, cx);
+  v.settings.editing = null;
+  assert.deepEqual([...v.settings.pending.repo], [["max_parallel", "3"]]);
+  // The machine section is still editable meanwhile.
+  assert.ok(find(ui, "field-machine-editor-change"));
   g.open();
   await cx.settle();
-  const save = sets.filter((x) => !x.args.includes("--dry-run"));
-  assert.deepEqual(save.map((x) => x.args.slice(5)), [["max_parallel=3"]]);
-  assert.deepEqual([...v.settings.pending.repo], [["max_parallel", "5"], ["ship", "merge"]], "the later edits stay");
-  assert.ok(text(v.render()).join(" ").includes("2 edits made during the save are still pending"));
-  // They are checked again.
-  await checks(cx);
-  assert.ok(sets.at(-1).args.includes("--dry-run") && sets.at(-1).args.includes("max_parallel=5"));
-  assert.ok(callsOf(find(v.render(), "save-repo"), "on_click").length > 0, "and can be saved");
+  assert.equal(v.settings.pending.repo.size, 0);
+  assert.ok(find(v.render(), "field-repo-max_parallel-change"), "editable again after the save");
 });
 
 test("Machine edits save with --machine and the machine revision", () => {

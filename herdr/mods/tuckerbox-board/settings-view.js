@@ -84,7 +84,14 @@ export class SettingsView {
 
   // ---- pending edits ----
 
+  // A section is read-only while its save runs: the save sends the edits
+  // as they were, and clears them when it succeeds.
+  locked(section) {
+    return this.busy === `save-${section}`;
+  }
+
   change(section, fn, cx) {
+    if (this.locked(section)) return false;
     try { fn(this.pending[section]); } catch (e) { this.notice = { text: String(e?.message ?? e), kind: "error" }; cx.notify(); return false; }
     this.notice = null;
     this.conflicts[section].clear();
@@ -125,9 +132,11 @@ export class SettingsView {
     catch (e) { this.notice = { text: String(e?.message ?? e), kind: "error" }; cx.notify(); return; }
     if (this.config.fixtures) { this.notice = { text: `Fixtures: would run ${argv.join(" ")}`, kind: "info" }; cx.notify(); return; }
     this.busy = `save-${section}`;
+    // Open fields and pickers of the section close: nothing changes it now.
+    if (this.editing?.section === section) this.editing = null;
+    if (this.picking?.section === section) this.picking = null;
+    if (section === "repo") this.adding = null;
     const want = this.want;
-    // What this save sends: edits made while it runs are not in it, and stay.
-    const sent = new Map(this.pending[section]);
     const gen = this.gen[section];
     cx.notify();
     cx.spawn(async (cx) => {
@@ -135,21 +144,13 @@ export class SettingsView {
       this.busy = null;
       if (want !== this.want) return;
       if (r.ok) {
-        const left = savedOut(this.pending[section], sent);
+        this.pending[section].clear();
         this.checks[section] = null;
         this.gen[section]++;
         this.conflicts[section].clear();
         const lines = [r.message, r.link ? `Merge request: ${r.link}` : "", ...r.changes.map((c) => `${c.change}: ${c.key} ${c.message}`)].filter(Boolean);
-        if (left) lines.push(`${left} edit${left === 1 ? "" : "s"} made during the save ${left === 1 ? "is" : "are"} still pending.`);
         this.notice = { text: lines.join("\n") || "Saved.", kind: "info", link: r.link };
-        // The edits left are judged against the file as saved: one that now
-        // matches it is dropped; the rest are checked again.
-        this.load(cx, (_before, after) => {
-          if (after.error) return;
-          for (const [key, v] of [...this.pending[section]]) {
-            try { edit(this.pending[section], after, section, key, v); } catch { /* kept as it was */ }
-          }
-        });
+        this.load(cx);
       } else if (r.error?.code === "changed_since_read") {
         // settings-view: Save conflicts. Edits kept; read again; mark what moved.
         this.notice = { text: "Someone saved this file since it was read. It has been read again: check the marked keys and save again.", kind: "error" };
@@ -271,9 +272,9 @@ export class SettingsView {
             .when(!st.inWorkflow, (el) => el.child(div().text_size(10.5).text_color(tm.dim).child("not in the workflow")))
             .child(div().flex_1())
             .when(st.inWorkflow, (el) => el
-              .child(tiny(`step-up-${st.id}`, "↑", (_e, cx) => this.change("repo", (pm) => moveStep(pm, c, st.id, -1), cx), { disabled: i <= 0 }))
-              .child(tiny(`step-down-${st.id}`, "↓", (_e, cx) => this.change("repo", (pm) => moveStep(pm, c, st.id, 1), cx), { disabled: i >= order.length - 1 }))
-              .child(tiny(`step-remove-${st.id}`, "Remove", (_e, cx) => this.change("repo", (pm) => removeStep(pm, c, st.id), cx), { danger: true }))))
+              .child(tiny(`step-up-${st.id}`, "↑", (_e, cx) => this.change("repo", (pm) => moveStep(pm, c, st.id, -1), cx), { disabled: i <= 0 || this.locked("repo") }))
+              .child(tiny(`step-down-${st.id}`, "↓", (_e, cx) => this.change("repo", (pm) => moveStep(pm, c, st.id, 1), cx), { disabled: i >= order.length - 1 || this.locked("repo") }))
+              .child(tiny(`step-remove-${st.id}`, "Remove", (_e, cx) => this.change("repo", (pm) => removeStep(pm, c, st.id), cx), { danger: true, disabled: this.locked("repo") }))))
           .children(st.keys.map((k) => this.field(c, "repo", k, segments(k.key).slice(2).join("."))))
           .when(st.keys.length === 0 && p.has(`steps.${st.id}.agent`), (el) => el.child(div().text_size(11).text_color(tm.accent).child(`agent → ${p.get(`steps.${st.id}.agent`)} (pending)`)));
       }))
@@ -284,6 +285,7 @@ export class SettingsView {
   addStepRow(c) {
     const tm = theme();
     const a = this.adding;
+    if (this.locked("repo")) return h_flex().child(tiny("step-add", "+ Add step", () => {}, { disabled: true }));
     if (!a) return h_flex().child(tiny("step-add", "+ Add step", (_e, cx) => {
       this.adding = { box: TextareaState.new({ placeholder: "step id", rows: 1 }), agent: agentChoices(c)[0], error: "" }; cx.notify();
     }));
@@ -298,6 +300,7 @@ export class SettingsView {
   }
 
   addStep(c, cx) {
+    if (this.locked("repo")) return;
     const a = this.adding;
     try { addStep(this.pending.repo, c, a.box.value().trim(), a.agent); }
     catch (e) { a.error = String(e?.message ?? e); cx.notify(); return; }
@@ -331,7 +334,7 @@ export class SettingsView {
     const p = this.pending[s];
     const has = p.has(k.key);
     const pend = has ? p.get(k.key) : undefined;
-    const can = editableIn(k, s) && !k.secret;
+    const can = editableIn(k, s) && !k.secret && !this.locked(s);
     const opts = can ? choices(c, k) : null;
     const editing = this.editing?.section === s && this.editing?.key === k.key ? this.editing : null;
     const picking = this.picking?.section === s && this.picking?.key === k.key;
@@ -363,6 +366,7 @@ export class SettingsView {
   }
 
   startChange(s, k, opts, cx) {
+    if (this.locked(s)) return;
     if (opts) { this.picking = this.picking?.key === k.key && this.picking?.section === s ? null : { section: s, key: k.key }; cx.notify(); return; }
     const p = this.pending[s];
     const value = p.has(k.key) && p.get(k.key) !== null ? p.get(k.key) : cliValue(sectionValue(k, s).value);
@@ -372,6 +376,7 @@ export class SettingsView {
 
   applyText(c, cx) {
     const e = this.editing;
+    if (!e || this.locked(e.section)) return;
     try { edit(this.pending[e.section], c, e.section, e.key, e.box.value()); }
     catch (err) { e.error = String(err?.message ?? err); cx.notify(); return; }
     this.editing = null;
@@ -404,9 +409,3 @@ function fixtureCheck(section) {
   return { ok: true, dryRun: true, target: section === "machine" ? "machine" : "local", reason: "fixtures: nothing runs", problems: [], changes: [], link: "", message: "", error: null };
 }
 
-// After a save: removes from pending each edit the save sent, unless it was
-// changed while the save ran. Returns how many edits are left.
-export function savedOut(pending, sent) {
-  for (const [key, v] of sent) if (pending.has(key) && pending.get(key) === v) pending.delete(key);
-  return pending.size;
-}
