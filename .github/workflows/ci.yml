@@ -42,6 +42,15 @@ jobs:
           CGO_ENABLED: "0"
         run: go build ./...
 
+  herdr-mod:
+    # The board mod's action mapping and data rules; plain node, no npm install.
+    name: herdr mod
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: node --test
+        run: node --test herdr/mods/tuckerbox-board/test/*.test.js
+
   tla:
     name: tla
     runs-on: ubuntu-latest
