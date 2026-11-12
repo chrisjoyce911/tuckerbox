@@ -30,7 +30,7 @@ The binary is built without cgo, so it is a single static file on macOS, Linux a
 ## Use
 
 ```sh
-tuckerbox version   # version, commit, Go version and platform
+tuckerbox version   # version, commit, Go version and platform (--json for tools)
 tuckerbox doctor    # checks git, openspec and the agent CLIs (claude, codex)
 tuckerbox init      # writes a commented starter .tuckerbox/config.toml
 tuckerbox check     # validates it, merged with this machine's config
