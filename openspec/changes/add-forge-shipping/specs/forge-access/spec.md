@@ -18,7 +18,7 @@ Tuckerbox SHALL find the forge from the push URL of the shipping remote (`origin
 - **THEN** the forge is GitLab, project `team/tools/app`, API `https://gitlab.com/api/v4`
 
 ### Requirement: Other forge hosts
-For any other host, repository config `[forge] kind` (`github` or `gitlab`) or machine config `[forges."<host>"] kind` SHALL name the forge. The API URL SHALL default to `https://<host>/api/v4` for GitLab and `https://<host>/api/v3` for GitHub. `[forge] api_url` MAY change it, but only to a URL on the remote's own host. Unknown hosts SHALL refuse to ship.
+For any other host, repository config `[forge] kind` (`github` or `gitlab`) or machine config `[forges."<host>"] kind` SHALL name the forge. The API URL SHALL default to `https://<host>/api/v4` for GitLab and `https://<host>/api/v3` for GitHub. `[forge] api_url` MAY change it, but only to an `https` URL on the remote's own host. Unknown hosts SHALL refuse to ship.
 
 #### Scenario: Self-hosted GitLab
 - **WHEN** the remote's host is `git.example.org` and repository config sets `[forge] kind = "gitlab"`
@@ -31,6 +31,21 @@ For any other host, repository config `[forge] kind` (`github` or `gitlab`) or m
 #### Scenario: API URL on another host
 - **WHEN** repository config sets `[forge] api_url` to a host other than the remote's
 - **THEN** `tuckerbox check` fails and no request is sent to that host
+
+#### Scenario: API URL over HTTP
+- **WHEN** repository config sets `[forge] api_url = "http://git.example.org/api/v4"`
+- **THEN** `tuckerbox check` fails naming `https`, and no request is sent
+
+### Requirement: Credentials on redirects
+Forge API and log requests SHALL refuse a redirect to a URL that is not `https`. On a redirect to another host or port, they SHALL drop `Authorization`, `PRIVATE-TOKEN` and `Cookie` before following it. Only same-host `https` redirects SHALL keep the token.
+
+#### Scenario: Redirect to HTTP
+- **WHEN** the forge answers an API request with a redirect from `https://git.example.org/...` to `http://git.example.org/...`
+- **THEN** the redirect is not followed, no token is sent over HTTP, and the request fails
+
+#### Scenario: Redirect to another host
+- **WHEN** a job log request is redirected to `https://logs.example.net/signed-url`
+- **THEN** the log is fetched from that host with no `Authorization`, `PRIVATE-TOKEN` or `Cookie` header
 
 ### Requirement: Token sources
 Tuckerbox SHALL take a forge token, in order, from: the variable named by machine config `[forges."<host>"] token_env`; then `GH_TOKEN` or `GITHUB_TOKEN` for `github.com`, `GITLAB_TOKEN` for `gitlab.com`; then, if `borrow_cli_token = true` for that host, the token `gh` or `glab` stores. A default variable SHALL NOT be sent to any other host.

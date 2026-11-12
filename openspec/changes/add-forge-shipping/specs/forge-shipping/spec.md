@@ -43,7 +43,7 @@ With `ship = "mr"`, a shipping run SHALL become `ready` once CI on the head comm
 - **THEN** the run is `ready` with the merge request link, and the merge request is still open
 
 ### Requirement: Merging in merge mode
-With `ship = "merge"`, a shipping run SHALL merge when every check on the head commit has passed, no review thread waits for a fix, and the forge reports the merge request mergeable. The merge SHALL be pinned to the head commit seen green, so the forge refuses it if the head moved. The run SHALL then be `merged`. Model: `formal/ship.tla`, `MergedGreen`.
+With `ship = "merge"`, a shipping run SHALL merge when every check on the head commit has passed, no review thread waits for a fix, and the forge reports the merge request mergeable. The merge SHALL be pinned to the head commit seen green, so the forge refuses it if the head moved. The run SHALL then be `merged`. Model: `formal/ship.tla`, `MergedGreen`, `MergedGated`.
 
 #### Scenario: Merge when green
 - **WHEN** checks on head `abc123` pass, no thread waits and the forge reports the merge request mergeable
@@ -57,12 +57,39 @@ With `ship = "merge"`, a shipping run SHALL merge when every check on the head c
 - **WHEN** checks pass but the forge says a required approval is missing
 - **THEN** Tuckerbox does not merge, the run stays `shipping` with reason `waiting for approval`, and polling continues
 
+### Requirement: Protection enforced by the forge
+Before each merge, `merge` mode SHALL check the forge enforces required checks and approvals for its token as it accepts a merge. GitHub: a required status check on the base, `current_user_can_bypass` `never` on every applicable ruleset, and `enforce_admins` if the token is admin. GitLab: `only_allow_merge_if_pipeline_succeeds` on, `allow_merge_on_skipped_pipeline` off. Otherwise the run SHALL block. It SHALL NOT change forge settings.
+
+#### Scenario: Check re-run after the read
+- **WHEN** Tuckerbox saw head `abc123` green, then a required check is re-run on `abc123` and is pending when the merge call arrives
+- **THEN** the forge refuses the merge, nothing merges, and the run keeps polling
+
+#### Scenario: Approval withdrawn
+- **WHEN** a reviewer withdraws the only required approval after Tuckerbox read the merge request as mergeable
+- **THEN** the forge refuses the merge and the run stays `shipping` with reason `waiting for approval`
+
+#### Scenario: Token can bypass protection
+- **WHEN** the token is a repository admin and classic protection does not enforce for admins, or a ruleset on the base reports `current_user_can_bypass` other than `never`
+- **THEN** the run is `blocked` with reason `token can bypass branch protection` and no merge is called
+
+#### Scenario: GitLab does not require pipelines
+- **WHEN** the GitLab project has `only_allow_merge_if_pipeline_succeeds = false`
+- **THEN** the run is `blocked` with reason `forge does not require CI to pass` and the project setting is unchanged
+
 ### Requirement: Merge method
-`[shipping] merge_method` SHALL be `merge`, `squash` or `rebase`, `merge` by default. It SHALL only be used in `merge` mode. A method the forge project does not allow SHALL block the run with the forge's message.
+`[shipping] merge_method` SHALL be `merge`, `squash` or `rebase`, `merge` by default, used only in `merge` mode. Before merging, Tuckerbox SHALL check the method against the repository's allowed methods (GitHub) or the project's `merge_method` and `squash_option` (GitLab), and block on a mismatch without calling merge. On GitLab, `rebase`, and `merge` with `ff` or `squash_option = always`, SHALL be refused. It SHALL NOT change settings.
 
 #### Scenario: Squash
 - **WHEN** `merge_method = "squash"` and the merge request is ready to merge
-- **THEN** Tuckerbox asks the forge for a squash merge
+- **THEN** Tuckerbox asks the forge for a squash merge (`merge_method = squash` on GitHub, `squash = true` on GitLab)
+
+#### Scenario: GitLab fast-forward project
+- **WHEN** `merge_method = "merge"` and the GitLab project's `merge_method` is `ff`
+- **THEN** the run is `blocked` with reason `merge method merge does not match the project's ff`, no merge is called, and the project is unchanged
+
+#### Scenario: Rebase on GitLab
+- **WHEN** `merge_method = "rebase"` on a GitLab project
+- **THEN** `tuckerbox check` and the run report that GitLab takes no per-merge rebase, and nothing merges
 
 ### Requirement: Branch behind the base
 When the forge reports the branch must be updated before merging, a run in `merge` mode SHALL merge the base branch into the change's branch with `git merge`, push it, and poll CI again. It SHALL NOT rebase. A merge conflict SHALL block the run with the conflicting files.
@@ -93,7 +120,7 @@ Tuckerbox SHALL push only the change's branch, by an explicit refspec, and SHALL
 - **THEN** the run is `blocked` before any push and says it will not push the base branch
 
 ### Requirement: Merge safety
-Tuckerbox SHALL NOT merge while any check on the head commit is failing or pending, while a check the forge marks required is missing, or when no check reported at all. It SHALL NOT use an option that skips the forge's protection, even with an admin token.
+Tuckerbox SHALL NOT merge while any check on the head commit is failing or pending, while a check the forge marks required is missing, or when no check reported at all. It SHALL NOT use an option that skips the forge's protection, and SHALL NOT merge with a token that can bypass it (see Protection enforced by the forge).
 
 #### Scenario: No CI at all
 - **WHEN** CI on the head commit is `none` in `merge` mode

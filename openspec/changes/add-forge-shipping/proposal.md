@@ -20,7 +20,11 @@ against that race.
     green and no review thread is waiting, then stop as `ready` for people
     to merge. This repository uses it.
   - `merge`: the same, then merge when the forge says the merge request is
-    mergeable and every check on its head is green.
+    mergeable and every check on its head is green. Only where the forge
+    itself enforces required checks and approvals at merge time for
+    Tuckerbox's token: a token that can bypass protection is refused.
+    GitLab's merge method is the project's setting; Tuckerbox checks that it
+    matches and never changes it.
   - The mode is a repository rule: machine config may not set `mr` or
     `merge`.
 - **GitHub and GitLab** (gitlab.com and self-hosted) through their HTTP
@@ -28,7 +32,8 @@ against that race.
   from the remote URL. Repository config can name it for other hosts.
 - **Tokens stay on the machine:** from machine config or the usual
   environment variables (`GITHUB_TOKEN`, `GH_TOKEN`, `GITLAB_TOKEN`), and
-  only for the host they belong to. With `borrow_cli_token = true`,
+  only for the host they belong to, over HTTPS only. A redirect never
+  carries a token to plain HTTP or to another host. With `borrow_cli_token = true`,
   Tuckerbox may read the token `gh` or `glab` already stores, read-only.
   Repository config can never hold a token. `git push` keeps using git's own
   credentials.
@@ -38,13 +43,17 @@ against that race.
   the steps run.
 - **CI and review loop:** poll the checks for the head commit; on failure,
   fetch the failed jobs' logs, trimmed, and give them to a fix step the
-  repository names. Review threads from people with write access (and
-  named bots) become findings for the same loop. Each fix is pushed and
+  repository names. Review threads from people who can actually write to
+  the repository (and named bots) become findings for the same loop;
+  Tuckerbox's own replies never do. GitLab merge request and
+  merged-results pipelines are followed too. Each fix is pushed and
   polled again, up to `max_rounds`.
 - **Cross-machine claim:** a push with `--force-with-lease` and the forge's
   "one open merge request per branch" rule decide which machine ships a
   change. The other machine stops as `blocked` and pushes nothing. TLA+
-  model `formal/ship.tla`, with two broken variants TLC rejects.
+  model `formal/ship.tla`, with three broken variants TLC rejects (a
+  plain push, an unpinned merge, and a token that bypasses protection
+  while checks are re-run or an approval is withdrawn).
 - **Safety:** never push the base branch, never force-push except with a
   lease on the change's branch, never merge with a failing, pending or
   missing check, always merge pinned to the commit seen green, and poll

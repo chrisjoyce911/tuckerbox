@@ -12,7 +12,7 @@ See proposal.md for why. What exists:
 **Goals:**
 - A run can go from its last step to an open, green merge request, or to a merge, with no person in the loop unless something needs one.
 - No machine overwrites another's work or a person's, and two machines never both ship one change.
-- Nothing merges that the forge's own protection, or a green check on the exact head, would not allow.
+- Nothing merges unless the forge enforced its branch protection (required checks and approvals) as it accepted the merge, and Tuckerbox saw every check green on the exact head just before.
 - Tokens never leave the machine they belong to, and never reach a host they were not issued for.
 
 **Non-Goals:**
@@ -45,7 +45,7 @@ wait_timeout = "2h"
 
 [forge]                      # only for hosts other than github.com and gitlab.com
 kind = "gitlab"
-api_url = "https://git.example.org/api/v4"   # optional; must be on the remote's host
+api_url = "https://git.example.org/api/v4"   # optional; https, on the remote's host
 
 [steps.fix_ci]
 agent = "claude"
@@ -80,14 +80,15 @@ One forge interface, two implementations (`internal/forge/github`, `internal/for
 |---|---|---|
 | Find an open merge request for a branch | `GET /repos/{o}/{r}/pulls?head={o}:{branch}&state=open` | `GET /projects/{id}/merge_requests?source_branch=…&state=opened` |
 | Open one | `POST /repos/{o}/{r}/pulls` | `POST /projects/{id}/merge_requests` |
-| Checks on a commit | `GET /commits/{sha}/check-runs` and `/commits/{sha}/status` | `GET /projects/{id}/pipelines?sha=…`, then `/pipelines/{pid}/jobs` |
-| Required checks | `GET /repos/{o}/{r}/rules/branches/{base}` (readable without admin) | `detailed_merge_status` on the merge request |
+| Checks on a commit | `GET /commits/{sha}/check-runs` (latest run per check) and `/commits/{sha}/status` | `GET /merge_requests/{iid}/pipelines` and `GET /pipelines?sha=…`, then `/pipelines/{pid}/jobs` (see "GitLab pipelines") |
+| Required checks and bypass | `GET /repos/{o}/{r}/rules/branches/{base}`, `GET /rulesets/{id}` (`current_user_can_bypass`), `GET /branches/{base}` (`protection`), repository `permissions` | project `only_allow_merge_if_pipeline_succeeds`, `allow_merge_on_skipped_pipeline` |
 | Failed job log | `GET /actions/jobs/{id}/logs` | `GET /projects/{id}/jobs/{jid}/trace` |
 | Review threads | GraphQL `pullRequest.reviewThreads { isResolved comments }` | `GET /merge_requests/{iid}/discussions` (`resolvable`, `resolved`) |
 | Reply in a thread | GraphQL `addPullRequestReviewThreadReply` | `POST /discussions/{did}/notes` |
 | Mergeable | `mergeable_state == "clean"` | `detailed_merge_status == "mergeable"` |
-| Merge, pinned | `PUT /pulls/{n}/merge` with `sha` and `merge_method` | `PUT /merge_requests/{iid}/merge` with `sha` (and `squash`) |
-| Who may review | `author_association` in `OWNER`, `MEMBER`, `COLLABORATOR` | project member with Developer access or more |
+| Merge, pinned | `PUT /pulls/{n}/merge` with `sha` and `merge_method` | `PUT /merge_requests/{iid}/merge` with `sha` (and `squash`); the method is the project's `merge_method` |
+| Who may review | review's `authorCanPushToRepository`, else `GET /collaborators/{user}/permission` is `admin` or `write` | `GET /projects/{id}/members/all/{user_id}` with `access_level` ≥ 30 (Developer) |
+| Tuckerbox's own account | `GET /user` | `GET /user` |
 
 GitHub's REST API does not say whether a review thread is resolved; only its GraphQL API does. So the GitHub side uses one GraphQL query and one mutation for threads, over the same HTTP client and token. Everything else is REST.
 
@@ -98,7 +99,8 @@ Forge detection reuses the board's remote normalisation (scheme, `user@` and `.g
 ### Tokens
 
 - **Order:** `token_env` for the host, then the forge's usual variables for its public host only (`GH_TOKEN`, then `GITHUB_TOKEN`, for `github.com`; `GITLAB_TOKEN` for `gitlab.com`), then a borrowed CLI token if allowed. `glab` reads `GITLAB_TOKEN` for any host; Tuckerbox doesn't, so a token for one GitLab can't be sent to another by accident.
-- **Repository config can't name a host for a token.** `[forge] api_url` must be on the remote's host. Otherwise a cloned repository could point the API at its own server and receive your token.
+- **Repository config can't name a host for a token.** `[forge] api_url` must be `https` and on the remote's host (and its port, if the remote names one). Otherwise a cloned repository could point the API at its own server, or at plain HTTP, and receive your token.
+- **Redirects never carry the token elsewhere.** API and log requests use one client whose `CheckRedirect` refuses any redirect to a non-`https` URL, and removes `Authorization`, `PRIVATE-TOKEN` and `Cookie` from any redirect to another host or port. Go's default client keeps headers it does not know as sensitive (such as `PRIVATE-TOKEN`) across hosts, and keeps `Authorization` on a same-host scheme change, so the default is not enough. GitHub's job logs redirect to a signed URL on another host; that request goes without the token, which the signed URL doesn't need. Tests use `httptest.NewTLSServer`.
 - **Borrowing is read-only and off by default.** `gh auth token --hostname <host>` prints the token `gh` stores, from its config file or the system keyring. `glab config get token --host <host>` does the same for `glab`. Tuckerbox runs only these commands, with a 5-second timeout, reads standard output, and never logs it. It's off by default because reading another tool's credentials should be the person's choice. `doctor` mentions when a borrowable token exists.
 - **Pushing uses git's credentials** (SSH keys or a credential helper), exactly as when a person pushes. The API token is only for the API.
 - **Agents never get it.** Tuckerbox doesn't add the token to an agent's environment. Variables already in the person's environment are inherited as today; that is the person's setup.
@@ -154,11 +156,44 @@ The marker (`<!-- tuckerbox: change=… machine=… run=… -->`) is how other m
 
 ### CI judged for the exact head
 
-The run judges only the commit it last pushed. A green pipeline for an earlier commit says nothing about the head. On GitHub the head's check runs and commit statuses must all be done and passing (`success`, `neutral`, `skipped`); on GitLab the newest pipeline for the head must be `success`, ignoring `allow_failure` jobs. Required checks from branch rules that haven't reported yet keep CI `pending`, not `green`. No check at all within 5 minutes of the push is `none`: `mr` mode treats it as green (the repository has no CI, and a person merges), `merge` mode refuses to merge.
+The run judges only the commit it last pushed. A green pipeline for an earlier commit says nothing about the head. On GitHub the head's check runs (the latest run of each check, since a re-run adds a new run on the same commit) and commit statuses must all be done and passing (`success`, `neutral`, `skipped`); on GitLab the selected pipeline (below) must be `success`, ignoring `allow_failure` jobs. Required checks from branch rules that haven't reported yet keep CI `pending`, not `green`. No check at all within 5 minutes of the push is `none`: `mr` mode treats it as green (the repository has no CI, and a person merges), `merge` mode refuses to merge.
 
 The merge call carries the head commit seen green (`sha`). If anything was pushed in between, the forge refuses, and nothing unchecked merges. `formal/ship_broken_unpinned.tla` shows the merge without the pin merging an unchecked commit.
 
-Tuckerbox also requires the forge's own verdict (`clean` or `mergeable`) and never uses admin bypass, so required approvals, code owners and protection rules still apply, even with an admin's token.
+### GitLab pipelines
+
+A project can run branch pipelines (on the pushed commit), merge request pipelines (on the pushed commit, `source = merge_request_event`) and merged-results pipelines (on a temporary merge commit of the source into the target, which is on neither branch). A lookup by `sha` alone misses the last kind, so Tuckerbox reads `GET /merge_requests/{iid}/pipelines` first and falls back to `GET /pipelines?sha=<head>&ref=<branch>`:
+- A merge request pipeline counts if its `sha` is the head.
+- A merged-results pipeline (its `sha` is not the head) counts only if `GET /repository/commits/{sha}` lists the head among its `parent_ids`. Its other parent is the target commit it tested against, kept with the CI result.
+- The newest merge request pipeline that counts decides; only if there is none does the newest branch pipeline for the head. When a project runs both for the head, the merge request one wins, since it is the one GitLab's "pipelines must succeed" checks.
+- A pipeline whose source commit can't be confirmed is ignored (fail closed): CI stays `pending`, and then `none`.
+
+### What the forge enforces at merge time
+
+Reading CI and approvals, then calling merge, is not atomic. Between the two a check can be re-run on the same commit (the SHA pin still matches) and an approval can be withdrawn. Only the forge's own check, made as it accepts the merge, is atomic, and it covers what branch protection requires and nothing else. So the guarantee is split, and `formal/ship.tla` models both halves (`ReqRerun`, `OptRerun` and `Approval` act at any time):
+- **Required checks and required approvals:** enforced by the forge at merge time (`MergedGated`). This holds only if the forge enforces them for Tuckerbox's token.
+- **Every other check:** Tuckerbox saw it green on the merged commit before merging (`MergedGreen`). A re-run of a non-required check after that read can't stop the merge. Repositories that care make the check required.
+
+`formal/ship_broken_bypass.tla` shows the gap: with a token that bypasses protection, a run sees everything green and approved, a reviewer withdraws the approval (or a required check is re-run), and the merge goes through.
+
+So `merge` mode checks, before each merge attempt, that the forge will enforce protection for this token, and blocks with the reason otherwise. It never changes the forge's settings to make this so.
+- **GitHub:** the base must have at least one required status check, from a ruleset (`GET /rules/branches/{base}`, readable with read access) or classic protection (`protection.required_status_checks` on `GET /branches/{base}`). Every ruleset that applies must report `current_user_can_bypass: "never"`. If the repository's `permissions.admin` is true for the token, classic protection must have `enforce_admins` enabled (readable with that admin token). The merge call has no option that forces protection on a bypassing token, so a bypassing token is refused, not trusted to behave.
+- **GitLab:** the project must have `only_allow_merge_if_pipeline_succeeds = true` and `allow_merge_on_skipped_pipeline = false`. Required approvals are enforced by GitLab at merge for every role; the merge call has no bypass option, and Tuckerbox never edits approval rules.
+- **Residual:** classic GitHub protection can let named accounts bypass required reviews, and only an admin can read that list. A non-admin token listed there can't be detected. `doctor` says so, and the documented setup for `merge` mode is a dedicated account not on any bypass list.
+
+The forge's own verdict (`clean` or `mergeable`) is still required before the call; it is an early read, not the guarantee.
+
+### Merge methods
+
+GitHub takes the method per call (`merge_method`); Tuckerbox refuses a method the repository disallows (`allow_merge_commit`, `allow_squash_merge`, `allow_rebase_merge` on `GET /repos/{o}/{r}`) before calling. GitLab takes only `squash` per call; the merge method is a project setting (`merge_method`: `merge`, `rebase_merge` or `ff`; `squash_option`: `never`, `always`, `default_on`, `default_off`). Tuckerbox reads `GET /projects/{id}` and maps:
+
+| `[shipping] merge_method` | GitLab project must have | Call |
+|---|---|---|
+| `merge` | `merge_method` `merge` or `rebase_merge`; `squash_option` not `always` | `squash=false` |
+| `squash` | `squash_option` not `never` | `squash=true` |
+| `rebase` | refused on GitLab: no per-call rebase, and Tuckerbox never rebases | none |
+
+A project with `merge_method = "ff"` makes `merge` refused too (GitLab would fast-forward, not merge). A mismatch blocks the run with `merge method <x> does not match the project's <y>` before any merge call. Tuckerbox never edits project settings.
 
 ### Fix steps and findings
 
@@ -166,9 +201,16 @@ A failure becomes findings in the existing result format (`severity`, `file`, `d
 - **CI:** one finding per failed job: `file` is the job name, `detail` holds the job's link and the path of its saved log in the state directory. Logs are trimmed to the end, where failures are: the last 200 lines, at most 32 KiB per job and 128 KiB per round.
 - **Review:** one finding per new unresolved thread: `file` and line from the thread, `detail` holds the text, author and link.
 
-Only threads from people with write access, or from accounts listed in `review_from` (a review bot), count. On a public repository anyone can comment, and a comment is text an agent will read; limiting who can steer the fix step limits prompt injection. The brief says plainly that logs and comments are data.
+Only comments from people who can write to the repository, or from accounts listed in `review_from` (a review bot), count. On a public repository anyone can comment, and a comment is text an agent will read; limiting who can steer the fix step limits prompt injection. The brief says plainly that logs and comments are data.
 
-Tuckerbox remembers each thread's last comment id it handed on (in `run.json`), so a thread comes back only when someone adds to it. After the push it replies in each thread with the commit and the fix step's summary, and leaves resolving to people.
+Write access is the actual permission, not an association: a GitHub organisation member (`MEMBER`) can have read-only access. On GitHub a review comment counts when its review has `authorCanPushToRepository: true`; otherwise (for example a reply outside a review) the collaborator permission endpoint must say `admin` or `write` (`maintain` maps to `write`). On GitLab the author's `access_level` from `members/all` (which includes inherited group membership) must be 30 (Developer) or more. Any error, 403 or 404 counts as no access (fail closed); the result is cached per user for the run's ship stage. A finding's text holds only comments that count, so an outsider's reply in a reviewer's thread doesn't reach the agent.
+
+Tuckerbox's own replies never start a round. Each reply carries a hidden marker (`<!-- tuckerbox: reply run=… round=… thread=… -->`) and is posted from the token's account (`GET /user`). Per thread, `run.json` keeps a cursor (the newest comment id considered) and the ids of Tuckerbox's replies:
+1. Before posting, the run records the intended reply (thread, round, fix commit).
+2. After posting, it records the returned comment id and moves the thread's cursor past it, in one atomic write of `run.json`.
+3. On resume after a crash between 1 and 2, it looks in the thread for a comment from the token's account with that marker, and adopts it instead of posting again.
+
+A comment is Tuckerbox's when its id is recorded, or it is from the token's account and carries this run's reply marker. A person who reviews with the same account as the token still triggers rounds, as long as their comment has no marker. A thread is handed on again only when a comment newer than its cursor counts and isn't Tuckerbox's. After the push it replies in each thread with the commit and the fix step's summary, and leaves resolving to people.
 
 A fix step that changes nothing blocks the run, rather than push the same head and loop.
 
@@ -229,15 +271,19 @@ Cards gain `mr` and `ci` fields and the ship round, and the mod shows a link and
 | `Push`: compare-and-swap on the tip | `ship.push`: `git push --force-with-lease=refs/heads/<b>:<lease> <remote> refs/heads/<b>:refs/heads/<b>`, lease from `run.json` |
 | `Open`: one open merge request per branch | `forge.OpenMR`; on 409/422, `forge.FindMR` and compare the marker |
 | `SeeGreen`, `MergeGuard`: merge pinned to the commit seen green | `ship.ciState(head)`, then `forge.Merge(sha)` |
+| `ForgeGate`, `Protected`: the forge enforces required checks and approval at merge | `ship.mergeGate()` (the preflight in "What the forge enforces at merge time") before each `forge.Merge` |
+| `ReqRerun`, `OptRerun`, `Approval` | anything on the forge that re-runs a check on the same commit or changes an approval |
 | `PersonPush` | anything else that moves the branch; detected as `head != lease` on poll |
 
-`OneClaim`, `NoLostPush` and `MergedGreen` are named by ship-claim and forge-shipping requirements. `scripts/tla-check.sh` already runs every `formal/*.cfg` with its broken variants, so it needs no change.
+`OneClaim`, `NoLostPush`, `MergedGreen` and `MergedGated` are named by ship-claim and forge-shipping requirements. `scripts/tla-check.sh` already runs every `formal/*.cfg` with its broken variants, so it needs no change.
 
 ## Risks / Trade-offs
 
 - **[A person merges a merge request that Tuckerbox is still fixing]** → The next poll sees it merged, and the run becomes `merged` and stops. Nothing is pushed after a merge.
 - **[GitHub's `mergeable_state` is computed lazily and may be `unknown`]** → Treated as "not yet"; poll again. Never merged on `unknown`.
-- **[Required checks can't always be read]** → Branch rules need only read access, but classic branch protection needs admin. If neither can be read, Tuckerbox still requires every reported check green and the forge's `clean` verdict, which includes required checks. The forge stays the last word.
+- **[Required checks can't always be read]** → Branch rules and `GET /branches/{base}` need only read access; full classic protection needs admin. If no required check can be found, `merge` mode refuses (see "What the forge enforces at merge time"); `mr` mode doesn't need it.
+- **[A non-required check is re-run between the read and the merge]** → The merge can go through; Tuckerbox saw that check green on the merged commit, which is all it promises for checks protection doesn't require. Make the check required to have the forge enforce it.
+- **[A GitHub bypass list Tuckerbox can't read]** → See the residual in "What the forge enforces at merge time": use a dedicated account for `merge` mode.
 - **[A fix agent works from untrusted text]** → Only reviewers with write access and named bots count; logs are marked as data; agents keep their permission profiles; the token is not in their environment.
 - **[Archive date]** → `openspec archive` stamps the date it runs, which can be days before a person merges in `mr` mode. Accepted: the date says when the change was finished.
 - **[Archive conflicts]** → Two changes archived in parallel can both touch `openspec/specs/<cap>/spec.md`. The second merge request then conflicts with the base. In `merge` mode Tuckerbox merges the base into the branch and blocks on a conflict; in `mr` mode the forge shows the conflict to people.

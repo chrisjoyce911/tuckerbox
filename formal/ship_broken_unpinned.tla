@@ -5,7 +5,13 @@
 \* Two forge operations are atomic and are the only ones the design relies on:
 \*   - a push with --force-with-lease, a compare-and-swap on the branch tip
 \*   - opening a merge request, refused while one is open for the branch
-\* A person may push to the branch at any time. CI reports on each commit.
+\* A person may push to the branch at any time. CI reports on each commit, and
+\* a check can be re-run on the same commit at any time, so a result that was
+\* green can become pending or red again. Checks are either required (the
+\* forge's branch protection enforces them when it accepts a merge) or not.
+\* A person may approve or withdraw approval at any time. Reading CI and the
+\* approval, then merging, is not atomic: only the forge's own check at merge
+\* time is, and it covers required checks and required approval only.
 EXTENDS Naturals
 
 CONSTANTS Machines, MaxCommits
@@ -20,13 +26,18 @@ VARIABLES
   tip,        \* the remote branch tip (0: no branch)
   author,     \* who pushed each commit
   next,       \* the next unused commit id
-  ci,         \* CI state of each commit
+  req,        \* state of each commit's required checks
+  opt,        \* state of each commit's other (not required) checks
+  approved,   \* the merge request has the approval protection requires
   mr,         \* the merge request: "none", "open" or "merged"
   owner,      \* the machine named in the merge request's claim marker
   checked,    \* the commit each machine last saw green
+  seen,       \* commits some run saw with every check green and approved
   merged,     \* the commit the forge merged (0: none)
+  gated,      \* required checks were green and approval held when it merged
   lost        \* a push replaced a commit someone else pushed
-vars == <<pc, lease, tip, author, next, ci, mr, owner, checked, merged, lost>>
+vars == <<pc, lease, tip, author, next, req, opt, approved, mr, owner, checked,
+          seen, merged, gated, lost>>
 
 Init ==
   /\ pc = [m \in Machines |-> "idle"]
@@ -34,11 +45,15 @@ Init ==
   /\ tip = 0
   /\ author = [c \in Commits |-> None]
   /\ next = 1
-  /\ ci = [c \in Commits |-> "pending"]
+  /\ req = [c \in Commits |-> "pending"]
+  /\ opt = [c \in Commits |-> "pending"]
+  /\ approved = FALSE
   /\ mr = "none"
   /\ owner = None
   /\ checked = [m \in Machines |-> 0]
+  /\ seen = [c \in Commits |-> FALSE]
   /\ merged = 0
+  /\ gated = FALSE
   /\ lost = FALSE
 
 \* Push a new commit with --force-with-lease=<branch>:<lease>. The forge moves
@@ -57,7 +72,7 @@ Push(m) ==
             /\ pc' = [pc EXCEPT ![m] = IF pc[m] = "idle" THEN "pushed" ELSE "claimed"]
        ELSE /\ pc' = [pc EXCEPT ![m] = "blocked"]
             /\ UNCHANGED <<lost, tip, lease>>
-  /\ UNCHANGED <<ci, mr, owner, checked, merged>>
+  /\ UNCHANGED <<req, opt, approved, mr, owner, checked, seen, merged, gated>>
 
 \* Open the merge request with this machine's claim marker. The forge refuses
 \* a second open request for the same branch; the run then reads the open one
@@ -70,7 +85,7 @@ Open(m) ==
             /\ pc' = [pc EXCEPT ![m] = "claimed"]
        ELSE /\ pc' = [pc EXCEPT ![m] = IF mr = "open" /\ owner = m THEN "claimed" ELSE "blocked"]
             /\ UNCHANGED <<mr, owner>>
-  /\ UNCHANGED <<lease, tip, author, next, ci, checked, merged, lost>>
+  /\ UNCHANGED <<lease, tip, author, next, req, opt, approved, checked, seen, merged, gated, lost>>
 
 \* A person pushes to the branch (no lease: people are not bound by it).
 PersonPush ==
@@ -78,36 +93,75 @@ PersonPush ==
   /\ next' = next + 1
   /\ author' = [author EXCEPT ![next] = Person]
   /\ tip' = next
-  /\ UNCHANGED <<pc, lease, ci, mr, owner, checked, merged, lost>>
+  /\ UNCHANGED <<pc, lease, req, opt, approved, mr, owner, checked, seen, merged, gated, lost>>
 
-\* CI finishes on a commit. A result never changes once reported.
-CI(c) ==
+Others == <<pc, lease, tip, author, next, mr, owner, checked, seen, merged, gated, lost>>
+
+\* CI finishes a required or other check on a commit.
+ReqDone(c) ==
   /\ c < next
-  /\ ci[c] = "pending"
-  /\ \E r \in {"green", "red"} : ci' = [ci EXCEPT ![c] = r]
-  /\ UNCHANGED <<pc, lease, tip, author, next, mr, owner, checked, merged, lost>>
+  /\ req[c] = "pending"
+  /\ \E r \in {"green", "red"} : req' = [req EXCEPT ![c] = r]
+  /\ UNCHANGED <<opt, approved>> /\ UNCHANGED Others
 
-\* The claimant reads CI for the head it last pushed and sees it green.
+OptDone(c) ==
+  /\ c < next
+  /\ opt[c] = "pending"
+  /\ \E r \in {"green", "red"} : opt' = [opt EXCEPT ![c] = r]
+  /\ UNCHANGED <<req, approved>> /\ UNCHANGED Others
+
+\* Someone re-runs a check on the same commit: its result is pending again.
+ReqRerun(c) ==
+  /\ c < next
+  /\ req[c] # "pending"
+  /\ req' = [req EXCEPT ![c] = "pending"]
+  /\ UNCHANGED <<opt, approved>> /\ UNCHANGED Others
+
+OptRerun(c) ==
+  /\ c < next
+  /\ opt[c] # "pending"
+  /\ opt' = [opt EXCEPT ![c] = "pending"]
+  /\ UNCHANGED <<req, approved>> /\ UNCHANGED Others
+
+\* A reviewer approves, or withdraws an approval.
+Approval ==
+  /\ approved' = ~approved
+  /\ UNCHANGED <<req, opt>> /\ UNCHANGED Others
+
+\* The claimant reads CI and the forge's verdict for the head it last pushed
+\* and sees every check green and the approval present.
 SeeGreen(m) ==
   /\ pc[m] = "claimed"
   /\ mr = "open"
-  /\ ci[lease[m]] = "green"
+  /\ req[lease[m]] = "green"
+  /\ opt[lease[m]] = "green"
+  /\ approved
   /\ checked' = [checked EXCEPT ![m] = lease[m]]
+  /\ seen' = [seen EXCEPT ![lease[m]] = TRUE]
   /\ pc' = [pc EXCEPT ![m] = "merging"]
-  /\ UNCHANGED <<lease, tip, author, next, ci, mr, owner, merged, lost>>
+  /\ UNCHANGED <<lease, tip, author, next, req, opt, approved, mr, owner, merged, gated, lost>>
 
 \* Merge, pinned to the commit seen green: the forge refuses if the head moved.
 MergeGuard(m) == TRUE  \* BROKEN: merge not pinned to the commit seen green
 
+\* What branch protection requires at the moment it accepts a merge.
+Protected == req[tip] = "green" /\ approved
+
+\* The forge enforces protection on this merge: the token has no bypass.
+ForgeGate == Protected
+
+\* The forge checks the pin and protection atomically with the merge. If it
+\* refuses, the run goes back to polling.
 Merge(m) ==
   /\ pc[m] = "merging"
-  /\ IF MergeGuard(m)
+  /\ IF MergeGuard(m) /\ ForgeGate
        THEN /\ mr' = "merged"
             /\ merged' = tip
+            /\ gated' = Protected
             /\ pc' = [pc EXCEPT ![m] = "done"]
        ELSE /\ pc' = [pc EXCEPT ![m] = "claimed"]
-            /\ UNCHANGED <<mr, merged>>
-  /\ UNCHANGED <<lease, tip, author, next, ci, owner, checked, lost>>
+            /\ UNCHANGED <<mr, merged, gated>>
+  /\ UNCHANGED <<lease, tip, author, next, req, opt, approved, owner, checked, seen, lost>>
 
 \* The commit bound is used up: the runs left waiting stay as they are.
 Finished ==
@@ -117,7 +171,8 @@ Finished ==
 Next ==
   \/ \E m \in Machines : Push(m) \/ Open(m) \/ SeeGreen(m) \/ Merge(m)
   \/ PersonPush
-  \/ \E c \in Commits : CI(c)
+  \/ Approval
+  \/ \E c \in Commits : ReqDone(c) \/ OptDone(c) \/ ReqRerun(c) \/ OptRerun(c)
   \/ Finished
 
 Spec == Init /\ [][Next]_vars
@@ -127,7 +182,11 @@ TypeOK ==
   /\ lease \in [Machines -> 0..MaxCommits]
   /\ tip \in 0..MaxCommits
   /\ next \in 1..(MaxCommits + 1)
-  /\ ci \in [Commits -> {"pending", "green", "red"}]
+  /\ req \in [Commits -> {"pending", "green", "red"}]
+  /\ opt \in [Commits -> {"pending", "green", "red"}]
+  /\ approved \in BOOLEAN
+  /\ seen \in [Commits -> BOOLEAN]
+  /\ gated \in BOOLEAN
   /\ mr \in {"none", "open", "merged"}
   /\ owner \in Machines \cup {None}
   /\ merged \in 0..MaxCommits
@@ -143,6 +202,12 @@ OneClaim ==
 \* person pushed.
 NoLostPush == ~lost
 
-\* forge-shipping: the forge only merges a commit whose CI was green.
-MergedGreen == merged # 0 => ci[merged] = "green"
+\* forge-shipping: Tuckerbox only merges the commit it saw with every check
+\* green and the approval present (checks may change after that read).
+MergedGreen == merged # 0 => seen[merged]
+
+\* forge-shipping: when the forge accepted the merge, the required checks on
+\* the merged commit were green and the required approval held, even if a
+\* check was re-run or an approval withdrawn after Tuckerbox's read.
+MergedGated == merged # 0 => gated
 =============================================================================
