@@ -475,18 +475,23 @@ func readLayout(path string) ([]byte, *obj, error) {
 // shipped layout is read-only, so it is cloned first (layout.clone, which
 // also switches to the clone) and the clone gets the drawer.
 func installDrawer(home string, rec *Record, t *txn) (string, error) {
+	name := shownLayout(home)
 	if rec.Drawer != nil {
 		_, root, err := readLayout(layoutPath(home, rec.Drawer.Layout))
 		switch {
 		case err == nil && hasDrawer(root):
 			return fmt.Sprintf("the drawer is already in layout %s", rec.Drawer.Layout), nil
+		case errors.Is(err, fs.ErrNotExist):
+			if name == rec.Drawer.Layout && rec.Drawer.ClonedFrom != "" {
+				name = rec.Drawer.ClonedFrom
+			}
+			rec.Drawer = nil
 		case err != nil && !errors.Is(err, fs.ErrNotExist):
 			// The record holds a layout it can't read, such as a clone a
 			// failed install couldn't remove: replacing that entry would lose it.
 			return "", fmt.Errorf("the install record holds layout %s, which can't be read (%v); run tuckerbox herdr uninstall first", rec.Drawer.Layout, err)
 		}
 	}
-	name := shownLayout(home)
 	d := rec.Drawer
 	if d == nil {
 		d = &DrawerRecord{Layout: name}

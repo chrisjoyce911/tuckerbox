@@ -3,6 +3,7 @@ package herdrmod
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"strings"
@@ -200,5 +201,57 @@ func TestTopbarExtendsLegacyDrawerRecord(t *testing.T) {
 	rec = readRec(t, home)
 	if !reflect.DeepEqual(rec.Drawer.Blocks, []string{DrawerID, BarID, PanelID}) {
 		t.Fatal(rec.Drawer.Blocks)
+	}
+}
+
+// A missing recorded clone is stale history, not a permanent install error.
+// Cover both entry points, including shared.json still naming the deleted clone.
+func TestReinstallAfterRecordedLayoutDeleted(t *testing.T) {
+	for _, topbar := range []bool{false, true} {
+		name := "drawer"
+		if topbar {
+			name = "topbar"
+		}
+		for _, stillShown := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/still-shown-%t", name, stillShown), func(t *testing.T) {
+				home, e, _ := topbarHome(t)
+				ctx := context.Background()
+				before := snapshot(t, home)
+				opt := Options{Drawer: !topbar, Topbar: topbar}
+				if _, err := InstallExtras(ctx, e, opt); err != nil {
+					t.Fatal(err)
+				}
+				rec := readRec(t, home)
+				if err := os.Remove(layoutPath(home, rec.Drawer.Layout)); err != nil {
+					t.Fatal(err)
+				}
+				if !stillShown {
+					write(t, home, "shared.json", `{"layout":"main"}`)
+				}
+				if _, err := InstallExtras(ctx, e, opt); err != nil {
+					t.Fatalf("reinstall after deletion: %v", err)
+				}
+				rec = readRec(t, home)
+				if rec.Drawer.Layout != "main-tuckerbox" || rec.Drawer.ClonedFrom != "main" {
+					t.Fatal(rec.Drawer)
+				}
+				_, root, err := readLayout(layoutPath(home, rec.Drawer.Layout))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if topbar && (findBlock(root, BarID) == nil || findBlock(root, PanelID) == nil) {
+					t.Fatal("topbar/panel not reinstalled")
+				}
+				if !topbar && !hasDrawer(root) {
+					t.Fatal("drawer not reinstalled")
+				}
+				if _, err := Uninstall(ctx, e); err != nil {
+					t.Fatal(err)
+				}
+				if got := snapshot(t, home); !reflect.DeepEqual(got, before) {
+					t.Fatalf("uninstall did not restore original home: %v", got)
+				}
+			})
+		}
 	}
 }

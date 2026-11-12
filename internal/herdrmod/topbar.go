@@ -93,6 +93,17 @@ func installTopbar(home string, rec *Record, t *txn) (string, error) {
 		name = rec.Drawer.Layout
 	}
 	before, root, err := readLayout(layoutPath(home, name))
+	if errors.Is(err, fs.ErrNotExist) && rec.Drawer != nil {
+		// A person may delete an installed clone. There is nothing left to
+		// undo there, so rebuild the record from the currently shown layout.
+		shown := shownLayout(home)
+		if shown == rec.Drawer.Layout && rec.Drawer.ClonedFrom != "" {
+			shown = rec.Drawer.ClonedFrom
+		}
+		rec.Drawer = nil
+		name = shown
+		before, root, err = readLayout(layoutPath(home, name))
+	}
 	if err != nil {
 		return "", err
 	}
