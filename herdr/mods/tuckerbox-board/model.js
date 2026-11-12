@@ -53,6 +53,8 @@ export function normaliseCard(c, src = {}) {
     edit_folder: str(c?.edit_folder),
     depends_on: list(c?.depends_on).map((d) => ({ change: str(d?.change), column: str(d?.column) })),
     archived: str(c?.archived),
+    // The run's task scope (add-task-scope), or null for the whole change.
+    scope: c?.scope && str(c.scope.spec) ? { spec: str(c.scope.spec), tasks: list(c.scope.tasks).map(str) } : null,
     on: src.on ?? null,
     path: src.path ?? "",
   };
@@ -100,13 +102,16 @@ export function normaliseDetail(d) {
     tasks: list(d?.tasks).map((t) => ({ number: str(t?.number), group: str(t?.group), text: str(t?.text), checked: t?.checked === true })),
     rounds: list(d?.rounds).map((r) => ({
       round: num(r?.round), result: str(r?.result), step: str(r?.step), summary: str(r?.summary),
-      findings: list(r?.findings).map(finding), ended: str(r?.ended),
+      findings: list(r?.findings).map(finding), ended: str(r?.ended), scope: str(r?.scope),
     })),
     history: list(d?.history).map((h) => ({
       at: str(h?.at), event: str(h?.event), step: str(h?.step), round: num(h?.round), agent: str(h?.agent),
       machine: str(h?.machine), result: str(h?.result), to: str(h?.to), summary: str(h?.summary),
       reason: str(h?.reason), findings: list(h?.findings).map(finding),
+      scope: str(h?.scope), old_scope: str(h?.old_scope),
     })),
+    // Task groups with ticked and total counts, ship tasks left out (add-task-scope).
+    groups: list(d?.groups).map((g) => ({ number: num(g?.number), title: str(g?.title), ticked: num(g?.ticked), total: num(g?.total) })),
   };
 }
 
@@ -176,6 +181,7 @@ export const EVENT_WORDS = {
   resumed: "Resumed",
   failed: "Failed",
   ready: "Ready",
+  scope_started: "Started again",
 };
 
 // One history line in words: "Handed on build → review: summary".
@@ -186,7 +192,9 @@ export function eventText(h) {
     : h.event === "rejected" && h.findings.length ? ` with ${h.findings.length} finding${h.findings.length === 1 ? "" : "s"}`
       : "";
   const note = h.summary || h.reason;
-  return `${head}${step}${tail}${note ? `: ${note}` : ""}`;
+  const scope = h.event === "scope_started" ? ` for tasks ${h.scope || "all"} (was ${h.old_scope || "all"})`
+    : h.scope ? ` (tasks ${h.scope})` : "";
+  return `${head}${step}${tail}${scope}${note ? `: ${note}` : ""}`;
 }
 
 // History newest first. Events with the same time keep their reverse file order.

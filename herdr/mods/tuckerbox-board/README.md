@@ -13,7 +13,7 @@ stores no task state, writes no files and never moves a card by itself
 | `board.js` | The board: header (repository, running and needs-you counts, Dock or Undock and Close), columns, cards |
 | `drawer.js` | The peek drawer: nothing without a Tuckerbox repository, else the repository and its running and needs-you counts; a click toggles the board window |
 | `keys.json` | The toggle key `tuckerbox herdr install --keys` merges into the person's `keys.json` |
-| `card.js` | Card detail: proposal (markdown), tasks with tick boxes, approval, last validation, dependencies, rounds with findings, history (newest first, local time), actions |
+| `card.js` | Card detail: proposal (markdown), tasks with tick boxes, approval, last validation, dependencies, rounds with findings and task scope, history (newest first, local time), actions, and Run group… (where Start is offered, and on Ready cards with unticked tasks) |
 | `model.js` | Data rules with no Herdr imports: reading the document, grouping, counts, times, polling |
 | `actions.js` | Which actions each state offers, and `commandLine()`, the one function that builds every tuckerbox command line |
 | `perform.js` | Runs an action: `exec` of the tuckerbox command on the card's machine, or the Herdr tab, pane or view for it. With the fixtures it only says what it would run |
