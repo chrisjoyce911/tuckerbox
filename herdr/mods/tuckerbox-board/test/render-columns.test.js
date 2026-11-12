@@ -42,3 +42,17 @@ test("renders the In progress column and the step or queued badge on its cards",
     assert.ok(drawn.text.includes("#2"));
   }
 });
+
+// approval-publish: Card after publishing: "not published" shows only while
+// this machine's approval isn't on the remote.
+test("shows not published until the approval is published", () => {
+  for (const [published, shown] of [[false, true], [true, false], [undefined, false]]) {
+    const approval = { ...fixture.cards[0].approval, state: "approved", published };
+    const board = normaliseBoard({ ...fixture, cards: [{ ...fixture.cards[0], approval, state: "", step: "", badge: "" }] });
+    const view = new BoardView();
+    view.board = board;
+    const card = board.cards[0];
+    const drawn = view.column(group(board).find((col) => col.cards.some((c) => c.change === card.change)));
+    assert.equal(drawn.text.includes("not published"), shown, `published ${published}`);
+  }
+});

@@ -68,14 +68,12 @@ They work in the change's worktree if it has one on this machine, else in the ch
 A change must be approved before `tuckerbox run` starts it:
 
 ```sh
-tuckerbox approve fix-login     # validates strictly, then records the approval
-git add openspec/changes/fix-login/tuckerbox.toml
-git commit -m "Approve fix-login" && git push
-tuckerbox run fix-login
-tuckerbox unapprove fix-login   # withdraw it (also uncommitted)
+tuckerbox approve fix-login     # validates strictly, then publishes the approval
+tuckerbox run fix-login         # on this machine or any other, straight away
+tuckerbox unapprove fix-login   # withdraw it, also published at once
 ```
 
-`approve` writes an `[approval]` table (a hash of the proposal, design, model, tasks and spec deltas, your git `user.name` and the time) to `openspec/changes/<change>/tuckerbox.toml`. It never commits, and the run judges the files it will start from: the change's worktree if it has one, else its branch or the base branch after a fetch. So approve, commit and push before `tuckerbox run`, or it refuses and says the approval isn't committed. Ticking tasks keeps the approval; any other edit to those files makes it stale on every machine, and the change needs approving again. `tuckerbox run --all` skips changes that aren't approved and lists them. Resume and re-run don't check approval again. To turn the gate off for a repository, set it in the repository config (machine config may not):
+`approve` records a hash of the proposal, design, model, tasks and spec deltas, your git `user.name` and the time as `approvals/<change>.toml` in a commit on `refs/tuckerbox/approvals`, and pushes it to `origin` at once (with `--force-with-lease`, retrying if someone else approved at the same moment). There is nothing to commit: the approval counts on every machine as soon as it is pushed. The ref isn't a branch, so CI doesn't run on it. Offline, the approval counts on this machine, the board marks it `not published`, and the next approve, unapprove or board read publishes it; `tuckerbox doctor` says whether the ref can be pushed. An approval written by an older Tuckerbox as `[approval]` in the change's `tuckerbox.toml` still counts when the ref has nothing for that change. The run judges the hash against the files it will start from: the change's worktree if it has one, else its branch or the base branch after a fetch. Ticking tasks keeps the approval; any other edit to those files makes it stale on every machine, and the change needs approving again. `tuckerbox run --all` skips changes that aren't approved and lists them. Resume and re-run don't check approval again. To turn the gate off for a repository, set it in the repository config (machine config may not):
 
 ```toml
 require_approval = false

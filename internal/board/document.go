@@ -37,6 +37,9 @@ type Approval struct {
 	By        string `json:"by"`
 	At        string `json:"at"`
 	Committed bool   `json:"committed"`
+	// Published is false while this machine has an approve or unapprove of
+	// the change not yet on the remote (approval-publish).
+	Published bool `json:"published"`
 }
 type Dependency struct {
 	Change string `json:"change"`

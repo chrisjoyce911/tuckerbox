@@ -603,3 +603,33 @@ func TestBoardReadsApprovalsRef(t *testing.T) {
 		t.Errorf("add-users after withdrawal = %+v", got["add-users"])
 	}
 }
+
+// approval-publish: Card after publishing: published is false while this
+// machine's approval isn't on the remote, and true once a board read could
+// publish it.
+func TestBoardPublishedState(t *testing.T) {
+	ctx := context.Background()
+	testTools.Setup(t)
+	root := testTools.NewRepo(t, testenv.RepoOptions{Changes: []string{"add-login"}, RequireApproval: true})
+	bare := filepath.Join(t.TempDir(), "origin.git")
+	testenv.Git(t, filepath.Dir(bare), "init", "-q", "--bare", "-b", "main", bare)
+	testenv.Git(t, root, "remote", "add", "origin", filepath.Join(t.TempDir(), "gone.git"))
+	hash, err := approval.Hash(approval.DirOf(root, "add-login"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = approval.Store{Dir: root}.Record(ctx, "add-login", approval.Entry{State: approval.EntryApproved, Hash: hash, By: "Owner", At: time.Now()})
+	if !errors.Is(err, approval.ErrOffline) {
+		t.Fatalf("Record = %v, want offline", err)
+	}
+	if a := card(t, read(t, root, ""), "add-login").Approval; a.State != "approved" || a.Published {
+		t.Fatalf("offline card approval = %+v", a)
+	}
+	testenv.Git(t, root, "remote", "set-url", "origin", bare)
+	if a := card(t, read(t, root, ""), "add-login").Approval; a.State != "approved" || !a.Published {
+		t.Fatalf("after publishing: %+v", a)
+	}
+	if es, _ := (approval.Store{Dir: bare}).Entries(ctx); es["add-login"].Hash != hash {
+		t.Fatalf("remote entries = %+v", es)
+	}
+}

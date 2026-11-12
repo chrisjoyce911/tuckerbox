@@ -104,6 +104,8 @@ export class CardView extends View {
       .when(Boolean(a.at), (el) => el.child(div().text_color(tm.dim).child(fmtLocal(a.at))))
       .when(a.state !== "none", (el) => el.child(div().text_color(a.committed ? tm.dim : tm.blocked)
         .child(a.committed ? "committed" : "not committed: commit and push before tuckerbox run")))
+      .when(!a.published, (el) => el.child(div().text_color(tm.blocked)
+        .child("not published: it counts on this machine and is published with the next approve, unapprove or board read")))
       .when(a.state === "stale", (el) => el.child(div().text_color(tone(tm, b.tone)).child("the change was edited after approval")));
   }
 

@@ -20,11 +20,11 @@
 
 ## 3. Offline and cards (approval-publish)
 
-- [ ] 3.1 Keep an unpublished commit on the local ref when the remote can't be reached; list unpublished changes in the state directory; publish on the next approve, unapprove or board fetch by re-applying onto the remote's version
-- [ ] 3.2 Test "Approve on a train" (remote unreachable, then reachable)
-- [ ] 3.3 Card approval `published`; no publishing state without a remote; board mod shows `not published`
-- [ ] 3.4 Test "Card after publishing"
-- [ ] 3.5 `doctor` checks the approvals ref can be fetched and pushed
+- [x] 3.1 Keep an unpublished commit on the local ref when the remote can't be reached; list unpublished changes in the state directory; publish on the next approve, unapprove or board fetch by re-applying onto the remote's version
+- [x] 3.2 Test "Approve on a train" (remote unreachable, then reachable)
+- [x] 3.3 Card approval `published`; no publishing state without a remote; board mod shows `not published`
+- [x] 3.4 Test "Card after publishing"
+- [x] 3.5 `doctor` checks the approvals ref can be fetched and pushed
 
 ## 4. Team mode (approval-publish)
 
@@ -33,8 +33,8 @@
 
 ## 5. Integration
 
-- [ ] 5.1 README: approving publishes at once; offline note; team mode
-- [ ] 5.2 `go vet ./...`, `go test -race ./...`, `node --test herdr/mods/tuckerbox-board/test/*.test.js`, `CGO_ENABLED=0 go build ./...` and `scripts/tla-check.sh` pass on Linux, macOS and Windows CI
+- [x] 5.1 README: approving publishes at once; offline note; team mode
+- [x] 5.2 `go vet ./...`, `go test -race ./...`, `node --test herdr/mods/tuckerbox-board/test/*.test.js`, `CGO_ENABLED=0 go build ./...` and `scripts/tla-check.sh` pass on Linux, macOS and Windows CI
 
 ## Workflow follow-up
 

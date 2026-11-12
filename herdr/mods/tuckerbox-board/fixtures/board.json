@@ -69,7 +69,8 @@
         "state": "none",
         "by": "",
         "at": "",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "",
       "reason": "",
@@ -99,7 +100,8 @@
         "state": "stale",
         "by": "Sam Example",
         "at": "2026-11-10T16:20:00+10:00",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "",
       "reason": "",
@@ -128,7 +130,8 @@
         "state": "approved",
         "by": "Sam Example",
         "at": "2026-11-12T08:55:00+10:00",
-        "committed": false
+        "committed": false,
+        "published": true
       },
       "state": "",
       "reason": "",
@@ -157,7 +160,8 @@
         "state": "approved",
         "by": "Sam Example",
         "at": "2026-11-11T14:00:00+10:00",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "queued",
       "reason": "waiting on add-users",
@@ -191,7 +195,8 @@
         "state": "approved",
         "by": "Sam Example",
         "at": "2026-11-12T08:30:00+10:00",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "running",
       "reason": "",
@@ -220,7 +225,8 @@
         "state": "approved",
         "by": "Sam Example",
         "at": "2026-11-11T10:00:00+10:00",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "running",
       "reason": "",
@@ -249,7 +255,8 @@
         "state": "approved",
         "by": "Sam Example",
         "at": "2026-11-11T11:00:00+10:00",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "failed",
       "reason": "agent exited with code 1",
@@ -278,7 +285,8 @@
         "state": "approved",
         "by": "Sam Example",
         "at": "2026-11-10T09:00:00+10:00",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "blocked",
       "reason": "review limit reached",
@@ -312,7 +320,8 @@
         "state": "stale",
         "by": "Sam Example",
         "at": "2026-11-09T12:00:00+10:00",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "stopped",
       "reason": "",
@@ -341,7 +350,8 @@
         "state": "approved",
         "by": "Sam Example",
         "at": "2026-11-11T09:00:00+10:00",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "ready",
       "reason": "",
@@ -387,7 +397,8 @@
         "state": "none",
         "by": "",
         "at": "",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "",
       "reason": "",

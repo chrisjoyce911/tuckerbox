@@ -51,7 +51,8 @@
         "state": "approved",
         "by": "Sam Example",
         "at": "2026-11-10T09:00:00+10:00",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "blocked",
       "reason": "review limit reached",
