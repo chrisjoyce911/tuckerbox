@@ -395,8 +395,10 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 		return nil, err
 	}
 	defer lock.Release()
-	// We hold the lock, so an edit marker is from an edit that died.
+	// We hold the lock, so an edit marker is from an edit that died, and an
+	// answer in the inbox is one a dead run process never recorded.
 	RemoveEditMarker(ws.State)
+	DrainAnswerInbox(ws.State)
 	if req.Expect != nil {
 		cur, err := ReadRun(ws.State.RunFile())
 		switch {
@@ -779,6 +781,7 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 			Permissions: e.Config.PermissionArgs(st),
 			Worktree:    ws.Path, State: ws.State, Base: rs.Base,
 			Earlier: rs.Earlier(), Scope: rs.Scope, Term: e.term,
+			Answers: rs.PendingAnswers(st.ID),
 		}, opts)
 		stopTicks()
 		// The backend has had the adopted agent: it ends it on a stop.
@@ -798,6 +801,9 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 			return e.finish(ws, rs, Failed, fmt.Sprintf("step %s: %s", st.ID, out.FailureReason()))
 		}
 		res := out.Result
+		// The step has reported a result after a brief that held its
+		// answers: they are used, and later briefs leave them out.
+		rs.useAnswers(st.ID)
 		rs.History = append(rs.History, Entry{
 			Step: st.ID, Round: rs.Round, Status: res.Status, Summary: res.Summary,
 			Findings: res.Findings, ExitCode: out.ExitCode, Ended: e.now(),

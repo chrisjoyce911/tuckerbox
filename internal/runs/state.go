@@ -41,8 +41,9 @@ const (
 // RunVersion is the format version of run.json.
 const RunVersion = 1
 
-// Run is the content of run.json. Only the run's engine process writes it,
-// while it holds the change lock.
+// Run is the content of run.json. It is written only while the change lock
+// is held: by the run's engine process, or by tuckerbox stop and answer
+// when no process holds it.
 type Run struct {
 	ship.Record
 	Version int    `json:"version"`
@@ -92,6 +93,10 @@ type Run struct {
 	// AgentState is the terminal agent's state: "working", or "waiting for
 	// you" when its turn ended without a result.
 	AgentState string `json:"agent_state,omitempty"`
+	// Answers are a person's answers to the run's blocked questions,
+	// oldest first (tuckerbox answer). Unused ones go into the brief of the
+	// step they answer.
+	Answers []Answer `json:"answers,omitempty"`
 	// Since is when the state, step or round last changed.
 	Since time.Time `json:"since"`
 	// Created is when the run was first started.

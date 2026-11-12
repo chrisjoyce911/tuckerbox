@@ -567,7 +567,7 @@ func (t Terminal) prepare(s Step, o *Outcome) error {
 	brief := Brief{
 		Change: s.Change, Step: s.Step, Role: s.Role, Round: s.Round,
 		Root: s.Worktree, ResultPath: o.ResultPath, Base: s.Base, Earlier: s.Earlier,
-		Scope: s.Scope, ShippingFeedback: s.ShippingFeedback,
+		Scope: s.Scope, ShippingFeedback: s.ShippingFeedback, Answers: s.Answers,
 	}
 	text, err := brief.Render()
 	if err == nil {

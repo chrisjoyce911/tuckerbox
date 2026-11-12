@@ -62,6 +62,15 @@
 //     during a step and writes one event per task whose box changed since
 //     it last looked, so time is when the change was seen, at most that
 //     long after it was made.
+//   - answered: a person answered the run (tuckerbox answer, or the
+//     board's Answer): text is the answer and by who wrote it (git
+//     user.name). step and round are the step that asked and its round.
+//     terminal is set (the agent's terminal name) when the text was typed
+//     into a waiting terminal agent's terminal; otherwise the run was
+//     blocked, and the answer goes into the brief of the step when the run
+//     resumes. While a run process holds the change lock, tuckerbox
+//     answer leaves the event in the state directory's answers inbox and
+//     the lock's holder appends it, so the file keeps one writer.
 //
 // started, resumed and scope_started carry by = "autopilot" when tuckerbox
 // autopilot started the run; it is absent when a person did.
@@ -124,6 +133,7 @@ const (
 	ScopeStarted Kind = "scope_started"
 	TaskTicked   Kind = "task_ticked"
 	TaskUnticked Kind = "task_unticked"
+	Answered     Kind = "answered"
 )
 
 // Event is one line of history.jsonl.
@@ -172,8 +182,13 @@ type Event struct {
 	// Task is the task number, for task_ticked and task_unticked.
 	Task string `json:"task,omitempty"`
 	// By is "autopilot" on started, resumed and scope_started events that
-	// tuckerbox autopilot asked for; absent when a person did.
+	// tuckerbox autopilot asked for; absent when a person did. On answered
+	// it is who answered.
 	By string `json:"by,omitempty"`
+	// Text is the answer, for answered.
+	Text string `json:"text,omitempty"`
+	// Terminal is the terminal an answered event's text was typed into.
+	Terminal string `json:"terminal,omitempty"`
 }
 
 // Machine returns this machine's name for Event.Machine: its host name,

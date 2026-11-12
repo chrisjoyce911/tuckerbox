@@ -67,12 +67,19 @@ func (e *Engine) watchTicks(ws Workspace, rs *Run, step string, round int) func(
 		defer close(stopped)
 		t := time.NewTicker(every)
 		defer t.Stop()
+		// Answers typed into the step's waiting terminal agent reach
+		// history through the inbox (DrainAnswerInbox): this run process
+		// holds the change lock, so it writes them.
+		in := time.NewTicker(e.poll())
+		defer in.Stop()
 		for {
 			select {
 			case <-done:
 				return
 			case <-t.C:
 				w.check()
+			case <-in.C:
+				DrainAnswerInbox(ws.State)
 			}
 		}
 	}()
@@ -80,5 +87,6 @@ func (e *Engine) watchTicks(ws Workspace, rs *Run, step string, round int) func(
 		close(done)
 		<-stopped
 		w.check()
+		DrainAnswerInbox(ws.State)
 	}
 }
