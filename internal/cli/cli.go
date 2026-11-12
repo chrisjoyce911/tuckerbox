@@ -29,6 +29,8 @@ Commands:
                             spec:<capability> in your editor, then validate
   validate <change> [--json]  Validate a change strictly
   tasks <change> tick|untick <n.m>  Tick or untick one task in tasks.md
+  approve <change>          Approve a change's text so runs may start it
+  unapprove <change>        Withdraw a change's approval
   version [--json]          Print the version, commit, Go version and platform
   doctor                    Check that git, openspec and the agent CLIs are installed
   check                     Validate .tuckerbox/config.toml with machine config
@@ -109,6 +111,10 @@ func (a App) Run(args []string) int {
 		return a.validate(rest)
 	case "tasks":
 		return a.tasks(rest)
+	case "approve":
+		return a.approve(rest)
+	case "unapprove":
+		return a.unapprove(rest)
 	default:
 		fmt.Fprintf(a.Stderr, "tuckerbox: unknown command %q\n\n%s", cmd, usage)
 		return 2

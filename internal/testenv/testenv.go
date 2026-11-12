@@ -171,6 +171,10 @@ type RepoOptions struct {
 	Extra string
 	// NoConfig leaves out .tuckerbox/config.toml.
 	NoConfig bool
+	// RequireApproval leaves require_approval at its default (true). By
+	// default the scratch config sets require_approval = false, so tests
+	// of other behaviour need not approve their changes.
+	RequireApproval bool
 }
 
 // Git runs git in dir and fails the test on error.
@@ -245,7 +249,11 @@ func (tl *Tools) NewRepo(t *testing.T, o RepoOptions) string {
 		AddChange(t, repo, c)
 	}
 	if !o.NoConfig {
-		WriteFile(t, filepath.Join(repo, ".tuckerbox", "config.toml"), tl.Config(o.MaxParallel, o.Extra))
+		cfg := tl.Config(o.MaxParallel, o.Extra)
+		if !o.RequireApproval {
+			cfg = "require_approval = false\n" + cfg
+		}
+		WriteFile(t, filepath.Join(repo, ".tuckerbox", "config.toml"), cfg)
 	}
 	Git(t, repo, "add", "-A")
 	Git(t, repo, "commit", "-q", "-m", "scratch repository")

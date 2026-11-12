@@ -137,9 +137,15 @@ The hash is SHA-256 over proposal.md, design.md, model.md, tasks.md and each `sp
 ### The run gate judges what the run will use
 `tuckerbox run` checks approval against the files the run is about to work from:
 - with a worktree, the change's files there
-- without one, the change's files on the base branch the new worktree would come from, after the usual fetch, read with `git show` before any worktree is made
+- without one, the change's files at the commit the new worktree would be made from, read from git before any worktree is made: the change's own branch if it still exists (a worktree removed with its branch kept is remade from that branch), else the base branch after the usual fetch
 
 So an approval only lets a run start once it is committed where the run reads. If the checkout has an uncommitted approval, the refusal says so. `--all` skips changes that fail the gate and lists them, so one unapproved proposal doesn't stop the rest.
+
+That check in `tuckerbox run` is early, for a clear message before any process starts. It can't be the last word: between it and the run taking the change lock, `unapprove` or an edit may land in the worktree, and the base branch may move. So the run engine judges again:
+- **Before making a worktree,** at a pinned commit. `tuckerbox run` passes the commit it checked to the engine, which makes the new worktree at exactly that commit. A retained change branch must still be at the commit that was checked, or the run refuses. A commit can't change, so there is nothing to race.
+- **Once it holds the change lock,** in the worktree, before it writes any run state. `approve`, `unapprove`, `edit` and `tasks` take the same lock to write. So the files judged are the files the run starts with, and a refusal leaves the run as it was.
+
+Resume and re-run are not gated (see Risks).
 
 ### `require_approval` is a repository key
 It defaults to `true`, and only the repository config may set it. A machine that switched it off would quietly run unapproved changes that other machines refuse. Like the workflow, the gate is the same on every machine that checks out the repository.

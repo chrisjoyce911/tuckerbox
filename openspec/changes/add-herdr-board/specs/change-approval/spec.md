@@ -54,7 +54,7 @@ The repository config key `require_approval` SHALL default to `true`. It SHALL b
 - **THEN** `tuckerbox check` exits non-zero and says `require_approval` belongs in repository config
 
 ### Requirement: Run gate
-With `require_approval = true`, `tuckerbox run` SHALL refuse a change whose approval state is `none` or `stale`, say which, and create no worktree or run. It SHALL judge the change's files as the run will use them: in its worktree if it has one, else on the base branch a new worktree would come from. `--all` SHALL skip such changes and list them. This adds to `change-runs`.
+With `require_approval = true`, `tuckerbox run` SHALL refuse a change whose approval state is `none` or `stale`, say which, and create no worktree or run. It SHALL judge the change's files as the run will use them: in its worktree if it has one, else at the commit a new worktree would be made from, which is the change's branch if that branch exists and otherwise the base branch. `--all` SHALL skip such changes and list them. This adds to `change-runs`.
 
 #### Scenario: Stale approval
 - **WHEN** the user runs `tuckerbox run add-login` after its design was edited since approval
@@ -64,6 +64,10 @@ With `require_approval = true`, `tuckerbox run` SHALL refuse a change whose appr
 - **WHEN** the user approved `add-login` in the repository checkout but has not committed and pushed it, and the change has no worktree
 - **THEN** `tuckerbox run add-login` refuses, says the base branch has no approval for the change, and notes the uncommitted one in the checkout
 
+#### Scenario: Change branch without a worktree
+- **WHEN** branch `add-login` exists without a worktree and has no approval, and the approval is committed only on the base branch
+- **THEN** `tuckerbox run add-login` refuses, says its branch has no approval, and creates no worktree
+
 #### Scenario: Run all with unapproved changes
 - **WHEN** three changes are valid, two are approved and `tuckerbox run --all` is run
 - **THEN** the two approved changes start or queue and the third is listed as skipped, not approved
@@ -71,3 +75,14 @@ With `require_approval = true`, `tuckerbox run` SHALL refuse a change whose appr
 #### Scenario: Approval not required
 - **WHEN** the repository config sets `require_approval = false`
 - **THEN** `tuckerbox run` starts a valid change that has no approval
+
+### Requirement: Gate at the start
+A new worktree SHALL be made at the commit the run gate judged. The run SHALL judge the change's files again once it holds the change's run lock, before it changes any run state, so an `unapprove` or edit between the first check and the start is never missed. Model: `formal/runs.tla`, `OneRunPerChange`.
+
+#### Scenario: Unapproved after the check
+- **WHEN** `tuckerbox run add-login` has checked an approved worktree and `tuckerbox unapprove add-login` runs before the run takes the change's lock
+- **THEN** the run refuses once it holds the lock, starts no agent and leaves the run state as it was
+
+#### Scenario: Base moves after the check
+- **WHEN** `tuckerbox run add-login` has checked an approved commit on the base branch and the base branch then moves to an edited design
+- **THEN** the new worktree is made at the commit that was checked

@@ -532,3 +532,20 @@ func TestNormalizeRemote(t *testing.T) {
 		t.Error("drive path treated as scp")
 	}
 }
+
+// change-approval: require_approval defaults to true and is read from the
+// repository config only.
+func TestRequireApproval(t *testing.T) {
+	if cfg := newFixture(t, minimal, "").mustLoad(); !cfg.RequireApproval {
+		t.Error("require_approval should default to true")
+	}
+	if cfg := newFixture(t, "require_approval = false\n"+minimal, "").mustLoad(); cfg.RequireApproval {
+		t.Error("repository require_approval = false ignored")
+	}
+}
+
+// Scenario: Machine config sets the key.
+func TestRequireApprovalMachineOnlyRefused(t *testing.T) {
+	f := newFixture(t, minimal, "require_approval = false\n")
+	wantProblem(t, f.problems(), f.machine, "require_approval", "belongs in repository config")
+}
