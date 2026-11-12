@@ -1,0 +1,20 @@
+# Tuckerbox runs this repository's own OpenSpec changes.
+# Checked with: tuckerbox check
+
+max_parallel = 2
+ship = "local"
+
+[workflow]
+steps = ["build", "review"]
+
+[steps.build]
+agent = "claude"
+role = "builder"
+permissions = "edit"     # machine profile: edits in the worktree, go and read-only git commands
+
+[steps.review]
+agent = "codex"
+role = "reviewer"
+permissions = "review"   # machine profile: lets the reviewer write its result file
+on_reject = "build"
+max_rounds = 3
