@@ -95,12 +95,15 @@
 - [ ] 4.11 Report refused claims and failed starts without retrying in the pass
 - [ ] 4.12 Test "Two dispatchers"
 - [ ] 4.13 Test "Dry run" (fleet ref unchanged)
-- [ ] 4.14 Continuations in dispatch: approved changes with a `ready` claim and an incomplete run, continued on the holder only with `--tasks next` when scoped or `[autopilot] scope = "group"`, else reported; never complete ready runs or parked claims; continuations first, then new changes; read run state, scope, completeness and `dispatched` from the holder's machine report (extend `machine --json --for`)
+- [ ] 4.14 Continuations in dispatch: approved changes with a `ready` claim and an incomplete run, continued on the holder only with `--tasks next` when scoped or `[autopilot] scope = "group"`, else reported; never complete ready runs or parked claims; continuations first, then new changes; read run state, `since`, scope, completeness and `dispatched` from the holder's machine report (extend `machine --json --for`)
 - [ ] 4.15 Test "Next group across passes" (two state directories, bare remote, `max_runs = 1`: first pass reports and starts nothing, second pass after the other change is ready continues on the holder)
 - [ ] 4.16 Test "Complete ready run"
 - [ ] 4.17 Test "Stopped by a person"
 - [ ] 4.18 Test "Continuations first"
 - [ ] 4.19 Test "Holder unreachable"
+- [ ] 4.20 `tuckerbox run --expect-state <s> --expect-since <t>`: after the fleet slot and under the change lock, check state, `since` and `approved` before any run or claim change; change nothing on a mismatch; dispatch passes what the holder's report said and reports mismatches (shares the engine check of `add-autopilot` task 3.1)
+- [ ] 4.21 Test "A person reran and stopped it meanwhile" (two state directories, bare remote; the person's rerun and stop land between the report and the command)
+- [ ] 4.22 Test "Unapproved before the command arrives"
 
 ## 5. Team mode (team-claims)
 

@@ -25,7 +25,7 @@ Dispatch SHALL also continue each approved change whose fleet claim is `ready` a
 
 #### Scenario: Next group across passes
 - **WHEN** `max_runs = 1`, `add-login` is ready on `studio` after group 1 with group 2 unticked, and `add-users` holds the only room on `mini`
-- **THEN** a pass reports `add-login` waiting for room and starts nothing; once `add-users` is ready, the next pass runs `tuckerbox run --for <remote> --tasks next add-login` on `studio`, which reactivates the claim
+- **THEN** a pass reports `add-login` waiting for room and starts nothing; once `add-users` is ready, the next pass runs `tuckerbox run --for <remote> --expect-state ready --expect-since <since> --tasks next add-login` on `studio`, which reactivates the claim
 
 #### Scenario: Complete ready run
 - **WHEN** `add-login` is ready on `studio` with every task ticked, waiting for its merge request
@@ -34,6 +34,17 @@ Dispatch SHALL also continue each approved change whose fleet claim is `ready` a
 #### Scenario: Stopped by a person
 - **WHEN** a person stopped `add-login` on `studio`, so its claim is parked
 - **THEN** dispatch does not continue it, and reports nothing new for it
+
+### Requirement: Continuations act on what dispatch saw
+A continuation SHALL carry the run's state and `since` from the holder's report: `tuckerbox run --for <remote> --expect-state ready --expect-since <since> --tasks next <change>`. On the holder, after taking a fleet slot if needed and before changing the run or its claim, the run SHALL check under the change lock that both still match and the change is `approved`, and otherwise change nothing. Model: `formal/autopilot.tla`.
+
+#### Scenario: A person reran and stopped it meanwhile
+- **WHEN** dispatch saw `add-login` ready after scope `1`, and before its command reaches `studio` a person reruns scope `1` and stops it
+- **THEN** the command finds state `stopped` and a newer `since`, starts nothing, leaves the claim `parked`, and dispatch reports that the run changed
+
+#### Scenario: Unapproved before the command arrives
+- **WHEN** dispatch saw `add-login` ready and approved, and the owner runs `tuckerbox unapprove add-login` before the command reaches `studio`
+- **THEN** the command starts nothing and the claim stays `ready`
 
 ### Requirement: Order of a pass
 A pass SHALL take continuations before new changes, each in admission order, and stop at the fleet limit. A continuation SHALL go only to its holder's machine, which SHALL answer the report and have every agent the run's steps use; a run that was dispatched SHALL also need a free fleet slot there. The started command SHALL make the claim's admission check itself.
