@@ -159,3 +159,26 @@ func TestREADMEConfigExamples(t *testing.T) {
 		t.Fatalf("expected repository and machine shipping examples, found %d", found)
 	}
 }
+
+// Tests give the forge identity through TestForgeURLEnv, so the shipping
+// remote can be a local bare repository.
+func TestForgeIdentityInjectedForTests(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv(TestForgeURLEnv, "https://github.com/example/app.git")
+	root := t.TempDir()
+	env := SystemEnv()
+	if _, err := env.Git(root, "init"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.Git(root, "remote", "add", "origin", filepath.Join(t.TempDir(), "origin.git")); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := Discover(env, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := opts.PushURL("origin"); err != nil || got != "https://github.com/example/app.git" {
+		t.Fatal(got, err)
+	}
+}

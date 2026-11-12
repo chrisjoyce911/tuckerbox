@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/runs"
 	"github.com/chrisjoyce911/tuckerbox/internal/testenv"
 )
@@ -18,12 +19,14 @@ func (f *cliFixture) setShip(m, extra string) {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	// A shipping remote: fetched from a local bare repository, pushed to
-	// a forge URL (nothing here ever pushes). The base stays local main.
+	// The shipping remote is a local bare repository: every fetch and
+	// push (approvals ref sync) goes there. The forge identity is given
+	// to tuckerbox directly, not by a public URL. The base stays main.
 	bare := filepath.Join(f.t.TempDir(), "origin.git")
 	testenv.Git(f.t, f.repo, "init", "-q", "--bare", bare)
 	testenv.Git(f.t, f.repo, "remote", "add", "origin", bare)
-	testenv.Git(f.t, f.repo, "remote", "set-url", "--push", "origin", "https://github.com/example/app.git")
+	f.t.Setenv(config.TestForgeURLEnv, "https://github.com/example/app.git")
+	f.bare = bare
 	testenv.WriteFile(f.t, p, strings.Replace(string(data), `ship = "local"`, `ship = "`+m+`"`, 1)+extra+"\n[worktree]\nbase = \"main\"\n")
 	f.commit("ship = " + m)
 }
@@ -38,6 +41,10 @@ func TestAutopilotFirstGroupInMergeMode(t *testing.T) {
 	f.setShip("merge", "")
 	f.approveAll("add-login")
 	f.env.SetPlan(t, map[string]testenv.Action{"build:1": {Tick: []string{"1.1"}}, "build:2": {Tick: []string{"2.1"}}})
+	// Approving published to the local bare remote, not to the forge URL.
+	if out := testenv.Git(t, f.bare, "for-each-ref", "refs/tuckerbox/approvals"); out == "" {
+		t.Error("the approvals ref was not pushed to the local remote")
+	}
 	f.pass()
 	f.waitState("add-login", "ready", "")
 	if r := f.runOf("add-login"); r.Complete || r.Scope.Spec != "1" {
