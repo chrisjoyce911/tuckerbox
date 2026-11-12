@@ -98,6 +98,7 @@ func (a App) check() int {
 	}
 	fmt.Fprintf(a.Stdout, "config ok: %s (machine config: %s)\n", displayPath(opts.RepoRoot, cfg.RepoPath), machine)
 	fmt.Fprintf(a.Stdout, "workflow: %s; max_parallel %d; ship %s\n", strings.Join(ids, " -> "), cfg.MaxParallel, cfg.Ship)
+	approvalConflicts(a, opts.RepoRoot)
 	return 0
 }
 

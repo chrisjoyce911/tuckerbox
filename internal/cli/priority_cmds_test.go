@@ -224,14 +224,20 @@ func TestReorderAnApprovedChange(t *testing.T) {
 		t.Errorf("after unapprove: %q", got)
 	}
 	f.mustApprove("add-login")
-	if got := f.readSidecar(f.repo, "add-login"); !strings.HasPrefix(got, "priority = 1000\n") || !strings.Contains(got, "[approval]") {
+	// Approvals are published on the approvals ref (approval-publish), so
+	// the sidecar keeps only its priority.
+	if got := f.readSidecar(f.repo, "add-login"); got != "priority = 1000\n" {
 		t.Errorf("after approve: %q", got)
+	}
+	if st := f.approvalState(f.repo, "add-login"); st != approval.Approved {
+		t.Errorf("after approve: approval %s", st)
 	}
 }
 
 // Scenario: Priority and approve at once. Both run as separate processes
-// on a change without a worktree; the file ends with both edits, every
-// time.
+// on a change without a worktree; both edits land, every time. The
+// approval is on the approvals ref (approval-publish), the priority in the
+// sidecar.
 func TestPriorityAndApproveAtOnce(t *testing.T) {
 	f := newCLI(t, testenv.RepoOptions{Changes: []string{"a", "add-login"}, RequireApproval: true})
 	start := func(args ...string) (*exec.Cmd, *bytes.Buffer) {
@@ -255,7 +261,7 @@ func TestPriorityAndApproveAtOnce(t *testing.T) {
 			t.Fatalf("priority: %v %s", err, op)
 		}
 		got := f.readSidecar(f.repo, "add-login")
-		if !strings.Contains(got, "[approval]") || !strings.Contains(got, "priority = 1000") {
+		if !strings.Contains(got, "priority = 1000") {
 			t.Fatalf("round %d: lost an edit:\n%s", i, got)
 		}
 		if st := f.approvalState(f.repo, "add-login"); st != approval.Approved {

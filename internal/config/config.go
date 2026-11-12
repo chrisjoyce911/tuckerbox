@@ -45,6 +45,7 @@ import (
 	"github.com/chrisjoyce911/tuckerbox/internal/forge"
 	"path/filepath"
 	"slices"
+	"time"
 )
 
 // RepoDir is the folder at the repository root that holds Tuckerbox files:
@@ -137,6 +138,8 @@ type Config struct {
 	Worktree Worktree
 	// BoardColumns defaults to compact; steps shows each workflow step separately.
 	BoardColumns BoardColumns
+	// Autopilot holds the [autopilot] settings, defaults filled in.
+	Autopilot Autopilot
 
 	// Agents holds the agent command templates defined in config, by name:
 	// custom agents from either file and machine overrides of built-ins. An
@@ -155,6 +158,24 @@ type Config struct {
 	// repository config sets require_approval = false.
 	RequireApproval bool
 }
+
+// Autopilot is the [autopilot] table: how tuckerbox autopilot works
+// through changes. Either file may set it; repository values win.
+type Autopilot struct {
+	// Scope is AutopilotGroup (each change group by group, the default)
+	// or AutopilotChange (whole changes).
+	Scope string
+	// Interval is the time between full passes (default 60s, at least 10s).
+	Interval time.Duration
+}
+
+// Autopilot scopes and limits.
+const (
+	AutopilotGroup           = "group"
+	AutopilotChange          = "change"
+	DefaultAutopilotInterval = 60 * time.Second
+	MinAutopilotInterval     = 10 * time.Second
+)
 
 // BoardColumns selects the board layout. Repository values override machine defaults.
 type BoardColumns string

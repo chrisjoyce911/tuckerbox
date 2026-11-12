@@ -20,26 +20,26 @@
 
 ## 3. Claim (ship-claim)
 
-- [ ] 3.1 Lease pushes: explicit refspec, `--force-with-lease=<branch>:<lease>` with an empty lease for the first push and the last pushed commit (in `run.json`) after; refuse to push the base or default branch; verify with a test against a local bare remote and "Branch pattern names the base"
+- [x] 3.1 Lease pushes: explicit refspec, `--force-with-lease=<branch>:<lease>` with an empty lease for the first push and the last pushed commit (in `run.json`) after; refuse to push the base or default branch; verify with a test against a local bare remote and "Branch pattern names the base"
 - [x] 3.2 Claim marker in the merge request body; read markers on open merge requests; machine name from config or host name; verify with "Marker in the body"
 - [ ] 3.3 Open the merge request; on "already exists" read it and keep the claim only if the marker is ours; verify with "Two machines finish at once" (two engines, one bare remote, fake forge) and "Merge request already open"
-- [ ] 3.4 Block when the head is not our last push; verify with "Branch moved by a person"
-- [ ] 3.5 Resume: keep the claim when the tip is our push; open a missing merge request; fast-forward a clean worktree onto a person's commits; verify with "Crash between push and open" and "Resume after a person's fix"
-- [ ] 3.6 Refuse a leftover remote branch with no open merge request, never delete or overwrite it; verify with "Leftover branch"
+- [x] 3.4 Block when the head is not our last push; verify with "Branch moved by a person"
+- [x] 3.5 Resume: keep the claim when the tip is our push; open a missing merge request; fast-forward a clean worktree onto a person's commits; verify with "Crash between push and open" and "Resume after a person's fix"
+- [x] 3.6 Refuse a leftover remote branch with no open merge request, never delete or overwrite it; verify with "Leftover branch"
 - [x] 3.7 Run TLC on `formal/ship.tla` and its broken variants (`scripts/tla-check.sh` locally, the `tla` job in CI): the model passes, both variants are rejected
-- [ ] 3.8 Code review against the model's mapping table in design.md: every push goes through the lease helper, every merge passes the head commit seen green
+- [x] 3.8 Code review against the model's mapping table in design.md: every push goes through the lease helper, every merge passes the head commit seen green
 
 ## 4. Shipping (forge-shipping)
 
-- [ ] 4.1 Ship stage after the last step: state `shipping`; archive with `openspec archive <change> --yes`, validate all specs strictly, commit; `archive = false` skips; refuse a branch with no commits beyond the base; verify with "Last step done in mr mode", "Archive commit" and "Archive fails"
-- [ ] 4.2 Merge request title and body from the card title, proposal sections and change id, cut to the forge's limit with a link; labels; verify with "Pull request on GitHub" and "Body too long"
-- [ ] 4.3 `mr` mode stops `ready` at green or none; verify with "Green in mr mode"
-- [ ] 4.4 `merge` mode: merge only when CI is green, no thread waits and the forge says mergeable; pinned `sha`; merge method; never an admin bypass; verify with "Merge when green", "Head moved before the merge", "Protection not met", "Squash" and "No CI at all"
-- [ ] 4.5 Branch behind the base: `git merge` the base, push, re-poll; block on conflict with the files; verify with "Conflict with the base"
-- [ ] 4.6 After a merge, delete the remote branch only if its tip is the merged commit; keep the worktree; verify with "Branch removed"
-- [ ] 4.7 Merge request closed or merged by someone else; verify with "Closed by a person"
+- [x] 4.1 Ship stage after the last step: state `shipping`; archive with `openspec archive <change> --yes`, validate all specs strictly, commit; `archive = false` skips; refuse a branch with no commits beyond the base; verify with "Last step done in mr mode", "Archive commit" and "Archive fails"
+- [x] 4.2 Merge request title and body from the card title, proposal sections and change id, cut to the forge's limit with a link; labels; verify with "Pull request on GitHub" and "Body too long"
+- [x] 4.3 `mr` mode stops `ready` at green or none; verify with "Green in mr mode"
+- [x] 4.4 `merge` mode: merge only when CI is green, no thread waits and the forge says mergeable; pinned `sha`; merge method; never an admin bypass; verify with "Merge when green", "Head moved before the merge", "Protection not met", "Squash" and "No CI at all"
+- [x] 4.5 Branch behind the base: `git merge` the base, push, re-poll; block on conflict with the files; verify with "Conflict with the base"
+- [x] 4.6 After a merge, delete the remote branch only if its tip is the merged commit; keep the worktree; verify with "Branch removed"
+- [x] 4.7 Merge request closed or merged by someone else; verify with "Closed by a person"
 - [ ] 4.8 Dependencies in `mr` and `merge` mode are met only when archived on the base; verify with "Dependency waits for merge"
-- [ ] 4.9 `tuckerbox run` checks forge, token and foreign claims first; warns when the forge is unreachable; verify with "Claimed elsewhere" and "No token"
+- [x] 4.9 `tuckerbox run` checks forge, token and foreign claims first; warns when the forge is unreachable; verify with "Claimed elsewhere" and "No token"
 - [ ] 4.10 Honour task-scope's completeness rules: a scoped run not complete becomes `ready`, a run without a scope `blocked`, and neither ships; tick `(ship)` tasks in the archive commit; end-to-end tests against a fake forge for "Partial scope in merge mode" (no archive commit, no push, no merge request, no merge) and for task-scope's "Last group in mr mode", "Dependents in merge mode" and "Whole-change run leaves a task", and an archive commit that ticks a `(ship)` task
 
 ## 5. CI and review (ship-feedback)

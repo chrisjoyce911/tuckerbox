@@ -45,6 +45,8 @@ type Status struct {
 	Approval *Approval
 	// Hash is the hash of the change's files now.
 	Hash string
+	// FromRef: judged from the approvals ref, not the sidecar.
+	FromRef bool
 }
 
 // ParseSidecar returns the approval in a tuckerbox.toml's contents, or nil
@@ -347,6 +349,10 @@ func tomlString(s string) string {
 }
 
 func leftPad(h string) string { return strings.Repeat("0", 4-len(h)) + h }
+
+// writeAtomic replaces path with data through a temporary file beside it
+// (the approvals ref's local copy uses it too).
+func writeAtomic(path string, data []byte) error { return WriteSidecar(path, data) }
 
 // WriteSidecar replaces the tuckerbox.toml at path with data through a
 // temporary file beside it and a rename, so readers see the old file or the

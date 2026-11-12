@@ -63,6 +63,7 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 	if err != nil {
 		return nil, err
 	}
+	refs := refApprovals(ctx, repo.Root)
 	doc := &Document{Version: Version, Repo: key, Path: repo.Root, Machine: history.Machine(), RequireApproval: cfg.RequireApproval, Columns: columns(cfg), Cards: []Card{}}
 	doc.Steps = make([]string, 0, len(cfg.Steps))
 	for _, step := range cfg.Steps {
@@ -73,7 +74,7 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 	places := map[string]edits.Place{}
 	for _, id := range ids {
 		p, r, placeErr := locate(repo, cfg.Worktree, worktrees, id)
-		c, err := readCard(ctx, id, p.ChangeDir(), doc.Machine, false)
+		c, err := readCard(ctx, id, p.ChangeDir(), doc.Machine, false, refs)
 		c.addError(placeErr)
 		c.addError(err)
 		c.EditFolder = p.Dir
@@ -135,7 +136,7 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 		if _, ok := folders[a.id]; ok {
 			continue
 		}
-		c, err := readCard(ctx, a.id, a.folder, doc.Machine, true)
+		c, err := readCard(ctx, a.id, a.folder, doc.Machine, true, nil)
 		c.addError(err)
 		c.Column, c.Archived = "done", a.date
 		folders[a.id] = a.folder
@@ -237,7 +238,7 @@ func columns(cfg *config.Config) []Column {
 	return append(out, Column{ID: "ready", Kind: "ready", Name: "Ready"}, Column{ID: "done", Kind: "done", Name: "Done"})
 }
 
-func readCard(ctx context.Context, id, folder, machine string, archived bool) (Card, error) {
+func readCard(ctx context.Context, id, folder, machine string, archived bool, refs map[string]approval.Entry) (Card, error) {
 	c := Card{Change: id, Title: strings.ReplaceAll(id, "-", " "), Machine: machine, DependsOn: []Dependency{}, Approval: Approval{State: "none", Committed: archived}}
 	var sidecar struct {
 		Title     string   `toml:"title"`
@@ -273,7 +274,11 @@ func readCard(ctx context.Context, id, folder, machine string, archived bool) (C
 	if archived {
 		return c, nil
 	}
-	st, err := approval.Judge(approval.Dir(folder))
+	var entry *approval.Entry
+	if e, ok := refs[id]; ok {
+		entry = &e
+	}
+	st, err := approval.JudgeWith(approval.Dir(folder), entry)
 	if err != nil {
 		return c, err
 	}
@@ -445,4 +450,17 @@ func (c *Card) addError(err error) {
 		c.Error += "; "
 	}
 	c.Error += err.Error()
+}
+
+// refApprovals reads the approvals ref (approval-publish), fetching it from
+// the remote at most once a minute and publishing this machine's
+// unpublished approvals. A ref that can't be read leaves the sidecars.
+func refApprovals(ctx context.Context, root string) map[string]approval.Entry {
+	s := approval.Store{Dir: root}
+	_ = s.Sync(ctx, time.Minute)
+	es, err := s.Entries(ctx)
+	if err != nil {
+		return nil
+	}
+	return es
 }

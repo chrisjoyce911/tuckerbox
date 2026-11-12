@@ -57,6 +57,9 @@
 //     the one it had ("" or absent for the whole change). It comes where
 //     started, resumed or rerun would, and is followed by queued.
 //
+// started, resumed and scope_started carry by = "autopilot" when tuckerbox
+// autopilot started the run; it is absent when a person did.
+//
 // started, resumed, rerun, ready and blocked carry scope, the run's task
 // scope as typed with next resolved (such as "2" or "2.1-2.4"); it is
 // absent for a run of the whole change.
@@ -111,6 +114,12 @@ const (
 
 // Event is one line of history.jsonl.
 type Event struct {
+	Commit    string `json:"commit,omitempty"`
+	Branch    string `json:"branch,omitempty"`
+	Link      string `json:"link,omitempty"`
+	Number    int    `json:"number,omitempty"`
+	Method    string `json:"method,omitempty"`
+	ShipRound int    `json:"ship_round,omitempty"`
 	// V is the line's format version (Version); Append sets it.
 	V int `json:"v"`
 	// Time is when the event happened, with the writer's offset.
@@ -143,6 +152,9 @@ type Event struct {
 	Scope string `json:"scope,omitempty"`
 	// OldScope is the scope before, for scope_started.
 	OldScope string `json:"old_scope,omitempty"`
+	// By is "autopilot" on started, resumed and scope_started events that
+	// tuckerbox autopilot asked for; absent when a person did.
+	By string `json:"by,omitempty"`
 }
 
 // Machine returns this machine's name for Event.Machine: its host name,

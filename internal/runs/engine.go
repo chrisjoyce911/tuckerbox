@@ -14,6 +14,7 @@ import (
 
 	"github.com/chrisjoyce911/tuckerbox/internal/agent"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
+	"github.com/chrisjoyce911/tuckerbox/internal/forge"
 	"github.com/chrisjoyce911/tuckerbox/internal/history"
 	"github.com/chrisjoyce911/tuckerbox/internal/scope"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
@@ -50,12 +51,61 @@ type Request struct {
 	// the change lock. A scope other than the run's own starts a ready,
 	// stopped, blocked or failed run again from the first step.
 	Scope string
+	// Expect, when set, makes the request conditional (tuckerbox
+	// autopilot): once the change lock is held, the run must still be as
+	// the caller saw it, else Run returns a *ChangedError and changes
+	// nothing (formal/autopilot.tla, ActsOnSeenAttempt).
+	Expect *Expect
+	// By says who asked, for the history event that starts the run
+	// ("autopilot"); "" is a person.
+	By string
+}
+
+// Expect is the run state a conditional request was decided on: no run,
+// or run.json's state and since as read (not the effective state).
+type Expect struct {
+	NoRun bool
+	State State
+	Since time.Time
+}
+
+// ChangedError means a conditional request found the run changed since
+// its caller looked, or its approval rule no longer held; nothing was
+// changed.
+type ChangedError struct {
+	Change string
+	Why    string
+}
+
+func (e *ChangedError) Error() string {
+	return fmt.Sprintf("change %s changed since it was looked at (%s); nothing done", e.Change, e.Why)
+}
+
+// mismatch reports why rs (nil: no run.json) is not as x expects, or "".
+func (x *Expect) mismatch(rs *Run) string {
+	switch {
+	case x.NoRun && rs != nil:
+		return "it has a run now"
+	case x.NoRun:
+		return ""
+	case rs == nil:
+		return "its run is gone"
+	case rs.State != x.State:
+		return fmt.Sprintf("it is %s, not %s", rs.State, x.State)
+	case !rs.Since.Equal(x.Since):
+		return "its run moved on"
+	}
+	return ""
 }
 
 // Engine runs one change's workflow in this process.
 type Engine struct {
-	Repo   Repo
-	Config *config.Config
+	// Forge overrides the authenticated session in local fake-forge tests.
+	Forge        func(context.Context) (forge.Client, func(string) string, error)
+	ShipSleep    func(context.Context, time.Duration) error
+	workflowSlot *Slot
+	Repo         Repo
+	Config       *config.Config
 	// StateHome is the user state directory holding the machine index; ""
 	// leaves the index alone.
 	StateHome string
@@ -79,6 +129,10 @@ type Engine struct {
 	// made, and the worktree's files again once the change lock is held,
 	// before the run state changes. Resume and Rerun are not gated.
 	Gate func(ctx context.Context, change string, at StartPoint) error
+	// ResumeGate, when set, judges a conditional (Expect) Resume under the
+	// change lock: autopilot resumes a crashed run only while the change's
+	// approval is not withdrawn (approved or stale, not none).
+	ResumeGate func(ctx context.Context, change, worktree string) error
 
 	mu      sync.Mutex
 	saved   Run
@@ -193,6 +247,23 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	defer lock.Release()
 	// We hold the lock, so an edit marker is from an edit that died.
 	RemoveEditMarker(ws.State)
+	if req.Expect != nil {
+		cur, err := ReadRun(ws.State.RunFile())
+		switch {
+		case errors.Is(err, ErrNoRun):
+			cur = nil
+		case err != nil:
+			return nil, err
+		}
+		if why := req.Expect.mismatch(cur); why != "" {
+			return nil, &ChangedError{Change: req.Change, Why: why}
+		}
+		if req.Mode == Resume && e.ResumeGate != nil {
+			if err := e.ResumeGate(ctx, req.Change, ws.Path); err != nil {
+				return nil, &ChangedError{Change: req.Change, Why: err.Error()}
+			}
+		}
+	}
 	if e.gated(req) {
 		// Under the change lock, which approve and unapprove also take:
 		// what is judged here is what the run starts with.
@@ -225,7 +296,7 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	if err := e.save(ws, rs); err != nil {
 		return nil, err
 	}
-	e.startEvents(ws, rs, req.Mode, prev)
+	e.startEvents(ws, rs, req.Mode, prev, req.By)
 	if e.StateHome != "" {
 		if err := Remember(e.StateHome, IndexEntry{Repo: e.Repo.Main, Change: req.Change, Worktree: ws.Path, State: string(ws.State)}); err != nil {
 			e.logf(req.Change, "warning: machine index: %v", err)
@@ -240,6 +311,11 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 			e.OnLocked(ws, rs)
 		}
 		notified = true
+	}
+
+	if rs.ShippingStarted {
+		notify()
+		return e.forgeShip(ctx, ws, rs, true)
 	}
 
 	dw, fail := e.newDepWait(ws, rs)
@@ -295,6 +371,7 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	// Release: the slot is freed after the final state is written (the
 	// deferred lock release runs after this one).
 	defer slot.Release()
+	e.workflowSlot = slot
 	e.logf(req.Change, "running in slot %d", slot.N)
 
 	return e.steps(ctx, ws, rs, startIdx, stopReq)
@@ -380,6 +457,10 @@ func (e *Engine) prepare(req Request, ws Workspace) (*Run, int, error) {
 	case Resume:
 		switch cur.State {
 		case Stopped, Blocked:
+		case Ready:
+			if e.Config.Ship != config.ShipMR || rs.MR == nil || rs.MR.State != "open" {
+				return nil, 0, &StateError{Change: req.Change, State: Ready, Hint: "only a stopped or blocked run can be resumed"}
+			}
 		case Failed:
 			return nil, 0, &StateError{Change: req.Change, State: Failed, Hint: "use tuckerbox rerun " + req.Change + " " + rs.Step + " to run the step again"}
 		default:
@@ -389,6 +470,13 @@ func (e *Engine) prepare(req Request, ws Workspace) (*Run, int, error) {
 	case Rerun:
 		rs.Step = req.Step
 		rs.Rejections = nil
+	}
+	if rs.ShippingStarted && req.Mode != Rerun {
+		rs.Round++
+		rs.Worktree = ws.Path
+		rs.Repo = e.Repo.Root
+		rs.Step = ""
+		return rs, len(steps), nil
 	}
 	if rs.Step == "" {
 		rs.Step = steps[0].ID
@@ -510,7 +598,7 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 			return e.finish(ws, rs, Failed, fmt.Sprintf("step %s failed: %s", st.ID, oneLine(res.Summary)))
 		}
 	}
-	return e.ship(ws, rs)
+	return e.ship(ctx, ws, rs)
 }
 
 // ship finishes a run whose last step is done. A scoped run is ready only
@@ -518,7 +606,7 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 // complete decides, with the ship mode, whether the run ships (see
 // shipDecision). In local mode the work is committed on the change's
 // branch and nothing is pushed.
-func (e *Engine) ship(ws Workspace, rs *Run) (*Run, error) {
+func (e *Engine) ship(ctx context.Context, ws Workspace, rs *Run) (*Run, error) {
 	// The worktree's tasks.md, read while this run holds the change lock:
 	// tuckerbox tasks and edit write it only under that lock.
 	tasks, err := readTasks(TasksFile(ws.Path, rs.Change))
@@ -535,7 +623,7 @@ func (e *Engine) ship(ws Workspace, rs *Run) (*Run, error) {
 	case outcomeBlocked:
 		return e.finish(ws, rs, Blocked, "tasks not ticked: "+strings.Join(left, ", "))
 	case outcomeShip:
-		return e.finish(ws, rs, Failed, fmt.Sprintf("ship mode %q is not supported yet", e.Config.Ship))
+		return e.forgeShip(ctx, ws, rs, false)
 	}
 	msg := fmt.Sprintf("%s: work from tuckerbox run\n\nCommitted by Tuckerbox (ship = \"local\") after the last step, %s, reported done.\n",
 		rs.Change, rs.Step)
@@ -572,7 +660,9 @@ func (e *Engine) finish(ws Workspace, rs *Run, s State, reason string) (*Run, er
 	if s == Ready || s == Blocked {
 		ev.Scope = rs.Scope.SpecOrEmpty()
 	}
-	e.event(ws, rs, ev)
+	if s != Merged {
+		e.event(ws, rs, ev)
+	}
 	_ = os.Remove(StopFile(ws.State))
 	return rs, nil
 }
