@@ -401,10 +401,23 @@ export function fitColumn(card, columns) {
   if (ids.has(card.column)) return card.column;
   if ((card.column.startsWith("step:") || card.column === "queued") && ids.has("in_progress")) return "in_progress";
   if (card.column === "in_progress") {
-    if (card.step && ids.has(`step:${card.step}`)) return `step:${card.step}`;
+    // A queued run keeps the step it will run, so queued wins over the step.
+    const queued = card.state === "queued" || card.badge === "queued";
+    if (!queued && card.step && ids.has(`step:${card.step}`)) return `step:${card.step}`;
     if (ids.has("queued")) return "queued";
   }
   return card.column;
+}
+
+// Where a card's commands run: its own machine and checkout. A card's `on` of
+// null means this computer, so the board's machine stands in only when the
+// card names no machine at all (a card handed in without its source).
+export function cardAt(card, board) {
+  const known = card != null && card.on !== undefined;
+  return {
+    cwd: card?.path || board?.path || "",
+    on: known ? card.on : (board?.on ?? null),
+  };
 }
 
 // How much a machine's copy of a card says: a queued or running run beats any

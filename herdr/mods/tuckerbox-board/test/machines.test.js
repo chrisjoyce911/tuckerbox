@@ -2,7 +2,7 @@
 // their boards merge into the one shown.   node --test test/
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normaliseBoard, otherMachines, sharedRepo, fitColumn, mergeBoards, group } from "../model.js";
+import { normaliseBoard, otherMachines, sharedRepo, fitColumn, mergeBoards, group, cardAt } from "../model.js";
 
 const COMPACT = [
   { id: "proposed", kind: "proposed", name: "Proposed" },
@@ -79,6 +79,27 @@ test("Cards from a machine with the other column layout fit the board shown", ()
   assert.equal(fitColumn({ column: "in_progress", step: "review" }, steps), "step:review");
   assert.equal(fitColumn({ column: "in_progress", step: "" }, steps), "queued");
   assert.equal(fitColumn({ column: "ready", step: "" }, steps), "ready");
+});
+
+test("A queued card that keeps its step goes to Queued, not the step column", () => {
+  const steps = [{ id: "queued" }, { id: "step:build" }, { id: "step:review" }, { id: "ready" }];
+  assert.equal(fitColumn({ column: "in_progress", step: "build", state: "queued", badge: "queued" }, steps), "queued");
+  assert.equal(fitColumn({ column: "in_progress", step: "build", state: "", badge: "queued" }, steps), "queued");
+  assert.equal(fitColumn({ column: "in_progress", step: "build", state: "running", badge: "running" }, steps), "step:build");
+});
+
+test("A local card on a board opened from another machine runs on this computer", () => {
+  // The board was opened in a space on mini; its own cards say on: "mini".
+  const own = normaliseBoard(doc("mini", "/m", [card("a")]), { on: "mini" });
+  const local = normaliseBoard(doc("studio", "/s", [card("b")]), { on: null });
+  const b = mergeBoards(own, [{ machine: null, board: local }]);
+  const lc = b.cards.find((c) => c.change === "b");
+  assert.equal(lc.on, null);
+  assert.deepEqual(cardAt(lc, b), { cwd: "/s", on: null });
+  assert.deepEqual(cardAt(b.cards.find((c) => c.change === "a"), b), { cwd: "/m", on: "mini" });
+  // Only a card without any machine field falls back to the board's.
+  assert.deepEqual(cardAt({ change: "c", path: "" }, b), { cwd: "/m", on: "mini" });
+  assert.deepEqual(cardAt(null, { path: "/x", on: null }), { cwd: "/x", on: null });
 });
 
 test("Which machines are asked", () => {
