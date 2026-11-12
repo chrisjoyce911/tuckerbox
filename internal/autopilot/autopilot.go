@@ -99,6 +99,9 @@ type Pilot struct {
 	// Order puts the active changes in admission order. Nil keeps them
 	// sorted by id.
 	Order func(ctx context.Context, ids []string) ([]string, error)
+	// BeginPass, when set, is called at the start of each pass (the CLI
+	// reads the approvals ref there once, not once per change).
+	BeginPass func(ctx context.Context) error
 	// Warn receives problems that don't stop a pass (offline fetch).
 	Warn func(string)
 
@@ -125,6 +128,11 @@ func (p *Pilot) printf(format string, args ...any) {
 // Pass makes one pass.
 func (p *Pilot) Pass(ctx context.Context) (Outcome, error) {
 	out := Outcome{NeedsYou: map[string]string{}}
+	if p.BeginPass != nil {
+		if err := p.BeginPass(ctx); err != nil {
+			return out, err
+		}
+	}
 	base, err := p.Repo.Base(ctx, p.Config.Worktree.Base, p.Warn)
 	if err != nil {
 		return out, err
@@ -153,7 +161,7 @@ func (p *Pilot) Pass(ctx context.Context) (Outcome, error) {
 		}
 	}
 	room := p.Config.MaxParallel - busy
-	lookup := runs.DependencyLookup(ctx, p.Repo, p.Config)
+	lookup := runs.DependencyLookupFrom(local, p.Config)
 	active := map[string]bool{}
 	for _, id := range ids {
 		active[id] = true

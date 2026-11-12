@@ -87,11 +87,26 @@ func (a App) autopilot(args []string) int {
 	}
 	defer os.Remove(markerPath)
 
+	var entries map[string]approval.Entry
 	p := &autopilot.Pilot{
 		Repo: repo, Config: cfg, Out: a.Stdout, DryRun: dry,
 		Warn: func(msg string) { fmt.Fprintf(a.Stderr, "tuckerbox autopilot: warning: %s\n", msg) },
+		// The approvals ref is synced and read once per pass.
+		BeginPass: func(ctx context.Context) error {
+			s := approval.Store{Dir: repo.Root}
+			if err := s.Sync(ctx, 0); err != nil {
+				return err
+			}
+			es, err := s.Entries(ctx)
+			entries = es
+			return err
+		},
 		Approval: func(ctx context.Context, change, base string) (approval.State, string, error) {
-			return approvalAt(ctx, repo, cfg, change, base)
+			var e *approval.Entry
+			if x, ok := entries[change]; ok {
+				e = &x
+			}
+			return approvalAt(ctx, repo, cfg, change, base, e)
 		},
 		Start: func(_ context.Context, req autopilot.Request) error {
 			return a.spawnQuiet(repo.Root, req.Args())
@@ -166,17 +181,14 @@ func (discard) Write(p []byte) (int, error) { return len(p), nil }
 // approvalAt judges change's approval where tuckerbox run would start it:
 // its worktree if it has one, else its branch or base. It returns the
 // commit judged ("" for a worktree), which pins a new worktree.
-func approvalAt(ctx context.Context, repo runs.Repo, cfg *config.Config, change, base string) (approval.State, string, error) {
+func approvalAt(ctx context.Context, repo runs.Repo, cfg *config.Config, change, base string, entry *approval.Entry) (approval.State, string, error) {
 	sp, err := repo.ResolveStart(ctx, cfg.Worktree, change, base, nil)
 	if err != nil {
 		return approval.None, "", err
 	}
 	// Approvals are published on the approvals ref (approval-publish); an
-	// entry there wins over the sidecar, as in the run gate.
-	entry, err := refEntry(ctx, repo.Root, change)
-	if err != nil {
-		return approval.None, "", err
-	}
+	// entry there (read once per pass) wins over the sidecar, as in the
+	// run gate.
 	if sp.Worktree != "" {
 		st, err := approval.JudgeWith(approval.DirOf(sp.Worktree, change), entry)
 		return st.State, "", err
