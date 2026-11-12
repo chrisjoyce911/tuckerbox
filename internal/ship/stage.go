@@ -2,12 +2,14 @@ package ship
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/chrisjoyce911/tuckerbox/internal/agent"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/forge"
 )
@@ -24,21 +26,30 @@ type CIInfo struct {
 
 // Record is persisted with run state by Save, while the caller holds the change lock.
 type Record struct {
-	ShippingStarted bool      `json:"shipping_started,omitempty"`
-	LastPush        string    `json:"last_push,omitempty"`
-	PushedAt        time.Time `json:"pushed_at,omitempty"`
-	ArchiveDone     bool      `json:"archive_done,omitempty"`
-	ArchivePath     string    `json:"archive_path,omitempty"`
-	MR              *MRInfo   `json:"mr,omitempty"`
-	CI              *CIInfo   `json:"ci,omitempty"`
-	ShipRound       int       `json:"ship_round,omitempty"`
+	ShipFixes       int                 `json:"ship_fixes,omitempty"`
+	ThreadSeen      map[string]string   `json:"thread_seen,omitempty"`
+	ThreadReplies   map[string][]string `json:"thread_replies,omitempty"`
+	Pending         *Feedback           `json:"pending_feedback,omitempty"`
+	ShippingStarted bool                `json:"shipping_started,omitempty"`
+	LastPush        string              `json:"last_push,omitempty"`
+	PushedAt        time.Time           `json:"pushed_at,omitempty"`
+	ArchiveDone     bool                `json:"archive_done,omitempty"`
+	ArchivePath     string              `json:"archive_path,omitempty"`
+	MR              *MRInfo             `json:"mr,omitempty"`
+	CI              *CIInfo             `json:"ci,omitempty"`
+	ShipRound       int                 `json:"ship_round,omitempty"`
 }
 type Outcome struct{ State, Reason string }
 type Event struct {
+	Jobs, Threads                      []string
+	CI                                 string
 	Kind, Commit, Branch, Link, Method string
 	Number, Round                      int
 }
 type Engine struct {
+	Fix      func(context.Context, string, []agent.Finding) (*agent.Result, error)
+	LogDir   string
+	Jitter   func(time.Duration) time.Duration
 	Config   *config.Config
 	Git      Git
 	Identity Identity
@@ -93,7 +104,12 @@ func (e *Engine) save() error {
 	}
 	return e.Save()
 }
-func (e *Engine) blocked(err error) Outcome { return Outcome{"blocked", e.text(err.Error())} }
+func (e *Engine) blocked(err error) Outcome {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return Outcome{"stopped", err.Error()}
+	}
+	return Outcome{"blocked", e.text(err.Error())}
+}
 func (e *Engine) persistPush(sha string) error {
 	e.Record.LastPush = sha
 	e.Record.PushedAt = e.now()
@@ -113,6 +129,10 @@ func (e *Engine) Run(ctx context.Context, resume bool) Outcome {
 		return e.blocked(fmt.Errorf("shipping is not configured"))
 	}
 	r := e.Record
+	if resume {
+		r.ShipFixes = 0
+		r.ShipRound = 1
+	}
 	if e.Request.Base == "" {
 		e.Request.Base = strings.TrimPrefix(e.Git.Base, e.Git.remote()+"/")
 	}
@@ -211,128 +231,9 @@ func (e *Engine) Run(ctx context.Context, resume bool) Outcome {
 			return e.blocked(err)
 		}
 	}
-	interval := 30 * time.Second
-	lastChange := e.now()
-	fingerprint := ""
-	for {
-		if ctx.Err() != nil {
-			return Outcome{"stopped", ctx.Err().Error()}
-		}
-		mr, err = e.Forge.GetMR(ctx, r.MR.Number)
-		if err == nil {
-			r.MR = info(mr)
-			switch mr.State {
-			case "closed":
-				return e.blocked(fmt.Errorf("merge request closed"))
-			case "merged":
-				return e.merged(ctx, r.LastPush)
-			}
-			if err = claim.owner(mr); err == nil && mr.Head != "" && mr.Head != r.LastPush {
-				return e.blocked(fmt.Errorf("branch changed on the forge"))
-			}
-			if err == nil {
-				err = claim.Check(ctx, e.Forge)
-			}
-		}
-		if err != nil {
-			if api, ok := err.(*forge.APIError); ok && (api.Status >= 500 || api.Status == 429) {
-				if e.now().Sub(lastChange) >= e.waitTimeout() {
-					return e.blocked(fmt.Errorf("waiting for forge timed out"))
-				}
-				delay := interval
-				if api.RetryAt.After(e.now()) {
-					delay = api.RetryAt.Sub(e.now())
-				}
-				if err := e.sleep(ctx, delay); err != nil {
-					return Outcome{"stopped", err.Error()}
-				}
-				interval = min(interval*2, 5*time.Minute)
-				continue
-			}
-			return e.blocked(err)
-		}
-		if e.Config.Ship == config.ShipMerge && mr.Behind {
-			before := r.LastPush
-			sha, err := e.Git.UpdateBase(ctx)
-			if err != nil {
-				return e.blocked(err)
-			}
-			if sha == before {
-				return e.blocked(fmt.Errorf("forge requires a base update but merge changed nothing"))
-			}
-			if _, err := claim.Acquire(ctx, e.Forge, e.Request, e.persistPush); err != nil {
-				return e.blocked(err)
-			}
-			lastChange = e.now()
-			interval = 30 * time.Second
-			continue
-		}
-		checks, err := e.Forge.Checks(ctx, r.LastPush, e.Request.Base)
-		if err != nil {
-			return e.blocked(err)
-		}
-		ci := CIState(checks, r.PushedAt, e.now())
-		oldCI := ""
-		if r.CI != nil {
-			oldCI = r.CI.State
-		}
-		r.CI = &CIInfo{State: ci, Commit: r.LastPush}
-		if oldCI != ci && ci != "pending" {
-			e.emit(Event{Kind: "ci_finished", Commit: r.LastPush})
-		}
-		threads, err := e.Forge.Threads(ctx, mr.Number)
-		if err != nil {
-			return e.blocked(err)
-		}
-		waiting := false
-		for _, t := range threads {
-			if EligibleThread(t, e.Config.Shipping.ReviewFrom) {
-				waiting = true
-				break
-			}
-		}
-		if err := e.save(); err != nil {
-			return e.blocked(err)
-		}
-		switch {
-		case ci == "red":
-			return e.blocked(fmt.Errorf("CI failed"))
-		case !waiting && e.Config.Ship == config.ShipMR && (ci == "green" || ci == "none"):
-			return Outcome{State: "ready"}
-		case e.Config.Ship == config.ShipMerge && ci == "none":
-			return e.blocked(fmt.Errorf("no checks reported"))
-		case !waiting && ci == "green" && mr.Mergeable && e.Config.Ship == config.ShipMerge:
-			if err := claim.Check(ctx, e.Forge); err != nil {
-				return e.blocked(err)
-			}
-			if err := e.Forge.Merge(ctx, mr.Number, r.LastPush, e.Config.Shipping.MergeMethod); err != nil {
-				if api, ok := err.(*forge.APIError); ok && (api.Status == 409 || api.Status == 422) {
-					return e.blocked(fmt.Errorf("branch changed on the forge"))
-				}
-				return e.blocked(err)
-			}
-			return e.merged(ctx, r.LastPush)
-		}
-		next := fmt.Sprintf("%s/%s/%t/%s", mr.Head, ci, waiting, mr.MergeStatus)
-		if fingerprint != next {
-			lastChange = e.now()
-			interval = 30 * time.Second
-			fingerprint = next
-		} else {
-			interval = min(interval*2, 5*time.Minute)
-		}
-		if e.now().Sub(lastChange) >= e.waitTimeout() {
-			reason := "waiting for CI timed out"
-			if ci == "green" {
-				reason = "waiting for approval timed out"
-			}
-			return e.blocked(fmt.Errorf("%s", reason))
-		}
-		if err := e.sleep(ctx, interval); err != nil {
-			return Outcome{"stopped", err.Error()}
-		}
-	}
+	return e.watch(ctx, claim)
 }
+
 func (e *Engine) waitTimeout() time.Duration {
 	if e.Config.Shipping.WaitTimeout <= 0 {
 		return 2 * time.Hour
@@ -358,6 +259,9 @@ func (e *Engine) archive(ctx context.Context, change string) (string, error) {
 		cmd.Dir = e.Git.Worktree
 		out, err := cmd.CombinedOutput()
 		if err != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
 			return "", fmt.Errorf("openspec %s: %s", strings.Join(args, " "), e.text(string(out)))
 		}
 	}

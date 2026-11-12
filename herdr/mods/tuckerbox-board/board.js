@@ -92,7 +92,7 @@ export class BoardView extends View {
     this.busy = `${action}-${card?.change ?? ""}`;
     cx.notify();
     cx.spawn(async (cx) => {
-      const r = await perform(inv, { dry: Boolean(this.board?.fixtures) });
+      const r = await perform(inv, { dry: Boolean(this.board?.fixtures),openURL:(url)=>cx.open_url(url) });
       this.busy = null;
       this.notice = r.message ? { text: r.message, kind: r.ok || r.dry ? "info" : "error", change: card?.change ?? "" } : null;
       if (r.ok) this.last = 0; // read again at once: the card moves when tuckerbox says so
@@ -102,7 +102,7 @@ export class BoardView extends View {
 
   boardProps() {
     const b = this.board ?? {};
-    return { repo: b.repo, path: b.path, require_approval: b.require_approval, columns: b.columns, steps: b.steps, on: b.on, fixtures: Boolean(b.fixtures) };
+    return { ship:b.ship,repo: b.repo, path: b.path, require_approval: b.require_approval, columns: b.columns, steps: b.steps, on: b.on, fixtures: Boolean(b.fixtures) };
   }
 
   // Dock: this window becomes a pane beside the shown space's terminals,
@@ -208,6 +208,12 @@ export class BoardView extends View {
         .when(Boolean(c.agent), (el) => el.child(div().child("·")).child(div().child(c.agent)))
         .child(div().flex_1())
         .when(Boolean(c.machine), (el) => el.child(div().truncate().max_w(90).child(c.machine)))))
+      .when(Boolean(c.mr), (el)=>el.child(h_flex().items_center().gap(6).text_size(11)
+        .child(div().id(`mr-link-${c.change}`).cursor_pointer().text_color(tm.accent).hover(s=>s.underline())
+          .on_mouse_down("left",(_e,cx)=>cx.stop_propagation())
+          .on_click((_e,cx)=>{cx.stop_propagation();this.act("mr", c, {}, cx);}).child(`#${c.mr.number}`))
+        .when(Boolean(c.ci),(el)=>el.child(div().px(5).rounded(4).bg(tm.raised).text_color(c.ci.state==="red"?tm.blocked:c.ci.state==="green"?tm.working:tm.dim).child(`CI ${c.ci.state}`)))
+        .when(c.ship_round>0,(el)=>el.child(div().text_color(tm.dim).child(`ship round ${c.ship_round}`)))))
       .when(Boolean(c.reason), (el) => el.child(div().text_size(11).text_color(flag ? tm.blocked : tm.dim).child(c.reason)))
       .when(c.depends_on.length > 0 && !c.archived, (el) => el.child(div().text_size(11).text_color(tm.dim)
         .child(`after ${c.depends_on.map((d) => `${d.change} (${columnName(b, d.column)})`).join(", ")}`)))

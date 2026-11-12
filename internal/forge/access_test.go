@@ -269,7 +269,7 @@ func TestSignedJobLogDownloadNeverGetsCredentials(t *testing.T) {
 	// httptest certificates share their CA, so the local API client trusts both servers.
 	h, _ := NewHTTP(api.URL, token, api.Client())
 	got, err := h.JobLog(context.Background(), "/logs")
-	if err != nil || got != "job log: ***" {
+	if err != nil || got.Text != "job log: ***" {
 		t.Fatal(got, err)
 	}
 	if _, err := h.JobLog(context.Background(), "/again"); err == nil {
@@ -280,5 +280,51 @@ func TestSignedJobLogDownloadNeverGetsCredentials(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatal(calls)
+	}
+}
+
+func TestRetryAfterAndGitLabRateFloorPreventRequests(t *testing.T) {
+	for _, retryAfter := range []bool{false, true} {
+		t.Run(fmt.Sprint(retryAfter), func(t *testing.T) {
+			calls := 0
+			s := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if retryAfter {
+					w.Header().Set("Retry-After", "120")
+					w.WriteHeader(429)
+				} else {
+					w.Header().Set("RateLimit-Limit", "100")
+					w.Header().Set("RateLimit-Remaining", "5")
+					w.Header().Set("RateLimit-Reset", fmt.Sprint(time.Now().Add(12*time.Minute).Unix()))
+					fmt.Fprint(w, `{}`)
+				}
+			}))
+			defer s.Close()
+			h, err := NewHTTP(s.URL, Token{}, s.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = h.Do(context.Background(), "GET", "/state", nil, nil)
+			if _, err := h.Do(context.Background(), "GET", "/state", nil, nil); err == nil || calls != 1 {
+				t.Fatal(calls, err)
+			}
+			if time.Until(h.RetryAt()) < time.Minute {
+				t.Fatal(h.RetryAt())
+			}
+		})
+	}
+}
+
+func TestLargeJobLogStreamsBoundedTailAndCountsLines(t *testing.T) {
+	line := strings.Repeat("x", 511) + "\n"
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, strings.Repeat(line, 20000)) }))
+	defer server.Close()
+	h, err := NewHTTP(server.URL, Token{}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	log, err := h.JobLog(context.Background(), "/log")
+	if err != nil || !log.Truncated || len(log.Text) > 256<<10 || log.OmittedLines+strings.Count(log.Text, "\n") != 20000 {
+		t.Fatal(len(log.Text), log.OmittedLines, err)
 	}
 }

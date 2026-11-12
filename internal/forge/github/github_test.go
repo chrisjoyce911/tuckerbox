@@ -57,11 +57,11 @@ func TestChecksReplay(t *testing.T) {
 		}
 	}
 	log, err := c.Log(ctx, checks.Jobs[1])
-	if err != nil || log != "test failed\n" {
+	if err != nil || log.Text != "test failed\n" {
 		t.Fatal(log, err)
 	}
 	fallback, err := c.Log(ctx, forge.Job{Summary: "external summary", URL: "https://ci.example/job"})
-	if err != nil || !strings.Contains(fallback, "external summary") {
+	if err != nil || !strings.Contains(fallback.Text, "external summary") {
 		t.Fatal(fallback, err)
 	}
 }

@@ -266,3 +266,16 @@ Commands run with `exec` on the card's Herdr machine, in the document's
 lowercase letters, digits and dashes, a task number `n.m` and a position a
 whole number from 1, or the
 command isn't built. Archived (Done) cards offer nothing.
+
+## Forge shipping
+
+The board document adds `ship` (`local`, `mr`, `merge`). Cards may add `mr`
+(`link`, `number`, `state`), `ci` (`state`, `commit`), `ship_round` and
+`max_rounds`. The JSON version stays 1. Shipping sits before Ready in either
+layout; waiting and fix steps remain there, along with blocked shipping runs.
+Merged runs appear in Done before the base archive is fetched. The board reads
+these fields from run.json and makes no forge requests.
+
+Open merge request uses the local browser through the GPUI click context's
+`open_url`; Resume is offered on Ready with an open MR in mr mode. No merge
+action is exposed. Shipping is active for edit, task tick and approval gates.

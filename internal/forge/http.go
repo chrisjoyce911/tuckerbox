@@ -18,6 +18,10 @@ const maxResponse = 8 << 20
 
 // APIError includes only masked response text. Callers may inspect status to
 // recover duplicate opens, authentication failures and stale merge pins.
+type RequestError struct{ Message string }
+
+func (e *RequestError) Error() string { return e.Message }
+
 type APIError struct {
 	Status  int
 	Message string
@@ -106,12 +110,21 @@ func (h *HTTP) Do(ctx context.Context, method, endpoint string, input, output an
 	}
 	resp, err := h.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("forge request failed: %s", h.Mask(err.Error()))
+		return nil, &RequestError{Message: "forge request failed: " + h.Mask(err.Error())}
 	}
 	defer resp.Body.Close()
 	h.recordLimit(resp.Header)
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 && resp.StatusCode != 304 {
 		return resp.Header, &APIError{Status: resp.StatusCode, Message: "forge redirect refused"}
+	}
+	if log, ok := output.(*Log); ok && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		result, err := readLog(resp.Body)
+		if err != nil {
+			return resp.Header, &RequestError{Message: "reading forge log failed"}
+		}
+		result.Text = h.Mask(result.Text)
+		*log = result
+		return resp.Header, nil
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse+1))
 	if err != nil {
@@ -223,38 +236,39 @@ func (h *HTTP) WebProject(project string) string {
 // JobLog handles GitHub's documented signed log redirect. The API request is
 // authenticated; the single HTTPS download has no authorization or cookie jar,
 // and cannot redirect again. Ordinary API redirects remain forbidden.
-func (h *HTTP) JobLog(ctx context.Context, endpoint string) (string, error) {
-	var log string
+func (h *HTTP) JobLog(ctx context.Context, endpoint string) (Log, error) {
+	var log Log
 	header, err := h.Do(ctx, "GET", endpoint, nil, &log)
 	if err == nil {
 		return log, nil
 	}
 	e, ok := err.(*APIError)
 	if !ok || e.Status != 302 {
-		return "", err
+		return Log{}, err
 	}
 	location := header.Get("Location")
 	u, parseErr := url.Parse(location)
 	if parseErr != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Fragment != "" || h.Mask(location) != location {
-		return "", fmt.Errorf("unsafe forge log download URL")
+		return Log{}, fmt.Errorf("unsafe forge log download URL")
 	}
 	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
 	if err != nil {
-		return "", fmt.Errorf("invalid log download")
+		return Log{}, fmt.Errorf("invalid log download")
 	}
 	client := h.client
 	client.Jar = nil
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("forge log download failed")
+		return Log{}, fmt.Errorf("forge log download failed")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("forge log download HTTP %d", resp.StatusCode)
+		return Log{}, fmt.Errorf("forge log download HTTP %d", resp.StatusCode)
 	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse+1))
-	if err != nil || len(b) > maxResponse {
-		return "", fmt.Errorf("forge log download unreadable or exceeds size limit")
+	log, err = readLog(resp.Body)
+	if err != nil {
+		return Log{}, &RequestError{Message: "reading forge log download failed"}
 	}
-	return h.Mask(string(b)), nil
+	log.Text = h.Mask(log.Text)
+	return log, nil
 }

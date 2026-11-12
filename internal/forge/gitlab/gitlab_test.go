@@ -60,7 +60,7 @@ func TestNewestPipelineAndAllowedFailure(t *testing.T) {
 		t.Fatal(checks, err)
 	}
 	log, err := c.Log(ctx, checks.Jobs[0])
-	if err != nil || log != "test failed\n" {
+	if err != nil || log.Text != "test failed\n" {
 		t.Fatal(log, err)
 	}
 	checks, err = c.Checks(ctx, "noci", "main")

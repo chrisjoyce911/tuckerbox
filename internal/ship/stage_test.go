@@ -44,7 +44,9 @@ func (f *fullForge) Checks(context.Context, string, string) (forge.Checks, error
 	}
 	return forge.Checks{Jobs: []forge.Job{{ID: "job1", Name: "test", State: f.ci}}}, nil
 }
-func (f *fullForge) Log(context.Context, forge.Job) (string, error)       { return "test output", nil }
+func (f *fullForge) Log(context.Context, forge.Job) (forge.Log, error) {
+	return forge.Log{Text: "test output"}, nil
+}
 func (f *fullForge) Threads(context.Context, int) ([]forge.Thread, error) { return f.threads, nil }
 func (f *fullForge) Reply(context.Context, int, string, string) error     { return nil }
 func (f *fullForge) Merge(_ context.Context, _ int, sha, method string) error {
@@ -161,7 +163,7 @@ func TestProtectionPendingMissingCIAndClosedMR(t *testing.T) {
 				wantState = "merged"
 			case "review waiting":
 				api.threads = []forge.Thread{{ID: "thread1", Comments: []forge.Comment{{ID: "comment1", Author: "writer", Writer: true}}}}
-				wantReason = "waiting for approval timed out"
+				wantReason = "review findings need a fix step"
 			}
 			out := e.Run(context.Background(), false)
 			if out.State != wantState || out.Reason != wantReason || api.mergeCalls != 0 {

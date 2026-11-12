@@ -24,6 +24,7 @@ import (
 	"github.com/chrisjoyce911/tuckerbox/internal/priority"
 	"github.com/chrisjoyce911/tuckerbox/internal/runs"
 	"github.com/chrisjoyce911/tuckerbox/internal/scope"
+	"github.com/chrisjoyce911/tuckerbox/internal/ship"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 )
 
@@ -711,17 +712,20 @@ func displayTime(t time.Time) string {
 // statusRun is one run in tuckerbox status --json. Fields may be added
 // within a version, never renamed or removed.
 type statusRun struct {
-	Repo     string `json:"repo"`
-	Change   string `json:"change"`
-	State    string `json:"state"`
-	Step     string `json:"step"`
-	Round    int    `json:"round"`
-	Since    string `json:"since"`
-	Reason   string `json:"reason"`
-	Worktree string `json:"worktree"`
-	Branch   string `json:"branch"`
-	Pid      int    `json:"pid,omitempty"`
-	Created  string `json:"created"`
+	MR        *ship.MRInfo `json:"mr,omitempty"`
+	CI        *ship.CIInfo `json:"ci,omitempty"`
+	ShipRound int          `json:"ship_round,omitempty"`
+	Repo      string       `json:"repo"`
+	Change    string       `json:"change"`
+	State     string       `json:"state"`
+	Step      string       `json:"step"`
+	Round     int          `json:"round"`
+	Since     string       `json:"since"`
+	Reason    string       `json:"reason"`
+	Worktree  string       `json:"worktree"`
+	Branch    string       `json:"branch"`
+	Pid       int          `json:"pid,omitempty"`
+	Created   string       `json:"created"`
 	// Scope is the run's task scope; absent for the whole change.
 	Scope *scope.Scope `json:"scope,omitempty"`
 }
@@ -758,7 +762,7 @@ func (a App) statusRuns() ([]statusRun, error) {
 		out = append(out, statusRun{
 			Repo: e.Repo, Change: v.Change, State: string(v.State), Step: v.Step, Round: v.Round,
 			Since: rfc3339(v.Since), Reason: v.Reason, Worktree: v.Worktree, Branch: v.Branch,
-			Pid: v.Pid, Created: rfc3339(v.Created), Scope: v.Scope,
+			Pid: v.Pid, Created: rfc3339(v.Created), Scope: v.Scope, MR: v.MR, CI: v.CI, ShipRound: v.ShipRound,
 		})
 	}
 	return out, nil
@@ -782,7 +786,7 @@ func (a App) status(args []string) int {
 		fmt.Fprintln(a.Stdout, "no runs on this machine")
 		return 0
 	}
-	rows := [][]string{{"REPO", "CHANGE", "STATE", "STEP", "TASKS", "ROUND", "SINCE", "REASON"}}
+	rows := [][]string{{"REPO", "CHANGE", "STATE", "STEP", "TASKS", "ROUND", "SINCE", "MR", "CI", "SHIP ROUND", "REASON"}}
 	for _, r := range list {
 		since, _ := time.Parse(time.RFC3339, r.Since)
 		step := r.Step
@@ -793,7 +797,17 @@ func (a App) status(args []string) int {
 		if r.Scope != nil {
 			tasks = r.Scope.Spec
 		}
-		rows = append(rows, []string{filepath.Base(r.Repo), r.Change, r.State, step, tasks, strconv.Itoa(r.Round), displayTime(since), r.Reason})
+		mr, ci, shipRound := "", "", ""
+		if r.MR != nil {
+			mr = r.MR.Link
+		}
+		if r.CI != nil {
+			ci = r.CI.State
+		}
+		if r.ShipRound > 0 {
+			shipRound = strconv.Itoa(r.ShipRound)
+		}
+		rows = append(rows, []string{filepath.Base(r.Repo), r.Change, r.State, step, tasks, strconv.Itoa(r.Round), displayTime(since), mr, ci, shipRound, r.Reason})
 	}
 	writeTable(a.Stdout, rows)
 	return 0

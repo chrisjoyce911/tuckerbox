@@ -5,11 +5,13 @@ package board
 import (
 	"github.com/chrisjoyce911/tuckerbox/internal/agent"
 	"github.com/chrisjoyce911/tuckerbox/internal/scope"
+	"github.com/chrisjoyce911/tuckerbox/internal/ship"
 )
 
 const Version = 1
 
 type Document struct {
+	Ship            string   `json:"ship"`
 	Version         int      `json:"version"`
 	Repo            string   `json:"repo"`
 	Path            string   `json:"path"`
@@ -41,6 +43,10 @@ type Dependency struct {
 	Column string `json:"column"`
 }
 type Card struct {
+	MR         *ship.MRInfo `json:"mr,omitempty"`
+	CI         *ship.CIInfo `json:"ci,omitempty"`
+	ShipRound  int          `json:"ship_round,omitempty"`
+	MaxRounds  int          `json:"max_rounds,omitempty"`
 	Error      string       `json:"error,omitempty"`
 	Change     string       `json:"change"`
 	Title      string       `json:"title"`
@@ -110,17 +116,26 @@ type Round struct {
 	Scope string `json:"scope"`
 }
 type Event struct {
-	At       string          `json:"at"`
-	Event    string          `json:"event"`
-	Step     string          `json:"step"`
-	Round    int             `json:"round"`
-	Agent    string          `json:"agent"`
-	Machine  string          `json:"machine"`
-	Result   string          `json:"result,omitempty"`
-	To       string          `json:"to,omitempty"`
-	Summary  string          `json:"summary,omitempty"`
-	Findings []agent.Finding `json:"findings,omitempty"`
-	Reason   string          `json:"reason,omitempty"`
-	Scope    string          `json:"scope,omitempty"`
-	OldScope string          `json:"old_scope,omitempty"`
+	Commit    string          `json:"commit,omitempty"`
+	Branch    string          `json:"branch,omitempty"`
+	Link      string          `json:"link,omitempty"`
+	Number    int             `json:"number,omitempty"`
+	Method    string          `json:"method,omitempty"`
+	ShipRound int             `json:"ship_round,omitempty"`
+	CI        string          `json:"ci,omitempty"`
+	Jobs      []string        `json:"jobs,omitempty"`
+	Threads   []string        `json:"threads,omitempty"`
+	At        string          `json:"at"`
+	Event     string          `json:"event"`
+	Step      string          `json:"step"`
+	Round     int             `json:"round"`
+	Agent     string          `json:"agent"`
+	Machine   string          `json:"machine"`
+	Result    string          `json:"result,omitempty"`
+	To        string          `json:"to,omitempty"`
+	Summary   string          `json:"summary,omitempty"`
+	Findings  []agent.Finding `json:"findings,omitempty"`
+	Reason    string          `json:"reason,omitempty"`
+	Scope     string          `json:"scope,omitempty"`
+	OldScope  string          `json:"old_scope,omitempty"`
 }

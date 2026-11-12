@@ -8,6 +8,7 @@
 import { isActive } from "./model.js";
 
 export const ACTIONS = {
+  mr: {label:"Open merge request ↗"},
   start: { label: "▶ Start", primary: true },
   approve: { label: "Approve", primary: true },
   unapprove: { label: "Unapprove" },
@@ -70,6 +71,7 @@ export function commandLine(action, change, extra = {}) {
       if (!Number.isInteger(n) || n < 1) throw new Error(`priority needs a position from 1, not ${JSON.stringify(n)}`);
       return ["tuckerbox", "priority", change, String(n)];
     }
+    case "mr":
     case "proposal":
     case "worktree":
       return null;
@@ -86,8 +88,9 @@ export function commandLine(action, change, extra = {}) {
 // `on` is the card's Herdr machine (null: this computer), `cwd` its checkout there.
 export function invocation(action, card, extra = {}) {
   const argv = commandLine(action, card?.change, extra);
-  const place = action === "edit" ? "pane" : action === "follow" ? "tab" : argv ? "exec" : "view";
+  const place = action === "mr" ? "browser" : action === "edit" ? "pane" : action === "follow" ? "tab" : argv ? "exec" : "view";
   const out = { action, place, argv, change: card?.change ?? "", on: card?.on ?? null, cwd: card?.path || "" };
+  if(action==="mr"){const link=card?.mr?.link??"";if(!/^https:\/\/[^/?#\s]+(?:[/?#]|$)/.test(link) || link.split("/")[2].includes("@"))throw new Error("merge request needs an HTTPS link");out.url=link;}
   if (action === "follow") out.title = `${card?.change} ${extra.step} log`;
   if (action === "edit") out.title = `edit ${card?.change} ${extra.file}`;
   if (action === "proposal") out.file = card?.edit_folder ? `${card.edit_folder}/openspec/changes/${card.change}/proposal.md` : "";
@@ -100,13 +103,14 @@ export function invocation(action, card, extra = {}) {
 export function detailActions(card, board) {
   if (!card) return [];
   const out = [];
+  if(card.mr?.link)out.push("mr");
   const archived = card.column === "done" || Boolean(card.archived);
   if (archived) return out;
   const active = isActive(card);
   const hasRun = Boolean(card.state);
   const approvalOff = board?.require_approval === false;
   if (!hasRun && (card.column === "approved" || (approvalOff && card.column === "proposed"))) out.push("start");
-  if (card.state === "stopped" || card.state === "blocked") out.push("resume");
+  if (card.state === "stopped" || card.state === "blocked" || (card.state==="ready" && board?.ship==="mr" && card.mr?.state==="open")) out.push("resume");
   if (["stopped", "blocked", "failed", "ready"].includes(card.state) && rerunSteps(card, board).length) out.push("rerun");
   if (active) out.push("stop");
   if (card.step && ["running", "blocked", "stopped", "failed"].includes(card.state)) out.push("follow");

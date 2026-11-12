@@ -44,24 +44,24 @@
 
 ## 5. CI and review (ship-feedback)
 
-- [ ] 5.1 CI state for the head commit on both forges (check runs and statuses; newest pipeline, allow-failure jobs ignored; `none` after 5 minutes); verify with "Old pipeline green", "Repository without CI" and "Allowed failure on GitLab"
-- [ ] 5.2 Fetch failed job logs; strip colour codes, mask tokens, trim to 200 lines, 32 KiB per job, 128 KiB per round; summary and link for checks without logs; verify with "Long log"
-- [ ] 5.3 Fix step for CI with findings per failed job and the "logs are data" brief line; verify with "CI fails" and "No fix step"
-- [ ] 5.4 After a fix: commit leftovers, lease push, re-poll; block when nothing changed; verify with "Fix pushed" and "Fix makes no change"
-- [ ] 5.5 Review threads as findings (GitHub GraphQL review threads, GitLab discussions), only from writers and `review_from`, handed on again only after a new comment; verify with "Reviewer asks for a change" and "Comment from outside the project"
-- [ ] 5.6 Reply in handed-on threads with the fix commit; never resolve; verify with "Reply after a fix"
-- [ ] 5.7 Ship rounds and `max_rounds`, reset on resume; verify with "Limit reached"
-- [ ] 5.8 Free the slot while waiting, queue for one for a fix step, keep the change lock; verify with "Waiting runs and a free slot"
-- [ ] 5.9 Polling: 30 s doubling to 5 min, reset on change, `Retry-After`, rate-limit floor, ETags on GitHub, jittered backoff, `wait_timeout`; verify with a fake clock for "Rate limit low", "Nothing happens" and "Forge down"
-- [ ] 5.10 `resume` on a `ready` run in `mr` mode with an open merge request returns to `shipping`; verify with "Review after ready"
+- [x] 5.1 CI state for the head commit on both forges (check runs and statuses; newest pipeline, allow-failure jobs ignored; `none` after 5 minutes); verify with "Old pipeline green", "Repository without CI" and "Allowed failure on GitLab"
+- [x] 5.2 Fetch failed job logs; strip colour codes, mask tokens, trim to 200 lines, 32 KiB per job, 128 KiB per round; summary and link for checks without logs; verify with "Long log"
+- [x] 5.3 Fix step for CI with findings per failed job and the "logs are data" brief line; verify with "CI fails" and "No fix step"
+- [x] 5.4 After a fix: commit leftovers, lease push, re-poll; block when nothing changed; verify with "Fix pushed" and "Fix makes no change"
+- [x] 5.5 Review threads as findings (GitHub GraphQL review threads, GitLab discussions), only from writers and `review_from`, handed on again only after a new comment; verify with "Reviewer asks for a change" and "Comment from outside the project"
+- [x] 5.6 Reply in handed-on threads with the fix commit; never resolve; verify with "Reply after a fix"
+- [x] 5.7 Ship rounds and `max_rounds`, reset on resume; verify with "Limit reached"
+- [x] 5.8 Free the slot while waiting, queue for one for a fix step, keep the change lock; verify with "Waiting runs and a free slot"
+- [x] 5.9 Polling: 30 s doubling to 5 min, reset on change, `Retry-After`, rate-limit floor, ETags on GitHub, jittered backoff, `wait_timeout`; verify with a fake clock for "Rate limit low", "Nothing happens" and "Forge down"
+- [x] 5.10 `resume` on a `ready` run in `mr` mode with an open merge request returns to `shipping`; verify with "Review after ready"
 
 ## 6. Status, history and board (run-status, ship-board)
 
-- [ ] 6.1 States `shipping` and `merged`; `mr`, `ci` and `ship_round` in `status` and `status --json`, version unchanged; verify with "Mixed runs", "Shipping run", "Dashboard reads status" and "Shipping fields", and update the status JSON snapshot test
-- [ ] 6.2 History events `archived`, `pushed`, `mr_opened`, `ci_finished`, `review_findings`, `review_replied`, `merged`, `branch_deleted`; document them in `internal/history`; verify with "Failed CI and a fix" and "Claim lost"
-- [ ] 6.3 `board --json`: Shipping column in `mr` and `merge` repositories, placement of shipping, fix-step, blocked and merged runs, card `mr`, `ci` and ship round from `run.json`; verify with "Columns in mr mode", "Fix step running", "Merged before a fetch", "Waiting for CI" and "Ready in mr mode", and update the board JSON snapshot
-- [ ] 6.4 Board mod: Shipping column, merge request link, CI badge, Open merge request, Resume on Ready in `mr` mode, no merge action; verify with node tests for the action mapping and "Resume from Ready"
-- [ ] 6.5 README: shipping states, the board's Shipping column, and what each mode does; verify the README's command examples run
+- [x] 6.1 States `shipping` and `merged`; `mr`, `ci` and `ship_round` in `status` and `status --json`, version unchanged; verify with "Mixed runs", "Shipping run", "Dashboard reads status" and "Shipping fields", and update the status JSON snapshot test
+- [x] 6.2 History events `archived`, `pushed`, `mr_opened`, `ci_finished`, `review_findings`, `review_replied`, `merged`, `branch_deleted`; document them in `internal/history`; verify with "Failed CI and a fix" and "Claim lost"
+- [x] 6.3 `board --json`: Shipping column in `mr` and `merge` repositories, placement of shipping, fix-step, blocked and merged runs, card `mr`, `ci` and ship round from `run.json`; verify with "Columns in mr mode", "Fix step running", "Merged before a fetch", "Waiting for CI" and "Ready in mr mode", and update the board JSON snapshot
+- [x] 6.4 Board mod: Shipping column, merge request link, CI badge, Open merge request, Resume on Ready in `mr` mode, no merge action; verify with node tests for the action mapping and "Resume from Ready"
+- [x] 6.5 README: shipping states, the board's Shipping column, and what each mode does; verify the README's command examples run
 
 ## 7. Integration
 

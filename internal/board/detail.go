@@ -46,7 +46,7 @@ func readDetail(id, folder string, state statedir.Dir, run *runs.Run) (*Detail, 
 		}
 	}
 	for _, e := range events {
-		d.History = append(d.History, Event{At: timestamp(e.Time), Event: string(e.Kind), Step: e.Step, Round: e.Round, Agent: e.Agent, Machine: e.Machine, Result: string(e.Status), To: e.To, Summary: e.Summary, Findings: e.Findings, Reason: e.Reason, Scope: e.Scope, OldScope: e.OldScope})
+		d.History = append(d.History, Event{At: timestamp(e.Time), Event: string(e.Kind), Step: e.Step, Round: e.Round, Agent: e.Agent, Machine: e.Machine, Result: string(e.Status), To: e.To, Summary: e.Summary, Findings: e.Findings, Reason: e.Reason, Scope: e.Scope, OldScope: e.OldScope, Commit: e.Commit, Branch: e.Branch, Link: e.Link, Number: e.Number, Method: e.Method, ShipRound: e.ShipRound, CI: e.CI, Jobs: e.Jobs, Threads: e.Threads})
 	}
 	d.Rounds = rounds(run, events)
 	roundScopes(d.Rounds, run, events)
