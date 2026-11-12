@@ -111,8 +111,17 @@ func (a App) run(args []string) int {
 			return a.errf("run", "%v", err)
 		}
 		changes = nil
+		gate := &runGate{a: a, repo: repo, cfg: cfg}
 		for _, id := range ids {
 			if err := ospec.Validate(ctx, id); err != nil {
+				fmt.Fprintf(a.Stderr, "tuckerbox run: skipping %s: %v\n", id, err)
+				continue
+			}
+			if err := gate.check(ctx, id); err != nil {
+				var na *notApprovedError
+				if errors.As(err, &na) {
+					fmt.Fprintf(a.Stdout, "%s: skipped, not approved (%s)\n", id, na.State)
+				}
 				fmt.Fprintf(a.Stderr, "tuckerbox run: skipping %s: %v\n", id, err)
 				continue
 			}
@@ -124,6 +133,7 @@ func (a App) run(args []string) int {
 		}
 	} else {
 		bad := false
+		gate := &runGate{a: a, repo: repo, cfg: cfg}
 		for _, id := range changes {
 			if err := statedir.CheckID("change", id); err != nil {
 				a.errf("run", "%v", err)
@@ -131,6 +141,11 @@ func (a App) run(args []string) int {
 				continue
 			}
 			if err := ospec.Validate(ctx, id); err != nil {
+				a.errf("run", "%v", err)
+				bad = true
+				continue
+			}
+			if err := gate.check(ctx, id); err != nil {
 				a.errf("run", "%v", err)
 				bad = true
 			}
