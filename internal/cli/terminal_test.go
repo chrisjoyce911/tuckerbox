@@ -63,12 +63,29 @@ func (f *cliFixture) terminalOf(id string) *agent.HCTerminal {
 	return t
 }
 
-// waitAgent waits until id's step runs in a live terminal.
+// waitAgent waits until id's step runs in an acknowledged live terminal.
 func (f *cliFixture) waitAgent(id, step string) {
 	f.t.Helper()
 	waitFor(f.t, id+" "+step+" in a live terminal", func() bool {
 		r := f.runOf(id)
-		return r.State == runs.Running && r.Step == step && f.terminalOf(id).Live()
+		return r.State == runs.Running && r.Step == step && r.Terminal != nil &&
+			r.Terminal.Address != "" && f.terminalOf(id).Live()
+	})
+}
+
+// waitAdopted waits for the terminal backend to observe the live agent,
+// after the resumed engine's earlier lock acquisition and admission. The
+// caller can then release its gate without turning adoption into a restart.
+func (f *cliFixture) waitAdopted(id, step string) {
+	f.t.Helper()
+	st := mustState(f.t, f.worktreeOf(id))
+	waitFor(f.t, id+" "+step+" adopted in its live terminal", func() bool {
+		r := f.runOf(id)
+		if r.State != runs.Running || r.Step != step || r.Terminal == nil || r.Terminal.Address == "" {
+			return false
+		}
+		want := "adopted live terminal " + r.Terminal.Name + " (" + r.Terminal.Address + ")"
+		return runs.Active(st.RunLock()) && strings.Contains(readLog(f.t, st.Log(step)), want)
 	})
 }
 
@@ -313,28 +330,14 @@ func TestResumeAfterTheRunProcessDied(t *testing.T) {
 	f.plan(map[string]testenv.Action{"build": {WaitFor: f.gate("build"), ExitAfter: true}})
 	f.start("add-login")
 	f.waitAgent("add-login", "build")
-	// The scenario starts after the engine has acknowledged the agent's
-	// terminal, rather than during the launch-intent window.
-	waitFor(t, "the build terminal's address to be recorded", func() bool {
-		r := f.runOf("add-login")
-		return r.Terminal != nil && r.Terminal.Address != ""
-	})
 	addr := f.runOf("add-login").Terminal.Address
 	f.kill("add-login")
 
 	if res := f.tb("resume", "add-login"); res.code != 0 {
 		t.Fatalf("resume: %s%s", res.stdout, res.stderr)
 	}
-	st := mustState(t, f.worktreeOf("add-login"))
-	waitFor(t, "the resumed run to adopt the build terminal", func() bool {
-		// Taking the lock precedes admission and adoption. Opening the
-		// gate at that point can let the original agent exit before the
-		// terminal backend adopts it, changing the scenario into a restart.
-		r := f.runOf("add-login")
-		log := readLog(t, st.Log("build"))
-		return runs.Active(st.RunLock()) && r.State == runs.Running &&
-			strings.Contains(log, "adopted live terminal") && strings.Contains(log, "("+addr+")")
-	})
+	f.waitAdopted("add-login", "build")
+
 	r := f.runOf("add-login")
 	if r.Round != 1 || r.Step != "build" || r.State != runs.Running {
 		t.Errorf("after resume: %s %s round %d", r.State, r.Step, r.Round)
@@ -463,9 +466,7 @@ func TestCrashAnotherAdmittedThenAdoption(t *testing.T) {
 	if res := f.tb("resume", "add-login"); res.code != 0 {
 		t.Fatalf("resume: %s%s", res.stdout, res.stderr)
 	}
-	waitFor(t, "add-login's run process", func() bool {
-		return runs.Active(mustState(t, f.worktreeOf("add-login")).RunLock())
-	})
+	f.waitAdopted("add-login", "build")
 	f.start("add-third")
 	f.waitState("add-third", "queued", "")
 	time.Sleep(1 * time.Second)
@@ -586,9 +587,7 @@ func TestAutopilotAdoptsALiveAgent(t *testing.T) {
 	if res := f.pass(); !strings.Contains(res.stdout, "resume add-login (its run crashed)") {
 		t.Fatalf("pass after the crash:\n%s", res.stdout)
 	}
-	waitFor(t, "the resumed run", func() bool {
-		return runs.Active(mustState(t, f.worktreeOf("add-login")).RunLock())
-	})
+	f.waitAdopted("add-login", "build")
 	if r := f.runOf("add-login"); r.Round != 1 || r.Step != "build" {
 		t.Errorf("after autopilot's resume: %s round %d", r.Step, r.Round)
 	}
@@ -784,6 +783,7 @@ func TestCrashWhileTheTerminalStarts(t *testing.T) {
 	if r := f.runOf("add-login"); r.Round != 1 {
 		t.Errorf("round %d after resume, want 1 (adopted)", r.Round)
 	}
+	f.waitAdopted("add-login", "build")
 	f.open("build")
 	f.waitState("add-login", "ready", "")
 	if got := f.startsOf("add-login"); len(got) != 2 || got[0] != "add-login build 1" {
@@ -834,6 +834,7 @@ func TestCrashWhileAdoptionTakesTheSlot(t *testing.T) {
 	if r := f.runOf("add-login"); r.Round != 1 {
 		t.Errorf("round %d, want 1 (adopted)", r.Round)
 	}
+	f.waitAdopted("add-login", "build")
 	f.open("build")
 	f.waitState("add-login", "ready", "")
 	if got := f.startsOf("add-login"); len(got) != 2 || got[0] != "add-login build 1" {
