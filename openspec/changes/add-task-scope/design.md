@@ -25,7 +25,8 @@
 - **Scopes in parallel.** Two groups of one change never run at once. They
   share a worktree, a branch and tasks.md.
 - **Advancing by itself.** A ready scoped run doesn't start the next group.
-  `add-autopilot` does that with `--tasks next`. A person running groups by
+  `add-autopilot` (proposed) does that with `--tasks next`. A person
+  running groups by
   hand wants to look in between.
 - **Checking which files a step touched.** The brief and the reviewer keep
   the work in scope. Tuckerbox checks only the ticks.
@@ -77,9 +78,33 @@ change must be approved again before scope 2. That is the point at which
 the owner wants to see the change.
 
 ### Dependencies
-A dependent waits for the whole change. A ready run with a scope counts as
-a met dependency only once all of its tasks are ticked. The queued reason
-shows the scope, for example `waiting on A (ready, tasks 1)`.
+A dependent waits for the whole change. Its check must not combine the
+dependency's run state with its live tasks.md. Those are two reads, and A
+can move between them: B reads A as ready after scope 1, A starts scope 2
+and its builder ticks the rest, and B reads a fully ticked tasks.md. B
+would start on work no review has passed, and at no moment was A both
+ready and complete. (`formal/scope.tla`, broken variant
+`scope_broken_split`.)
+
+So completeness is recorded, not read:
+- When a scoped run becomes `ready`, the engine checks whether every task
+  of the change is ticked and writes `complete: true|false` into
+  `run.json` in the same write that sets `ready`. It holds A's change lock,
+  and `run.json` is replaced with a rename, so a reader sees both or
+  neither.
+- Starting another scope writes `queued` and clears `complete` in one
+  write.
+- A dependent reads A's `run.json` once: met when `ready` and `complete`
+  (or `ready` with no scope, as today). It never reads A's tasks.md.
+- Ticks by hand (`tuckerbox tasks`) after a partial run don't release
+  dependents. The rest of the change has to run and pass review.
+
+The queued reason shows the scope, for example `waiting on A (ready,
+tasks 1)`. The existing check again after taking a slot stays as it is.
+
+In `mr` and `merge` modes, `add-forge-shipping` already says a dependency
+counts only once archived on the base branch. That rule wins: ticks and
+`complete` never release dependents there.
 
 ### Brief
 The brief gets a section after the change files:
@@ -119,11 +144,43 @@ requirements stay in `task-scope`, as `add-forge-shipping` does with
 `agent-launch` is archived, so its `Step brief` gets a MODIFIED delta.
 
 ### Shipping
-`add-forge-shipping` isn't built yet. A scoped run that reaches the last
-step in `mr` or `merge` mode must not archive and ship a half-done change.
-`add-autopilot` adds that rule ("partial runs don't ship"), because it
-depends on both changes. Until forge shipping exists, every run ends at
-`ready` in local mode, so nothing ships early.
+`add-forge-shipping` ships a run when its last step reports `done`, and
+shipping starts by archiving the change. A run for group 1 of 3 must never
+do that, so the rule is in this change, not left to a later one:
+- In `mr` or `merge` mode, when the last step reports `done`, the engine
+  records `complete` as above. If it is false, the run becomes `ready` and
+  nothing is archived, pushed, opened or merged. If it is true, the run
+  enters `shipping`.
+- `add-forge-shipping` now depends on this change, and its `Ship modes`
+  requirement defers to this rule. Its tasks include the failure tests
+  (partial run in `merge` mode archives nothing, pushes nothing, opens no
+  merge request).
+- This change is built first. Until forge shipping exists, `ship` accepts
+  only `local`, so no scoped run can ship. The engine's decision ("ready,
+  or go on to ship?") is a function of `complete` and the ship mode, and is
+  unit tested here.
+
+### Ship tasks
+Most tasks.md files end with a task such as "Archive this change once
+accepted". No step can honestly tick it before shipping, and shipping only
+starts once the change is complete. Without a rule, the last group could
+never ship. So a task whose text starts with `(ship)` is a ship task:
+- it is never in a scope or `next`, and doesn't count toward `complete`
+- the brief tells steps not to tick it
+- in `mr` and `merge` modes, the ship stage ticks it in the archive commit,
+  the commit that does the archiving
+- in `local` mode it stays for the person, as today
+
+A marker in the text was chosen over a heading or a sidecar list: it
+travels with the task, and OpenSpec ignores it. Ticks don't change the
+approval hash, so the archive commit's tick keeps the approval.
+
+### Whole-change runs that leave tasks unticked
+A run without a scope keeps today's rule in `local` mode: ready when the
+last step is done. In `mr` and `merge` modes, an incomplete change must not
+ship, and a `ready` run would just be started again and refused, pass
+after pass. So it becomes `blocked`, naming the unticked tasks: a state a
+person sees and `add-autopilot` reports.
 
 ## Risks / Trade-offs
 

@@ -7,14 +7,18 @@ Defines what a run does after its last workflow step when the repository ships t
 ## ADDED Requirements
 
 ### Requirement: Ship modes
-Repository config `ship` SHALL accept `local`, `mr` and `merge`. With `mr` or `merge`, a run whose last step reports `done` SHALL enter state `shipping` and follow the steps in this capability. `local` SHALL keep its current behaviour.
+Repository config `ship` SHALL accept `local`, `mr` and `merge`. With `mr` or `merge`, a run whose last step reports `done` SHALL enter state `shipping` and follow the steps in this capability, unless its change is not complete: then a scoped run SHALL be `ready` and a run without a scope `blocked`, and neither ships (see task-scope). `local` SHALL keep its current behaviour.
 
 #### Scenario: Last step done in mr mode
 - **WHEN** the last workflow step reports `done` and `ship = "mr"`
 - **THEN** the run's state becomes `shipping` and nothing is pushed until the change is archived in the branch
 
+#### Scenario: Partial scope in merge mode
+- **WHEN** `ship = "merge"` and the last step reports `done` for a run with scope `1` while group 2 is unticked
+- **THEN** the run is `ready`; nothing is archived, pushed or merged, and no merge request is opened
+
 ### Requirement: Archive in the merge request
-Before its first push, a shipping run SHALL archive the change on its branch with `openspec archive <change> --yes`, validate all specs strictly, and commit the result, so the archive merges with the work. `[shipping] archive = false` SHALL skip this. A failed archive or validation SHALL block the run with the command's output, and push nothing.
+Before its first push, a shipping run SHALL tick the change's ship tasks (see task-scope), archive the change on its branch with `openspec archive <change> --yes`, validate all specs strictly, and commit the result, so the archive merges with the work. `[shipping] archive = false` SHALL skip this. A failed archive or validation SHALL block the run with the command's output, and push nothing.
 
 #### Scenario: Archive commit
 - **WHEN** a change's last step is done in `mr` mode with the default settings

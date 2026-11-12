@@ -80,12 +80,68 @@ When the last step of a scoped run reports `done`, Tuckerbox SHALL read tasks.md
 - **WHEN** review reports `done` for a run with scope `2` and task 2.3 is not ticked
 - **THEN** the run is `blocked` with reason `scope tasks not ticked: 2.3`
 
+### Requirement: Recording a complete change
+When a run becomes `ready`, Tuckerbox SHALL record in its run state whether the change is complete: every task ticked except ship tasks. It SHALL do so in the same run state write that makes it `ready`, under the change's lock. Starting another scope SHALL clear the record.
+
+#### Scenario: Last group ready
+- **WHEN** review reports `done` for scope `2` and every task of the change is ticked
+- **THEN** the run state is `ready` and records the change as complete, in one write
+
+#### Scenario: Earlier group ready
+- **WHEN** review reports `done` for scope `1` and group 2 is not ticked
+- **THEN** the run state is `ready` and records the change as not complete
+
 ### Requirement: Dependencies wait for the whole change
-For a change that depends on it, a dependency whose run is ready with a scope SHALL count as ready only when every task in its tasks.md is ticked. Until then the dependent run SHALL wait, with the dependency's state and scope as its reason.
+With `ship = "local"`, a dependency's ready run SHALL count as met when it has no scope, as before, or when its run state records the change as complete. A dependent SHALL judge this from that one read of the run state, never from the dependency's tasks.md. Until then it SHALL wait, with the dependency's state and scope as its reason. Model: `formal/scope.tla`, `DependentSeesReviewedWork`.
 
 #### Scenario: Dependency ready for one group
-- **WHEN** change B depends on A, A's run is ready with scope `1`, and A's group 2 is not ticked
+- **WHEN** change B depends on A, and A's run is ready with scope `1` and recorded as not complete
 - **THEN** B stays `queued` with reason `waiting on A (ready, tasks 1)`
+
+#### Scenario: Next group ticked while the dependent checks
+- **WHEN** B depends on A, A is ready with scope `1` and not complete, then A starts scope `2` and its builder ticks every remaining task while B checks its dependencies
+- **THEN** B stays `queued`, because A's run is not `ready` and complete in any single read
+
+#### Scenario: Dependency complete
+- **WHEN** change B depends on A, and A's run is ready with scope `2` and recorded as complete
+- **THEN** B can start
+
+#### Scenario: Ticks by hand don't release dependents
+- **WHEN** A's run is ready with scope `1` and not complete, and a person ticks group 2 with `tuckerbox tasks`
+- **THEN** B keeps waiting until a run of A becomes ready and complete
+
+### Requirement: Ship tasks
+A task whose text starts with `(ship)`, such as archiving the change, SHALL be done by shipping, not by a step. It SHALL NOT be part of a scope or of `next`, and SHALL NOT count when deciding whether a change is complete. A scope naming only ship tasks SHALL be refused. The step brief SHALL say not to tick them.
+
+#### Scenario: Final group with an archive task
+- **WHEN** group 6 has tasks 6.1, 6.2 and `6.3 (ship) Archive this change`, everything else is ticked, and a run with scope `6` ticks 6.1 and 6.2
+- **THEN** the run records the change as complete, although 6.3 is unticked
+
+#### Scenario: Scope of a ship task
+- **WHEN** the user runs `tuckerbox run add-login --tasks 6.3` and 6.3 is a ship task
+- **THEN** it refuses and says 6.3 is done by shipping
+
+### Requirement: Partial runs don't ship
+With a ship mode other than `local` (see add-forge-shipping), a scoped run whose change is not complete when its last step reports `done` SHALL become `ready` and SHALL NOT archive, push, open a merge request or merge. A run that is complete SHALL ship as that mode says. In those modes, a dependency SHALL count as met only once archived on the base branch, whatever its ticks.
+
+#### Scenario: First group in merge mode
+- **WHEN** `ship = "merge"` and a run with scope `1` finishes while group 2 is unticked
+- **THEN** the run is `ready`, nothing is archived, pushed or merged, and no merge request is opened
+
+#### Scenario: Last group in mr mode
+- **WHEN** `ship = "mr"` and a run with scope `2` finishes with every task of the change ticked
+- **THEN** the run enters `shipping`
+
+#### Scenario: Dependents in merge mode
+- **WHEN** `ship = "merge"`, B depends on A, every task of A is ticked, and A's run is `shipping` with its merge request not yet merged
+- **THEN** B keeps waiting until A's archive is on the base branch
+
+### Requirement: Incomplete whole-change runs
+With a ship mode other than `local`, a run without a scope whose change is not complete when its last step reports `done` SHALL be `blocked`, with a reason naming the unticked tasks, and SHALL ship nothing.
+
+#### Scenario: Whole-change run leaves a task
+- **WHEN** `ship = "merge"`, a run without a scope finishes its last step, and task 3.2 is unticked
+- **THEN** the run is `blocked` with reason `tasks not ticked: 3.2`, and nothing is archived or pushed
 
 ### Requirement: Scope in status and history
 `tuckerbox status` SHALL show a run's scope, and `--json` SHALL add `scope` with the scope as typed and its task numbers. History events `started`, `resumed`, `rerun`, `ready` and `blocked` SHALL carry the scope. A new event `scope_started` SHALL record a run starting again for a new scope, with the old and new scopes.
