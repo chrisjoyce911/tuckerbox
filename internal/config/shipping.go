@@ -22,10 +22,13 @@ type ForgeHost struct {
 	Kind           forge.Kind `toml:"kind"`
 	TokenEnv       string     `toml:"token_env"`
 	BorrowCLIToken bool       `toml:"borrow_cli_token"`
+	// Stored is the token from the credentials file, if it holds one for
+	// this host. It is never decoded from config.toml.
+	Stored forge.Token `toml:"-"`
 }
 
 func (h ForgeHost) Credentials() forge.Credentials {
-	return forge.Credentials{TokenEnv: h.TokenEnv, BorrowCLIToken: h.BorrowCLIToken}
+	return forge.Credentials{TokenEnv: h.TokenEnv, Stored: h.Stored, BorrowCLIToken: h.BorrowCLIToken}
 }
 
 type rawShipping struct {
@@ -54,21 +57,7 @@ func shippingPolicy(f *file) {
 				f.problem("forge."+key, "tokens and token sources belong in machine config ([forges.<host>])")
 			}
 		}
-		for _, key := range []string{"machine", "forges"} {
-			if f.defined(key) {
-				f.problem(key, "belongs in machine config")
-			}
-		}
-		f.raw.Machine = nil
-		f.raw.Forges = nil
 	} else {
-		for _, key := range []string{"forge", "shipping"} {
-			if f.defined(key) {
-				f.problem(key, "belongs in repository config (.tuckerbox/config.toml)")
-			}
-		}
-		f.raw.Forge = rawForge{}
-		f.raw.Shipping = rawShipping{}
 		if f.raw.Ship != nil && *f.raw.Ship != "local" {
 			f.problem("ship", "ship = %q belongs in repository config; machine config may set only local", *f.raw.Ship)
 			f.raw.Ship = nil

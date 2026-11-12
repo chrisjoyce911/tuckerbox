@@ -7,8 +7,10 @@ import (
 	"github.com/chrisjoyce911/tuckerbox/internal/forge"
 	"github.com/chrisjoyce911/tuckerbox/internal/gitremote"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -86,20 +88,51 @@ func Load(opts Options) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	var machine *file
-	machinePath := ""
+	var machineData []byte
 	if opts.MachinePath != "" {
 		data, err := os.ReadFile(opts.MachinePath)
 		switch {
 		case err == nil:
-			machinePath = opts.MachinePath
-			machine = parse(machinePath, string(data), false)
+			machineData = data
+			if machineData == nil {
+				machineData = []byte{}
+			}
 		case !errors.Is(err, fs.ErrNotExist):
 			return nil, err
 		}
 	}
+	return LoadData(opts, repoData, machineData)
+}
+
+// LoadData is [Load] on file contents given in memory, as a save would
+// leave them: repoData is the repository config's text and machineData
+// the machine config's, or nil when the machine file is absent. Problems
+// name the files' real paths. The credentials file is read from disk.
+func LoadData(opts Options, repoData, machineData []byte) (*Config, error) {
+	repoPath := filepath.Join(opts.RepoRoot, RepoFile)
+	if repoData == nil {
+		return nil, fmt.Errorf("%s: %w", opts.RepoRoot, ErrNoRepoConfig)
+	}
+	var machine *file
+	machinePath := ""
+	if opts.MachinePath != "" && machineData != nil {
+		machinePath = opts.MachinePath
+		machine = parse(machinePath, string(machineData), false)
+	}
 	repo := parse(repoPath, string(repoData), true)
+	creds, err := readCredentials(CredentialsPath(opts.MachinePath))
+	if err != nil {
+		return nil, err
+	}
+	files := Files{
+		Repo:        fileInfo(repo, repoData),
+		Credentials: creds.info,
+	}
+	if machine != nil {
+		files.Machine = fileInfo(machine, machineData)
+	} else {
+		files.Machine = FileInfo{Path: opts.MachinePath}
+	}
 	if repo.broken || (machine != nil && machine.broken) {
 		// Checks on a half-read file only add noise; report what stopped
 		// decoding.
@@ -108,12 +141,34 @@ func Load(opts Options) (*Config, error) {
 			ps = append(ps, machine.problems...)
 		}
 		ps = append(ps, repo.problems...)
-		return &Config{RepoRoot: opts.RepoRoot, RepoPath: repoPath, MachinePath: machinePath}, ps
+		ps = append(ps, creds.problems...)
+		// Report what the files that did decode set.
+		var mv, rv *file
+		if machine != nil && !machine.broken {
+			mv = machine
+		}
+		if !repo.broken {
+			rv = repo
+		}
+		return &Config{RepoRoot: opts.RepoRoot, RepoPath: repoPath, MachinePath: machinePath,
+			Files: files, Values: values(mv, rv, creds, nil)}, ps
 	}
 
 	cfg, problems := resolve(opts.RepoRoot, opts.Remote, machine, repo)
 	cfg.RepoPath = repoPath
 	cfg.MachinePath = machinePath
+	cfg.Files = files
+	problems = append(problems, creds.problems...)
+	for host, tok := range creds.tokens {
+		h := cfg.Forges[host]
+		h.Stored = forge.StoredToken(tok)
+		cfg.Forges[host] = h
+	}
+	workflow := make([]string, len(cfg.Steps))
+	for i, s := range cfg.Steps {
+		workflow[i] = s.ID
+	}
+	cfg.Values = values(machine, repo, creds, workflow)
 	if len(problems) == 0 && cfg.Ship != ShipLocal {
 		remote := opts.Remote
 		var lookupErr error
@@ -141,11 +196,21 @@ func Load(opts Options) (*Config, error) {
 	return cfg, nil
 }
 
+func fileInfo(f *file, data []byte) FileInfo {
+	info := FileInfo{Path: f.path, Exists: true, Revision: Revision(data)}
+	if f.broken && len(f.problems) > 0 {
+		p := f.problems[0]
+		info.Error = &p
+	}
+	return info
+}
+
 // file is one parsed config file.
 type file struct {
 	path     string
 	repo     bool
 	raw      rawFile
+	tree     map[string]any // the file as decoded TOML, for sources
 	defined  func(key ...string) bool
 	problems Problems
 	broken   bool // the file could not be decoded; its other checks are skipped
@@ -265,6 +330,9 @@ func parse(path, data string, repo bool) *file {
 		return f
 	}
 	f.defined = md.IsDefined
+	// The same text as a plain tree, for reporting each key's value and
+	// source. It decoded above, so it decodes here.
+	_, _ = toml.Decode(data, &f.tree)
 	shippingPolicy(f)
 
 	undecoded := map[string]bool{}
@@ -277,6 +345,9 @@ func parse(path, data string, repo bool) *file {
 		}
 		name := k[len(k)-1]
 		switch {
+		case !repo && name == "token" && len(k) == 3 && k[0] == "forges":
+			// Never quote the value: it is a token.
+			f.problem(k.String(), "tokens belong in the credentials file, not config.toml; remove this line and run `tuckerbox config set --machine %s` to store it", JoinKey(k))
 		case name == "token" || name == "token_env" || name == "borrow_cli_token":
 			f.problem(k.String(), "tokens and token sources belong in machine config ([forges.<host>])")
 		case slices.Contains(rawArgKeys, name):
@@ -290,30 +361,35 @@ func parse(path, data string, repo bool) *file {
 		}
 	}
 
-	if repo {
-		if md.IsDefined("permissions") {
-			f.problem("permissions", "permission profiles are machine-only; define them in machine config and name them from a step with permissions = \"<profile>\"")
-			f.raw.Permissions = nil
+	checkScopes(f, md)
+	return f
+}
+
+// checkScopes refuses every top-level key the key table gives the other
+// file's scope, and drops its value so nothing later uses it.
+func checkScopes(f *file, md toml.MetaData) {
+	tops := scopeTops()
+	for _, top := range slices.Sorted(maps.Keys(tops)) {
+		scope := tops[top]
+		wrong := (f.repo && scope == ScopeMachine) || (!f.repo && scope == ScopeRepo)
+		if !wrong || !md.IsDefined(top) {
+			continue
 		}
-		if md.IsDefined("editor") {
-			f.problem("editor", "editor is machine-only; set it in machine config")
-			f.raw.Editor = nil
-		}
-		if md.IsDefined("agent_backend") {
-			f.problem("agent_backend", "agent_backend belongs in machine config: whether herdr-core is installed and running is a fact about the machine")
-			f.raw.AgentBackend = nil
-		}
-	} else {
-		if md.IsDefined("require_approval") {
-			f.problem("require_approval", "require_approval belongs in repository config (.tuckerbox/config.toml), so every machine applies the same gate")
-			f.raw.RequireApproval = nil
-		}
-		if md.IsDefined("overrides") {
-			f.problem("overrides", "[overrides] belongs in repository config (.tuckerbox/config.toml), so every machine allows the same change overrides")
-			f.raw.Overrides = nil
+		f.problem(top, "%s", WrongFileMessage(top, scope))
+		clearTop(&f.raw, top)
+		delete(f.tree, top)
+	}
+}
+
+// clearTop zeroes the field of raw decoded from the top-level key top.
+func clearTop(raw *rawFile, top string) {
+	v := reflect.ValueOf(raw).Elem()
+	for i := 0; i < v.NumField(); i++ {
+		if tag, _, _ := strings.Cut(v.Type().Field(i).Tag.Get("toml"), ","); tag == top {
+			v.Field(i).SetZero()
+			return
 		}
 	}
-	return f
 }
 
 func parentUndecoded(k toml.Key, undecoded map[string]bool) bool {

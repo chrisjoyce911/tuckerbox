@@ -134,6 +134,12 @@ type Config struct {
 	// MachinePath is the machine config file that was read, or "" if there
 	// was none.
 	MachinePath string
+	// Files describes the repository, machine and credentials files as
+	// they were read, with their revisions.
+	Files Files
+	// Values is every key's effective value and source, in key-table
+	// order (see [Keys]).
+	Values []Value
 	// Remote is the repository remote that permission profiles were matched
 	// against (origin, or the only remote; see [Remote]), normalised by
 	// [NormalizeRemote]; "" if the repository has none.

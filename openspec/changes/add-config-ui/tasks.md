@@ -2,9 +2,9 @@
 
 ## 1. Key table and sources (repo-config, config-cli)
 
-- [ ] 1.1 Gather every key the loader knows into one table (path, type, allowed values, scope, default, secret); make `check`'s repository-only and machine-only rules read it; a unit test fails when the loader accepts a key the table lacks
-- [ ] 1.2 Test "Scopes agree" (for every `machine` and `repo` row, `check` refuses it in the other file)
-- [ ] 1.3 Track each effective value's source (`repo`, `machine`, `default`) and the machine value it overrode in the merged config
+- [x] 1.1 Gather every key the loader knows into one table (path, type, allowed values, scope, default, secret); make `check`'s repository-only and machine-only rules read it; a unit test fails when the loader accepts a key the table lacks
+- [x] 1.2 Test "Scopes agree" (for every `machine` and `repo` row, `check` refuses it in the other file)
+- [x] 1.3 Track each effective value's source (`repo`, `machine`, `default`) and the machine value it overrode in the merged config
 - [ ] 1.4 `tuckerbox config show` and `--json` (key, value, source, scope, file, allowed values; each file's path and revision), machine-scope keys under "this machine only" with the machine's name; document in README
 - [ ] 1.5 Test "Repository value wins"
 - [ ] 1.6 Test "Built-in default"
