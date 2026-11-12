@@ -518,6 +518,13 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 			// The agent ended before its slot was free: a new round, admitted
 			// as any other run.
 			e.logf(req.Change, "the agent in terminal %s ended before it could be adopted; starting a new round", adopt.Name)
+			// Its session goes to the step log before run.json lets the
+			// terminal go: the new round starts in a terminal of the same
+			// name. One left live but no longer of this step is ended first.
+			if err := e.endLeftover(ctx, ws, req.Change, adopt.Name, true); err != nil {
+				return e.unwatched(ws, rs, &agent.EndError{Name: adopt.Name, Err: err})
+			}
+			rs.Terminal, rs.Slot, rs.AgentState = nil, nil, ""
 			rs.Round++
 			if err := e.save(ws, rs); err != nil {
 				return rs, err

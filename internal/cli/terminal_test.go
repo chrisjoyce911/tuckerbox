@@ -1230,3 +1230,56 @@ func TestOrphanEndsThenResumeKeepsItsSession(t *testing.T) {
 		t.Errorf("logs after the step lacks the orphan's session:\n%s%s", res.stdout, res.stderr)
 	}
 }
+
+// An orphaned agent that ends while a resume waits to take its slot back
+// (another process holds slot 0's run lock): resume starts a new round in a
+// terminal of the same name, and first appends the ended terminal's history
+// to the step log, so the orphan's session is not lost when the new
+// terminal replaces it.
+func TestOrphanEndsWhileAdoptionTakesTheSlot(t *testing.T) {
+	f := newTermCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}, MaxParallel: 1})
+	f.plan(map[string]testenv.Action{"build": {WaitFor: f.gate("orphan"), Status: "none", ExitAfter: true}})
+	f.start("add-login")
+	f.waitAgent("add-login", "build")
+	name := f.runOf("add-login").Terminal.Name
+	f.kill("add-login")
+
+	admission := flock.New(runs.SlotLock(f.common(), 0))
+	if ok, err := admission.TryLock(); !ok || err != nil {
+		t.Fatalf("slot 0's run lock: %v %v", ok, err)
+	}
+	defer admission.Unlock()
+	if res := f.tb("resume", "add-login"); res.code != 0 {
+		t.Fatalf("resume: %s%s", res.stdout, res.stderr)
+	}
+	waitFor(t, "the adopting resume to wait for its slot", func() bool {
+		return runs.Active(mustState(t, f.worktreeOf("add-login")).RunLock()) && f.runOf("add-login").State == runs.Queued
+	})
+	f.open("orphan")
+	waitFor(t, "the orphaned agent to end", func() bool {
+		term, _ := f.hc().Get(context.Background(), name)
+		return term != nil && !term.Live()
+	})
+	waitFor(t, "the resume to give up adopting the ended agent", func() bool { return f.runOf("add-login").Round == 2 })
+	f.plan(map[string]testenv.Action{"build": {WaitFor: f.gate("build2"), ExitAfter: true}})
+	_ = admission.Unlock()
+
+	waitFor(t, "the resumed build agent", func() bool { return len(f.startsOf("add-login")) == 2 })
+	f.waitAgent("add-login", "build")
+	want := []string{"history of terminal " + name, "fakeagent: add-login build round 1"}
+	log := readLog(t, mustState(t, f.worktreeOf("add-login")).Log("build"))
+	for _, w := range want {
+		if !strings.Contains(log, w) {
+			t.Errorf("build log after the new round started lacks %q:\n%s", w, log)
+		}
+	}
+	if n := strings.Count(log, "history of terminal "+name); n != 1 {
+		t.Errorf("the orphan's history is in the build log %d times, want once:\n%s", n, log)
+	}
+	f.open("build2")
+	waitFor(t, "the resumed build to finish", func() bool { return len(f.runOf("add-login").History) > 0 })
+	res := f.tb("logs", "add-login", "build")
+	if !strings.Contains(res.stdout, "fakeagent: add-login build round 1") {
+		t.Errorf("logs after the step lacks the orphan's session:\n%s%s", res.stdout, res.stderr)
+	}
+}
