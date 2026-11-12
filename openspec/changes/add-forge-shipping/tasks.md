@@ -67,7 +67,7 @@
 
 - [x] 7.1 End to end through both real HTTP clients against local TLS GitHub/GitLab fakes and a local bare git remote (no real forge API calls): `mr` mode to green, a failing CI fixed by `fix_ci`, a review thread fixed and answered, `merge` mode to a pinned merge; record results in the merge request
 - [x] 7.2 Two machines (or two state directories) ship the same change at once; one ships, the other is `blocked` with `claimed by` when the winning marker is visible, or a branch-race reason before the merge request exists
-- [ ] 7.3 `go vet ./...`, `go test -race ./...`, `CGO_ENABLED=0 go build ./...` and `scripts/tla-check.sh` pass on Linux, macOS and Windows CI
+- [x] 7.3 `go vet ./...`, `go test -race ./...`, `CGO_ENABLED=0 go build ./...` and `scripts/tla-check.sh` pass on Linux, macOS and Windows CI
 
 ## Workflow follow-up
 
