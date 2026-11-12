@@ -25,13 +25,13 @@
 
 ## 4. Approval (change-approval)
 
-- [ ] 4.1 Approval hash: SHA-256 over proposal, design, model, tasks and `specs/**/spec.md` in path order, with path and length per file; LF line endings; task checkboxes read as unchecked
-- [ ] 4.2 Approval state `approved`, `stale` or `none` from the `[approval]` table and the files
-- [ ] 4.3 `tuckerbox approve <change>`: validate strictly, refuse invalid, write `[approval]` (hash, git `user.name`, RFC 3339 time) keeping other keys and comments; say it isn't committed
-- [ ] 4.4 `tuckerbox unapprove <change>`: remove `[approval]`, keep the rest, no-op when absent
-- [ ] 4.5 `require_approval` repository key, default `true`; `tuckerbox check` fails when machine config sets it
-- [ ] 4.6 Run gate in `tuckerbox run`: judge the worktree's files, else the base branch's after fetch via `git show`; refuse `none` or `stale` before making a worktree; mention an uncommitted approval in the checkout; `--all` skips and lists
-- [ ] 4.7 Tests for each change-approval scenario, including hash fixtures shared across macOS, Linux and Windows CI
+- [x] 4.1 Approval hash: SHA-256 over proposal, design, model, tasks and `specs/**/spec.md` in path order, with path and length per file; LF line endings; task checkboxes read as unchecked
+- [x] 4.2 Approval state `approved`, `stale` or `none` from the `[approval]` table and the files
+- [x] 4.3 `tuckerbox approve <change>`: validate strictly, refuse invalid, write `[approval]` (hash, git `user.name`, RFC 3339 time) keeping other keys and comments; say it isn't committed
+- [x] 4.4 `tuckerbox unapprove <change>`: remove `[approval]`, keep the rest, no-op when absent
+- [x] 4.5 `require_approval` repository key, default `true`; `tuckerbox check` fails when machine config sets it
+- [x] 4.6 Run gate in `tuckerbox run`: judge the worktree's files, else the base branch's after fetch, read from git (`git cat-file`, the committed bytes); refuse `none` or `stale` before making a worktree; mention an uncommitted approval in the checkout; `--all` skips and lists
+- [x] 4.7 Tests for each change-approval scenario, including hash fixtures shared across macOS, Linux and Windows CI
 
 ## 5. Board data (board-data)
 
