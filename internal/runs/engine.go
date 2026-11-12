@@ -127,12 +127,18 @@ type Engine struct {
 	// Gate, when set, may refuse a Start request (the approval run gate).
 	// It judges the commit a new worktree will be made at, before it is
 	// made, and the worktree's files again once the change lock is held,
-	// before the run state changes. Resume and Rerun are not gated.
+	// before the run state changes. Resume and Rerun are not gated on the
+	// text (see SettingsGate).
 	Gate func(ctx context.Context, change string, at StartPoint) error
 	// ResumeGate, when set, judges a conditional (Expect) Resume under the
 	// change lock: autopilot resumes a crashed run only while the change's
 	// approval is not withdrawn (approved or stale, not none).
 	ResumeGate func(ctx context.Context, change, worktree string) error
+	// SettingsGate, when set, judges every Resume and Rerun under the
+	// change lock, before the run state changes: it refuses a change whose
+	// approved agent or permissions overrides changed (change-settings:
+	// Resume checks approved settings).
+	SettingsGate func(ctx context.Context, change, worktree string) error
 
 	mu      sync.Mutex
 	saved   Run
@@ -268,6 +274,11 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 		// Under the change lock, which approve and unapprove also take:
 		// what is judged here is what the run starts with.
 		if err := e.Gate(ctx, req.Change, StartPoint{Worktree: ws.Path}); err != nil {
+			return nil, err
+		}
+	}
+	if req.Mode != Start && e.SettingsGate != nil {
+		if err := e.SettingsGate(ctx, req.Change, ws.Path); err != nil {
 			return nil, err
 		}
 	}

@@ -69,7 +69,14 @@ func (a App) approve(args []string) int {
 		if err != nil {
 			return err
 		}
-		ap = approval.Entry{State: approval.EntryApproved, Hash: hash, By: by, At: time.Now().Truncate(time.Second)}
+		// The approval also covers the change's agent and permissions
+		// overrides: changing one later makes it stale.
+		lines, shash, err := approval.Settings(approval.DirOf(p.Dir, change))
+		if err != nil {
+			return err
+		}
+		ap = approval.Entry{State: approval.EntryApproved, Hash: hash, SettingsHash: shash, Settings: lines,
+			By: by, At: time.Now().Truncate(time.Second)}
 		pubErr = approval.Store{Dir: p.Dir}.Record(ctx, change, ap)
 		if errors.Is(pubErr, approval.ErrOffline) {
 			return nil
@@ -84,6 +91,9 @@ func (a App) approve(args []string) int {
 		return a.errf("approve", "change %s is not valid; fix it before approving. Nothing changed", change)
 	}
 	fmt.Fprintf(a.Stdout, "approved %s as in %s (by %s at %s, %s)\n", change, p.Describe(), ap.By, ap.At.Format(time.RFC3339), ap.Hash)
+	if len(ap.Settings) > 0 {
+		fmt.Fprintf(a.Stdout, "with its overrides %s; changing an agent or permissions override makes the approval stale\n", strings.Join(ap.Settings, ", "))
+	}
 	published(a, pubErr)
 	return 0
 }
@@ -277,8 +287,8 @@ func gateError(change string, st approval.Status, where, note string) error {
 	case approval.Approved:
 		return nil
 	case approval.Stale:
-		msg = fmt.Sprintf("change %s: approval is stale %s: its text changed since %s approved it at %s; review it and run tuckerbox approve %s",
-			change, where, st.Approval.By, st.Approval.At.Format(time.RFC3339), change)
+		msg = fmt.Sprintf("change %s: approval is stale %s: %s since %s approved it at %s; review it and run tuckerbox approve %s",
+			change, where, st.StaleReason(), st.Approval.By, st.Approval.At.Format(time.RFC3339), change)
 	default:
 		msg = fmt.Sprintf("change %s: not approved: there is no approval %s; run tuckerbox approve %s", change, where, change)
 		if ref, ok := strings.CutPrefix(where, "on the base branch "); ok {
@@ -288,6 +298,29 @@ func gateError(change string, st approval.Status, where, note string) error {
 		}
 	}
 	return &notApprovedError{State: st.State, msg: msg + note}
+}
+
+// settingsGate refuses to resume or re-run change, in its worktree, when
+// approval is required and the change's agent or permissions overrides
+// changed since it was approved (change-settings: Resume checks approved
+// settings). A stale text hash alone does not stop it: a plan step may
+// rewrite the design and must not block its own run. A change with no
+// approval is not refused here, as before.
+func settingsGate(ctx context.Context, root, change, worktree string) error {
+	entry, err := refEntry(ctx, root, change)
+	if err != nil {
+		return fmt.Errorf("change %s: reading %s: %v", change, approval.RefName, err)
+	}
+	st, err := approval.JudgeWith(approval.DirOf(worktree, change), entry)
+	if err != nil {
+		return fmt.Errorf("change %s: reading its approval in %s: %v", change, worktree, err)
+	}
+	if st.Approval == nil || len(st.SettingsChanged) == 0 {
+		return nil
+	}
+	return &notApprovedError{State: approval.Stale, msg: fmt.Sprintf(
+		"change %s: %s changed since %s approved it at %s; review the change and run tuckerbox approve %s again, or set the override back",
+		change, strings.Join(st.SettingsChanged, ", "), st.Approval.By, st.Approval.At.Format(time.RFC3339), change)}
 }
 
 // notApprovedError is a change the run gate refuses.

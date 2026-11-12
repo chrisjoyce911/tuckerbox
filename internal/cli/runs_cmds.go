@@ -407,6 +407,9 @@ func (a App) newEngine(repo runs.Repo, cfg *config.Config, log io.Writer) *runs.
 	}
 	if cfg.RequireApproval {
 		e.Gate = approvalGate(repo)
+		e.SettingsGate = func(ctx context.Context, change, worktree string) error {
+			return settingsGate(ctx, repo.Root, change, worktree)
+		}
 		e.ResumeGate = func(ctx context.Context, change, worktree string) error {
 			// The approvals ref wins over the sidecar, as in the run gate.
 			entry, err := refEntry(ctx, repo.Root, change)
@@ -610,6 +613,11 @@ func (a App) restart(cmd string, fg bool, change string, req runs.Request) int {
 	// under the change lock.
 	if err := runs.CheckOverrides(context.Background(), cfg, repo.Root, change, runs.StartPoint{Worktree: req.Worktree}); err != nil {
 		return a.errf(cmd, "%v", err)
+	}
+	if cfg.RequireApproval {
+		if err := settingsGate(context.Background(), repo.Root, change, req.Worktree); err != nil {
+			return a.errf(cmd, "%v", err)
+		}
 	}
 	if fg {
 		return a.foreground(repo, cfg, req)

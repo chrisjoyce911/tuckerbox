@@ -194,3 +194,45 @@ func TestStepStartRefusesProfileNotGranted(t *testing.T) {
 		t.Errorf("agent starts %v, want only build", starts)
 	}
 }
+
+// change-settings, Resume checks approved settings: the engine's
+// SettingsGate judges every Resume and Rerun under the change lock, before
+// the run state changes, and never a Start.
+func TestSettingsGateOnResumeAndRerun(t *testing.T) {
+	f := setup(t, testenv.RepoOptions{Changes: []string{"add-login"}})
+	f.env.SetPlan(t, map[string]testenv.Action{"review:1": {Status: "blocked"}})
+	var asked []string
+	refuse := func(_ context.Context, change, worktree string) error {
+		asked = append(asked, change+" "+filepath.Base(worktree))
+		return errors.New("step.review.agent changed since approval")
+	}
+	e := f.engine()
+	e.SettingsGate = refuse
+	r, err := e.Run(context.Background(), Request{Change: "add-login"})
+	if err != nil || r.State != Blocked || len(asked) != 0 {
+		t.Fatalf("start: %+v %v, gate asked %q", r, err, asked)
+	}
+	before := *f.current("add-login")
+	for _, req := range []Request{
+		{Change: "add-login", Mode: Resume, Worktree: f.worktree("add-login")},
+		{Change: "add-login", Mode: Rerun, Step: "build", Worktree: f.worktree("add-login")},
+	} {
+		e := f.engine()
+		e.SettingsGate = refuse
+		if _, err := e.Run(context.Background(), req); err == nil || !strings.Contains(err.Error(), "step.review.agent") {
+			t.Errorf("mode %v: %v", req.Mode, err)
+		}
+		if now := f.current("add-login"); now.State != Blocked || !now.Since.Equal(before.Since) || now.Round != before.Round {
+			t.Errorf("mode %v changed the run: %+v", req.Mode, now)
+		}
+	}
+	if len(asked) != 2 {
+		t.Errorf("gate asked %q", asked)
+	}
+	f.env.SetPlan(t, map[string]testenv.Action{})
+	e = f.engine()
+	e.SettingsGate = func(context.Context, string, string) error { return nil }
+	if r, err := e.Run(context.Background(), Request{Change: "add-login", Mode: Resume, Worktree: f.worktree("add-login")}); err != nil || r.State != Ready {
+		t.Errorf("allowed resume: %+v %v", r, err)
+	}
+}
