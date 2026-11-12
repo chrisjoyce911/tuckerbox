@@ -19,6 +19,7 @@ func TestRewrite(t *testing.T) {
 		{"array", "[workflow]\nsteps = [\n  \"build\", # here\n  \"review\",\n] # order\n# end\n", Edit{Path: []string{"workflow", "steps"}, Value: []string{"review", "build"}}, "[workflow]\nsteps = [\"review\", \"build\"] # order\n# end\n"},
 		{"remove step", "# keep\n[steps.build]\nagent = \"codex\"\n[steps.review]\nagent = \"claude\"\n", Edit{Path: []string{"steps", "build"}, Unset: true}, "# keep\n[steps.review]\nagent = \"claude\"\n"},
 		{"remove last", "[steps.build]\n# keep\nagent = \"codex\"\n", Edit{Path: []string{"steps", "build", "agent"}, Unset: true}, "# keep\n"},
+		{"multiline string comment", "editor = \"\"\"\ncode \"inside\" # string content\n\"\"\" # retained\n", Edit{Path: []string{"editor"}, Value: "code --wait"}, "editor = \"code --wait\" # retained\n"},
 		{"untouched empty table", "max_parallel = 1\n[steps.empty]\n# keep\n", Edit{Path: []string{"max_parallel"}, Unset: true}, "[steps.empty]\n# keep\n"},
 		{"quoted host", "[forges.\"git.example.org\"]\nkind = \"gitlab\"\n", Edit{Path: []string{"forges", "git.example.org", "token"}, Value: "secret"}, "[forges.\"git.example.org\"]\nkind = \"gitlab\"\ntoken = \"secret\"\n"},
 	}

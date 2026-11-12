@@ -166,25 +166,53 @@ func encode(v any) (string, error) {
 	}
 	return strings.TrimSpace(s), nil
 }
+
+// comment returns a comment on the final line of a complete statement.
+// Track multiline strings from their opening delimiter, so their closing
+// quotes do not hide a following comment or expose a # inside the value.
 func comment(s string) string {
-	var q byte
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if q != 0 {
-			if c == '\\' && q == '"' {
-				i++
+	s = strings.TrimRight(s, "\r\n")
+	lastLine := strings.LastIndexByte(s, '\n') + 1
+	delim := ""
+	for i := 0; i < len(s); {
+		if delim != "" {
+			if delim[0] == '"' && s[i] == '\\' {
+				i += 2
 				continue
 			}
-			if c == q {
-				q = 0
+			if strings.HasPrefix(s[i:], delim) {
+				i += len(delim)
+				// TOML permits one or two quote characters immediately
+				// before a multiline string's closing triple delimiter.
+				if len(delim) == 3 {
+					for i < len(s) && s[i] == delim[0] {
+						i++
+					}
+				}
+				delim = ""
+			} else {
+				i++
 			}
 			continue
 		}
-		if c == '"' || c == '\'' {
-			q = c
-		}
-		if c == '#' {
-			return strings.TrimRight(s[i:], "\r\n")
+		switch s[i] {
+		case '#':
+			if i >= lastLine {
+				return s[i:]
+			}
+			end := strings.IndexByte(s[i:], '\n')
+			if end < 0 {
+				return ""
+			}
+			i += end + 1
+		case '"', '\'':
+			delim = string(s[i])
+			if strings.HasPrefix(s[i:], strings.Repeat(delim, 3)) {
+				delim = strings.Repeat(delim, 3)
+			}
+			i += len(delim)
+		default:
+			i++
 		}
 	}
 	return ""
@@ -248,7 +276,7 @@ func rewriteOne(data []byte, e Edit) ([]byte, error) {
 				found = true
 				indent := lines[s.start][:len(lines[s.start])-len(strings.TrimLeft(lines[s.start], " \t"))]
 				suffix := ""
-				if c := comment(lines[s.end-1]); c != "" {
+				if c := comment(strings.Join(lines[s.start:s.end], "")); c != "" {
 					suffix = " " + c
 				}
 				ending := ""
