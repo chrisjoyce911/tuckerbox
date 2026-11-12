@@ -41,11 +41,16 @@ type Env struct {
 	// Mod is the mod to install, with its files at its root; nil means the
 	// one this binary embeds.
 	Mod fs.FS
+	// Do runs `herdr-app do <command> <args>` against the running window
+	// (layout.clone and layout.switch for the drawer). Tests replace it.
+	Do func(ctx context.Context, command string, args map[string]any) (string, error)
+	// GOOS picks the toggle key's spelling (cmd- on macOS); "" is this one.
+	GOOS string
 }
 
 // SystemEnv uses the real environment and herdr-app.
 func SystemEnv() Env {
-	return Env{Getenv: os.Getenv, UserHome: os.UserHomeDir, Check: herdrAppCheck}
+	return Env{Getenv: os.Getenv, UserHome: os.UserHomeDir, Check: herdrAppCheck, Do: herdrAppDo}
 }
 
 func herdrAppCheck(ctx context.Context, dir string) (string, error) {
@@ -69,6 +74,9 @@ func (e Env) withDefaults() Env {
 	}
 	if e.Check == nil {
 		e.Check = s.Check
+	}
+	if e.Do == nil {
+		e.Do = s.Do
 	}
 	return e
 }
@@ -218,7 +226,16 @@ func Install(ctx context.Context, env Env, version, commit string) (Result, erro
 	if old != "" {
 		os.RemoveAll(old)
 	}
-	return res, nil
+	// The record lets tuckerbox herdr uninstall remove exactly this.
+	err = updateRecord(home, func(r *Record) {
+		for _, m := range r.Mods {
+			if m == herdr.ModName {
+				return
+			}
+		}
+		r.Mods = append(r.Mods, herdr.ModName)
+	})
+	return res, err
 }
 
 func copyFS(dst string, src fs.FS) error {

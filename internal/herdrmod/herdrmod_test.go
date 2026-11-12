@@ -55,7 +55,7 @@ func TestEmbeddedModHasItsFilesOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"main.js", "mod.json", "board.js", "card.js", "actions.js", "model.js", "spinner.svg", "fixtures/board.json", "fixtures/detail.json"} {
+	for _, want := range []string{"main.js", "mod.json", "keys.json", "board.js", "card.js", "drawer.js", "actions.js", "model.js", "spinner.svg", "fixtures/board.json", "fixtures/detail.json"} {
 		if _, err := fs.Stat(mod, want); err != nil {
 			t.Errorf("embedded mod lacks %s", want)
 		}

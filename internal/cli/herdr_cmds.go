@@ -10,13 +10,35 @@ import (
 	"github.com/chrisjoyce911/tuckerbox/internal/version"
 )
 
-// herdr: tuckerbox herdr install
+const herdrUsage = "usage: tuckerbox herdr install [--keys [--key <key>]] [--drawer] | tuckerbox herdr uninstall"
+
+// herdr: tuckerbox herdr install [--keys [--key <key>]] [--drawer], tuckerbox herdr uninstall
 func (a App) herdr(args []string) int {
-	if len(args) != 1 || args[0] != "install" {
-		return a.usageErr("herdr", "usage: tuckerbox herdr install")
+	var keys, drawer bool
+	var key string
+	pos, err := parseArgs(args, map[string]*bool{"keys": &keys, "drawer": &drawer}, map[string]*string{"key": &key})
+	if err != nil || len(pos) != 1 {
+		return a.usageErr("herdr", herdrUsage)
 	}
+	switch pos[0] {
+	case "install":
+		if key != "" && !keys {
+			return a.usageErr("herdr", "--key needs --keys")
+		}
+		return a.herdrInstall(herdrmod.Options{Keys: keys, Key: key, Drawer: drawer})
+	case "uninstall":
+		if keys || drawer || key != "" {
+			return a.usageErr("herdr", "uninstall takes no flags: it undoes what install recorded")
+		}
+		return a.herdrUninstall()
+	}
+	return a.usageErr("herdr", herdrUsage)
+}
+
+func (a App) herdrInstall(opt herdrmod.Options) int {
 	info := version.Get()
-	res, err := herdrmod.Install(context.Background(), a.HerdrEnv, info.Version, info.Commit)
+	ctx := context.Background()
+	res, err := herdrmod.Install(ctx, a.HerdrEnv, info.Version, info.Commit)
 	var ce *herdrmod.CheckError
 	switch {
 	case errors.Is(err, herdrmod.ErrNoHerdr):
@@ -37,6 +59,28 @@ func (a App) herdr(args []string) int {
 	} else {
 		fmt.Fprintln(a.Stdout, "herdr-app not found, so the mod wasn't checked; Herdr loads it when it next starts or reloads mods")
 	}
+	did, err := herdrmod.InstallExtras(ctx, a.HerdrEnv, opt)
+	for _, d := range did {
+		fmt.Fprintln(a.Stdout, d)
+	}
+	if err != nil {
+		return a.errf("herdr install", "%v", err)
+	}
+	return 0
+}
+
+func (a App) herdrUninstall() int {
+	did, err := herdrmod.Uninstall(context.Background(), a.HerdrEnv)
+	for _, d := range did {
+		fmt.Fprintln(a.Stdout, d)
+	}
+	switch {
+	case errors.Is(err, herdrmod.ErrNoHerdr), errors.Is(err, herdrmod.ErrNothingInstalled):
+		return a.errf("herdr uninstall", "%v; nothing was changed", err)
+	case err != nil:
+		return a.errf("herdr uninstall", "%v", err)
+	}
+	fmt.Fprintln(a.Stdout, "uninstalled; close any board panes you docked, they have no mod now")
 	return 0
 }
 
