@@ -100,6 +100,13 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 			if step, ok := cfg.Step(r.Step); ok {
 				c.Agent = step.Agent
 			}
+			if hasActivity(r.State) && !r.ShippingStarted {
+				var events []history.Event
+				if p.State != "" {
+					events, _ = history.Read(history.File(p.State))
+				}
+				c.Activity = readActivity(ctx, cfg, r, folder, p.State, events, doc.Machine)
+			}
 			switch r.State {
 			case runs.Queued:
 				c.Column = "queued"

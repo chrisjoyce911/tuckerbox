@@ -77,6 +77,9 @@ type Card struct {
 	Position int    `json:"position,omitempty"`
 	// Scope is the card's run's task scope; absent for the whole change.
 	Scope *scope.Scope `json:"scope,omitempty"`
+	// Activity is what the run's agent is doing, on cards whose run is
+	// running, queued or stopped (agent-activity).
+	Activity *Activity `json:"activity,omitempty"`
 }
 type Detail struct {
 	Change   string  `json:"change"`
@@ -87,6 +90,9 @@ type Detail struct {
 	History  []Event `json:"history"`
 	// Groups are tasks.md's task groups, in order.
 	Groups []Group `json:"groups"`
+	// Ticks are the current run's task_ticked and task_unticked events,
+	// newest first.
+	Ticks []Tick `json:"ticks"`
 }
 
 // Group is a task group in card detail. Ticked and Total count its tasks
@@ -141,4 +147,6 @@ type Event struct {
 	Reason    string          `json:"reason,omitempty"`
 	Scope     string          `json:"scope,omitempty"`
 	OldScope  string          `json:"old_scope,omitempty"`
+	// Task is the task number of task_ticked and task_unticked.
+	Task string `json:"task,omitempty"`
 }

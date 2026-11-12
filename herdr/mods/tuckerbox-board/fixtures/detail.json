@@ -330,6 +330,24 @@
         "machine": "studio"
       },
       {
+        "at": "2026-11-12T07:40:05+10:00",
+        "event": "task_ticked",
+        "step": "build",
+        "round": 3,
+        "agent": "claude",
+        "machine": "studio",
+        "task": "2.1"
+      },
+      {
+        "at": "2026-11-12T07:52:40+10:00",
+        "event": "task_ticked",
+        "step": "build",
+        "round": 3,
+        "agent": "claude",
+        "machine": "studio",
+        "task": "2.2"
+      },
+      {
         "at": "2026-11-12T08:00:00+10:00",
         "event": "handoff",
         "step": "build",
@@ -375,6 +393,22 @@
         "title": "Header",
         "ticked": 0,
         "total": 1
+      }
+    ],
+    "ticks": [
+      {
+        "number": "2.2",
+        "at": "2026-11-12T07:52:40+10:00",
+        "ticked": true,
+        "step": "build",
+        "round": 3
+      },
+      {
+        "number": "2.1",
+        "at": "2026-11-12T07:40:05+10:00",
+        "ticked": true,
+        "step": "build",
+        "round": 3
       }
     ]
   },

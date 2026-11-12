@@ -22,18 +22,69 @@ type HCTerminal struct {
 	Name    string            `json:"name"`
 	Cwd     string            `json:"cwd"`
 	State   string            `json:"state"`
-	Status  *string           `json:"status"`
+	Status  *HCStatus         `json:"status"`
 	Labels  map[string]string `json:"labels"`
 	Exit    *int              `json:"exit_code"`
+	// CreatedMs, StatusMs and OutputMs are when herdr-core started the
+	// terminal, last saw its status change and last saw it write output,
+	// in Unix milliseconds; each may be absent.
+	CreatedMs *int64 `json:"created_ms"`
+	StatusMs  *int64 `json:"status_ms"`
+	OutputMs  *int64 `json:"output_ms"`
+}
+
+// HCStatus is the status the terminal's program reports: hc ls prints it
+// as a string ("working"), hc get as an object with its state, message
+// and app.
+type HCStatus struct {
+	State string `json:"state"`
+	Msg   string `json:"msg,omitempty"`
+	App   string `json:"app,omitempty"`
+}
+
+// UnmarshalJSON reads a status as a string or as an object.
+func (s *HCStatus) UnmarshalJSON(data []byte) error {
+	var state string
+	if json.Unmarshal(data, &state) == nil {
+		*s = HCStatus{State: state}
+		return nil
+	}
+	type plain HCStatus
+	return json.Unmarshal(data, (*plain)(s))
+}
+
+// Working reports whether herdr-core sees the agent in the terminal at
+// work.
+func (t *HCTerminal) Working() bool {
+	return t != nil && t.Status != nil && t.Status.State == "working"
+}
+
+// LastActivity is the last time herdr-core saw the terminal's program do
+// something: its last output, else its last status change, else its
+// start. It is zero when herdr-core reports none of them.
+func (t *HCTerminal) LastActivity() time.Time {
+	var ms int64
+	if t != nil {
+		for _, v := range []*int64{t.OutputMs, t.StatusMs, t.CreatedMs} {
+			if v != nil && *v > ms {
+				ms = *v
+			}
+		}
+	}
+	if ms == 0 {
+		return time.Time{}
+	}
+	return time.UnixMilli(ms)
 }
 
 // Live reports whether the terminal's program is still running.
 func (t *HCTerminal) Live() bool { return t != nil && t.State == "live" }
 
 // Waiting reports whether herdr-core sees the agent in the terminal
-// waiting for input.
+// waiting for the person: "blocked" (a permission prompt or a question),
+// or "waiting".
 func (t *HCTerminal) Waiting() bool {
-	return t != nil && t.Status != nil && *t.Status == "waiting"
+	return t != nil && t.Status != nil && (t.Status.State == "blocked" || t.Status.State == "waiting")
 }
 
 // HCError is an error hc reported.

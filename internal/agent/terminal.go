@@ -411,8 +411,12 @@ loop:
 			case !term.Live():
 				logLine(log, "step %s round %d: the agent's terminal %s ended", s.Step, s.Round, name)
 				break loop
-			case agentState == AgentWaiting && term.Status != nil && *term.Status == "working":
+			case agentState == AgentWaiting && term.Working():
 				setState(AgentWorking)
+			case agentState == AgentWorking && term.Waiting():
+				// A permission prompt or a question: herdr-core sees the
+				// agent waiting for the person.
+				setState(AgentWaiting)
 			}
 		}
 	}

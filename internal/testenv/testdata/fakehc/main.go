@@ -16,6 +16,12 @@
 //	                   types TEXT and enter into it
 //	hc ls --json       the live terminals
 //	hc killall         ends every terminal (test cleanup)
+//	hc status N STATE  sets the status the terminal's program reports, as
+//	                   an agent's OSC 7501 report would ("working",
+//	                   "blocked", ...; "" clears it). get shows it as hc
+//	                   0.1 does, an object with its state, and status_ms
+//	                   when it was set; get's output_ms is when the
+//	                   terminal last wrote output.
 //
 // Terminals live in FAKEHC_DIR: <name>.json (the record), <name>.out and
 // <name>.in. Each call is appended to FAKEHC_DIR/calls.log as one JSON
@@ -58,8 +64,11 @@ type record struct {
 	Argv    []string          `json:"argv"`
 	Labels  map[string]string `json:"labels"`
 	State   string            `json:"state"`
-	Status  *string           `json:"status"`
+	Status  json.RawMessage   `json:"status"`
 	Exit    *int              `json:"exit_code"`
+	// StatusMs and OutputMs are filled in by get.
+	StatusMs *int64 `json:"status_ms,omitempty"`
+	OutputMs *int64 `json:"output_ms,omitempty"`
 	Pid     int               `json:"pid"`
 	Seq     int               `json:"seq"`
 }
@@ -167,8 +176,30 @@ func main() {
 		if err != nil {
 			notFound(name)
 		}
+		if fi, err := os.Stat(path(name, ".status")); err == nil {
+			state, _ := os.ReadFile(path(name, ".status"))
+			ms := fi.ModTime().UnixMilli()
+			r.StatusMs = &ms
+			r.Status = json.RawMessage("null")
+			if st := strings.TrimSpace(string(state)); st != "" {
+				r.Status, _ = json.Marshal(map[string]string{"app": "fake", "msg": "", "state": st})
+			}
+		}
+		if fi, err := os.Stat(path(name, ".out")); err == nil {
+			ms := fi.ModTime().UnixMilli()
+			r.OutputMs = &ms
+		}
 		data, _ := json.Marshal(r)
 		fmt.Println(string(data))
+	case "status":
+		pos := positionals(rest)
+		if len(pos) != 2 {
+			fail(2, "fakehc status: want <terminal> <state>")
+		}
+		if _, err := readRecord(pos[0]); err != nil {
+			notFound(pos[0])
+		}
+		must(os.WriteFile(path(pos[0], ".status"), []byte(pos[1]), 0o644))
 	case "kill":
 		kill(lastPositional(rest))
 	case "read":
