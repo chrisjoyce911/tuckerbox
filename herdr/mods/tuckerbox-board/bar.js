@@ -6,6 +6,7 @@ import { props, settings, layout, run, openOverlay, closeOverlay, shared, setSha
 import { MOD, candidates, locate, loadAll } from "./data.js";
 import { counts, candidatesKey, DRAWER_POLL_MS } from "./model.js";
 import { toggleCall, windowSpec } from "./actions.js";
+import { renderAutopilot, AUTOPILOT_MENU_PX } from "./bar-autopilot.js";
 
 const MENU = "tuckerbox.bar.menu";
 export function findLayout(root, id) {
@@ -38,7 +39,7 @@ export class BarView extends View {
     run("layout.resize", { id: props()?.block ?? "tuckerbox-bar", px });
   }
   follow(key, cx) {
-    this.want = key; this.at = null; this.counts = null; this.last = 0; this.setup = null;
+    this.want = key; this.at = null; this.counts = null; this.autopilot = false; this.last = 0; this.setup = null;
     this.resize(0); cx.notify();
   }
   tick(cx) {
@@ -52,14 +53,18 @@ export class BarView extends View {
     if (this.loading.has(key)) return;
     this.loading.add(key);
     cx.spawn(async (cx) => {
-      let at = null, n = null;
+      let at = null, n = null, autopilot = false;
       try {
         at = await locate(null, c, { includeUnconfigured: true, fresh: Boolean(this.setup) });
-        if (at.found) { const b = await loadAll(at); n = b.error ? { error: b.error.message } : counts(b); }
+        if (at.found) {
+          const b = await loadAll(at); n = b.error ? { error: b.error.message } : counts(b);
+          // The menu has an Autopilot section only where approval is required.
+          autopilot = !b.error && !b.fixtures && b.require_approval === true;
+        }
       } catch { /* an unavailable machine has no actionable entry point */ }
       this.loading.delete(key);
       if (key !== this.want) return;
-      this.at = at; this.counts = n; this.last = Date.now();
+      this.at = at; this.counts = n; this.autopilot = autopilot; this.last = Date.now();
       if (this.setup) {
         const terminal = terminals().find((t) => t.name === this.setup.name);
         // Herdr keeps finished terminals and their exit code. Do not open a
@@ -95,7 +100,7 @@ export class BarView extends View {
     const z = zoom(), b = bounds ?? this.bounds;
     if (!b) return;
     const token = `${Date.now()}-${props()?.block ?? "bar"}`;
-    const id = openOverlay({ mod: MOD, kind: "popup", width: 220, height: findLayout(layout(), "tuckerbox-panel") ? 120 : 84,
+    const id = openOverlay({ mod: MOD, kind: "popup", width: 220, height: (findLayout(layout(), "tuckerbox-panel") ? 120 : 84) + (this.autopilot ? AUTOPILOT_MENU_PX : 0),
       at: { x: b.x + b.width - 220 * z, y: b.y + b.height + 5 * z }, props: { view: "bar-menu", token } });
     setShared(MENU, { id, token });
   }
@@ -128,11 +133,13 @@ export class BarMenuView extends View {
     if (panel && !panel.hidden && stack?.active === "tuckerbox-panel") run("layout.hide", { id: "panel" });
     else { run("layout.select", { stack: "panel-body", child: "tuckerbox-panel" }); run("layout.show", { id: "panel" }); }
   }
-  render() {
+  render(cx) {
     const item = (id, label, action) => control(id, label, () => this.choose(action));
     return v_flex().id("tuckerbox-bar-menu").p(4)
       .child(item("bar-board", "Board", toggle))
       .when(Boolean(findLayout(layout(), "tuckerbox-panel")), (el) => el.child(item("bar-panel", "Board in side panel", () => this.panel())))
-      .child(item("bar-settings", "Settings", () => openOverlay({ ...windowSpec(MOD), props: { start: "settings" } })));
+      .child(item("bar-settings", "Settings", () => openOverlay({ ...windowSpec(MOD), props: { start: "settings" } })))
+      // Autopilot: status, then Start or Stop (add-herdr-topbar: Autopilot from the bar).
+      .when(Boolean(cx), (el) => el.child(renderAutopilot(item, cx)));
   }
 }

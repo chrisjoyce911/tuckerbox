@@ -68,7 +68,7 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 	refs := refApprovals(ctx, repo.Root)
 	doc := &Document{Version: Version, Ship: string(cfg.Ship), Repo: key, Path: repo.Root, Machine: history.Machine(), OS: runtime.GOOS, RequireApproval: cfg.RequireApproval, Columns: columns(cfg), Cards: []Card{}}
 	if m := autopilot.ReadMarker(repo.Common); m != nil {
-		doc.Autopilot = Autopilot{Running: true, Pid: m.Pid, Started: timestamp(m.Started)}
+		doc.Autopilot = Autopilot{Running: true, Pid: m.Pid, Machine: m.Machine, Started: timestamp(m.Started), Terminal: m.Terminal}
 	}
 	doc.Steps = make([]string, 0, len(cfg.Steps))
 	for _, step := range cfg.Steps {

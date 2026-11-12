@@ -53,7 +53,7 @@ func (a App) autopilot(args []string) int {
 		return a.errf("autopilot", "%v", err)
 	}
 	defer lock.Release()
-	data, _ := json.Marshal(autopilot.Marker{Pid: os.Getpid(), Machine: history.Machine(), Started: time.Now()})
+	data, _ := json.Marshal(autopilot.Marker{Pid: os.Getpid(), Machine: history.Machine(), Started: time.Now(), Terminal: os.Getenv(autopilot.TerminalEnv)})
 	if err := os.WriteFile(markerPath, data, 0o644); err != nil {
 		return a.errf("autopilot", "%v", err)
 	}

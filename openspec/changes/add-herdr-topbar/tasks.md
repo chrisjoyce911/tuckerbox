@@ -31,13 +31,13 @@
 
 ## 3. Autopilot (herdr-topbar, board-data)
 
-- [ ] 3.1 `board --json` `autopilot`: running from a non-blocking lock probe, process id, machine, start time and terminal from the marker; the marker records `TUCKERBOX_TERMINAL`
-- [ ] 3.2 Test "Autopilot running"
-- [ ] 3.3 Test "Marker left by a crash"
-- [ ] 3.4 Menu Autopilot: status, Start (`hc run --bg --name tb-ap-<hash> … tuckerbox autopilot`), Stop (`hc keys … ctrl+c`), no Stop for one started elsewhere, no item with approval off; a hint without `hc`
-- [ ] 3.5 Node test "Start and stop" (fake exec records the `hc` calls)
-- [ ] 3.6 Node test "Started in a shell"
-- [ ] 3.7 Node test "Approval off"
+- [x] 3.1 `board --json` `autopilot`: running from a non-blocking lock probe, process id, machine, start time and terminal from the marker; the marker records `TUCKERBOX_TERMINAL`
+- [x] 3.2 Test "Autopilot running"
+- [x] 3.3 Test "Marker left by a crash"
+- [x] 3.4 Menu Autopilot: status, Start (`hc run --bg --name tb-ap-<hash> … tuckerbox autopilot`), Stop (`hc keys … ctrl+c`), no Stop for one started elsewhere, no item with approval off; a hint without `hc`
+- [x] 3.5 Node test "Start and stop" (fake exec records the `hc` calls)
+- [x] 3.6 Node test "Started in a shell"
+- [x] 3.7 Node test "Approval off"
 
 ## 4. Integration
 

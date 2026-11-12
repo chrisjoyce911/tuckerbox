@@ -65,6 +65,8 @@ func TestSecondAutopilot(t *testing.T) {
 	f := newCLI(t, testenv.RepoOptions{Changes: []string{"a"}, RequireApproval: true})
 	cmd := exec.Command(tools.Tuckerbox, "autopilot")
 	cmd.Dir = f.repo
+	// Started from the top bar: the marker names its terminal.
+	cmd.Env = append(os.Environ(), "TUCKERBOX_TERMINAL=tb-ap-3f2a9c1d0b4e")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -81,6 +83,9 @@ func TestSecondAutopilot(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	time.Sleep(200 * time.Millisecond)
+	if data, _ := os.ReadFile(marker); !strings.Contains(string(data), `"terminal":"tb-ap-3f2a9c1d0b4e"`) {
+		t.Errorf("marker lacks the terminal: %s", data)
+	}
 	res := f.tb("autopilot", "--once")
 	if res.code == 0 || !strings.Contains(res.stderr, "already running") || !strings.Contains(res.stderr, "pid "+strconv.Itoa(cmd.Process.Pid)) {
 		t.Errorf("second: %d %s", res.code, res.stderr)

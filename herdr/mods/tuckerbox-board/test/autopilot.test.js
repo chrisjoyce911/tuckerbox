@@ -43,7 +43,7 @@ test("Board opened later: no toast at the first read, and the header counts 2", 
 });
 
 test("Autopilot on and off in the document", () => {
-  assert.deepEqual(normaliseBoard(fixture("board.json")).autopilot, { running: true, pid: 4242, started: "2026-11-12T08:00:00+10:00" });
+  assert.deepEqual(normaliseBoard(fixture("board.json")).autopilot, { running: true, pid: 4242, machine: "mini", started: "2026-11-12T08:00:00+10:00", terminal: "tb-ap-3f2a9c1d0b4e" });
   assert.equal(normaliseBoard(fixture("detail.json")).autopilot.running, false);
   assert.equal(doc([]).autopilot.running, false);
 });
