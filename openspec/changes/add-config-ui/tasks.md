@@ -1,0 +1,87 @@
+# Tasks
+
+## 1. Key table and sources (repo-config, config-cli)
+
+- [ ] 1.1 Gather every key the loader knows into one table (path, type, allowed values, scope, default, secret); make `check`'s repository-only and machine-only rules read it; a unit test fails when the loader accepts a key the table lacks
+- [ ] 1.2 Test "Scopes agree" (for every `machine` and `repo` row, `check` refuses it in the other file)
+- [ ] 1.3 Track each effective value's source (`repo`, `machine`, `default`) and the machine value it overrode in the merged config
+- [ ] 1.4 `tuckerbox config show` and `--json` (key, value, source, scope, file, allowed values; each file's path and revision), machine-scope keys under "this machine only" with the machine's name; document in README
+- [ ] 1.5 Test "Repository value wins"
+- [ ] 1.6 Test "Built-in default"
+- [ ] 1.7 Test "Permission profile"
+- [ ] 1.8 Test "Revision for a later save" (revision is the SHA-256 of the file's bytes; none when absent)
+- [ ] 1.9 `tuckerbox config get <key>` for a key or a table, with `--json` and a nearest-key suggestion
+- [ ] 1.10 Test "Step setting"
+- [ ] 1.11 Test "Misspelt key"
+
+## 2. Credentials file (repo-config, config-cli)
+
+- [ ] 2.1 Read `credentials.toml` from the machine config folder; refuse it when group or others can read it (macOS, Linux); put its token after `token_env` and before the default variables in forge access; `doctor` names the source; refuse `token` in machine `config.toml`
+- [ ] 2.2 Test "Stored token used first"
+- [ ] 2.3 Test "Token in machine config" (the value is not printed)
+- [ ] 2.4 Test "File readable by others"
+- [ ] 2.5 `show` and `get` print secrets only as `set` or `not set` with the source in use
+- [ ] 2.6 Test "Token set" (the token appears nowhere in text or JSON output)
+
+## 3. Saving (config-save, config-cli)
+
+- [ ] 3.1 Line-level TOML rewrite for set and unset (key line, new key at table end, new table at file end, whole multi-line arrays, empty `[steps.<id>]` removed); write by temporary file and rename
+- [ ] 3.2 Test "Comment kept"
+- [ ] 3.3 Check before saving: parse, merge with the other file, run the config checks, compare problems before and after; list problems a save causes in active changes without blocking
+- [ ] 3.4 Test "Removing a step another step needs"
+- [ ] 3.5 Test "Fixing one of two problems"
+- [ ] 3.6 Test "Narrowing the allow-list"
+- [ ] 3.7 Per-file OS lock in the machine state folder; `--if-match` compared under the lock; check and write from the file read under the lock
+- [ ] 3.8 Test "Two people edit at once"
+- [ ] 3.9 `tuckerbox config set` with several `key=value`, `--unset`, `--machine`, `--dry-run`, `--json`; values parsed by the key's type, lists comma-separated; document in README
+- [ ] 3.10 Test "Two keys in one save"
+- [ ] 3.11 Test "Back to the machine default"
+- [ ] 3.12 Test "Dry run"
+- [ ] 3.13 Refuse keys in the wrong file, naming the right one
+- [ ] 3.14 Test "Profile in repository config"
+- [ ] 3.15 Test "Approval rule on the machine"
+- [ ] 3.16 Machine saves: create the folder and file if needed; tokens into `credentials.toml` created with mode 0600; never commit
+- [ ] 3.17 Test "First token on a new machine"
+- [ ] 3.18 Token prompt without echo, or standard input when not a terminal; refuse a token in the arguments; `--unset` removes it
+- [ ] 3.19 Test "Token in the arguments" (the value is not printed)
+- [ ] 3.20 `tuckerbox config edit [--machine]` with the `tuckerbox edit` editor, then the check; no commit
+- [ ] 3.21 Test "Syntax error after an edit"
+- [ ] 3.22 Run TLC on `formal/configsave.tla` and its broken variants `blindwrite` and `checkbeforelock` (`/opsx:tlc` locally, `scripts/tla-check.sh` in CI); the model passes and each variant is rejected
+
+## 4. Where a repository save goes (config-save)
+
+- [ ] 4.1 Choose the target per save: `--local`, `--pr`, or a pull request when this machine has a forge token for the remote's host, else local; print the target and the reason
+- [ ] 4.2 Test "No token on this machine"
+- [ ] 4.3 Test "Pull request demanded but not possible"
+- [ ] 4.4 Local save into the repository's main checkout (as the board resolves it), no commit, note about committing and existing worktrees
+- [ ] 4.5 Test "Local save"
+- [ ] 4.6 Pull request save: fetch base, judge `--if-match` and the check against the base file, temporary worktree on `tuckerbox/config-<UTC time>-<hash>`, one commit, push without force, open a ready merge request through forge access, remove the worktree, print the link; document in README
+- [ ] 4.7 Test "Pull request" (fake forge; checkout files unchanged)
+- [ ] 4.8 Test "Base branch moved" (no branch pushed)
+- [ ] 4.9 Never merge a config pull request in any ship mode
+- [ ] 4.10 Test "Merge ship mode"
+
+## 5. Settings view (settings-view)
+
+- [ ] 5.1 Settings in the board header (window and docked pane, not the drawer), view in place of the columns, Back; reads `tuckerbox config show --json` on the board's machine, dropping stale reads by the board's rule
+- [ ] 5.2 Node test "Open and go back"
+- [ ] 5.3 Node test "Space changed during a read"
+- [ ] 5.4 Repository and "This machine only (<machine>)" sections; editable only where the key's scope allows; value, source badge and the overridden value
+- [ ] 5.5 Node test "Machine-only key"
+- [ ] 5.6 Node test "Overridden machine default"
+- [ ] 5.7 Groups by key prefix (Workflow, Runs, Board, Autopilot, Change overrides, Other; Permission profiles, Forge tokens, Editor, Machines, Other); empty groups hidden; fields by key type
+- [ ] 5.8 Node test "Workflow group"
+- [ ] 5.9 Workflow editing: add a step (id and agent), remove, move up or down, as pending edits to `workflow.steps` and `steps.<id>`
+- [ ] 5.10 Node test "Reorder steps"
+- [ ] 5.11 Pending edits checked with `config set --dry-run --json`, problems by field, save target and reason shown, Save disabled while an edit adds a problem; one `config set --if-match` per save
+- [ ] 5.12 Node test "Edit that adds a problem"
+- [ ] 5.13 Node test "Save as a pull request"
+- [ ] 5.14 The view only runs `tuckerbox config`; shows a failed command's message and keeps pending edits
+- [ ] 5.15 Node test "Command refused"
+- [ ] 5.16 On "changed since read": reload, keep pending edits, mark keys changed meanwhile
+- [ ] 5.17 Node test "Someone saved first"
+- [ ] 5.18 Forge tokens group: `set` or `not set` with source; Set token opens a pane running the prompt on the board's machine; reload after it closes
+- [ ] 5.19 Node test "Set a token" (no token value in the mod's commands or state)
+- [ ] 5.20 Broken file: show the error with file and line, no fields for that file, Edit file opens a pane running `tuckerbox config edit` (`--machine` for machine config)
+- [ ] 5.21 Node test "Syntax error in repository config"
+- [ ] 5.22 Document the Settings view in README
