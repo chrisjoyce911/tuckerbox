@@ -397,8 +397,13 @@ func (a App) newEngine(repo runs.Repo, cfg *config.Config, log io.Writer) *runs.
 	}
 	if cfg.RequireApproval {
 		e.Gate = approvalGate(repo)
-		e.ResumeGate = func(_ context.Context, change, worktree string) error {
-			st, err := approval.Judge(approval.DirOf(worktree, change))
+		e.ResumeGate = func(ctx context.Context, change, worktree string) error {
+			// The approvals ref wins over the sidecar, as in the run gate.
+			entry, err := refEntry(ctx, repo.Root, change)
+			if err != nil {
+				return err
+			}
+			st, err := approval.JudgeWith(approval.DirOf(worktree, change), entry)
 			if err != nil {
 				return err
 			}
