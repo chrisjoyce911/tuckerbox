@@ -19,22 +19,41 @@ export class DrawerView extends View {
     this.counts = p?.counts ?? null;
     this.repo = p?.repo ?? "";
     this.last = this.at ? Date.now() : 0;
+    // want: the candidates key (space, machine, folders) the drawer shows;
+    // loading: the keys with a read running (board-view: Stale reads are dropped).
+    this.want = this.at ? candidatesKey(candidates(null)) : null;
+    this.loading = new Set();
     cx.timer.after(30, (cx) => this.refresh(cx));
-    cx.timer.every(1000, (cx) => {
-      // Follow a space switch at once; otherwise read the counts every 30 s.
-      const key = candidatesKey(candidates(null));
-      if (key !== this.where) { this.where = key; this.last = 0; }
-      if (!this.last || Date.now() - this.last >= DRAWER_POLL_MS) this.refresh(cx);
-    });
+    cx.timer.every(1000, (cx) => this.tick(cx));
+  }
+
+  // Follow a space switch at once; otherwise read the counts every 30 s.
+  tick(cx) {
+    const key = candidatesKey(candidates(null));
+    if (key !== this.want) this.follow(key, cx);
+    if (!this.last || Date.now() - this.last >= DRAWER_POLL_MS) this.refresh(cx);
+  }
+
+  // The space or its folders changed: stop showing the old result now.
+  follow(key, cx) {
+    this.want = key;
+    this.at = null;
+    this.counts = null;
+    this.repo = "";
+    this.last = 0;
+    cx.notify();
   }
 
   refresh(cx) {
-    if (this.loading) return;
-    this.loading = true;
+    const c = candidates(null);
+    const key = candidatesKey(c);
+    if (key !== this.want) this.follow(key, cx);
+    if (this.loading.has(key)) return;
+    this.loading.add(key);
     cx.spawn(async (cx) => {
+      let at = null, n = null;
       try {
-        const at = await locate(null);
-        let n = null;
+        at = await locate(null, c);
         if (at.found) {
           const b = await loadAll(at);
           n = b.error ? { error: b.error.message } : counts(b);
@@ -47,11 +66,12 @@ export class DrawerView extends View {
             for (const x of t.toasts) notify(toastCall(x));
           }
         }
-        this.at = at;
-        this.counts = n;
-        this.repo = at.root ? at.root.replace(/\\/g, "/").split("/").filter(Boolean).pop() : "";
-      } catch { this.at = null; this.counts = null; }
-      this.loading = false;
+      } catch { at = null; n = null; }
+      this.loading.delete(key);
+      if (key !== this.want) return; // a read for a space no longer shown: dropped
+      this.at = at;
+      this.counts = n;
+      this.repo = at?.root ? at.root.replace(/\\/g, "/").split("/").filter(Boolean).pop() : "";
       this.last = Date.now();
       cx.notify();
     });

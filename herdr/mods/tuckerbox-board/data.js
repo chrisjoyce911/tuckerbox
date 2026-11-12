@@ -2,7 +2,7 @@
 // the dev flag, the fixtures next to this file. The board reads nothing else
 // (design: the mod calls the CLI, never the files).
 import { exec, readTextFile, appHome, props, spaces, panes, focused, machines } from "herdr";
-import { parseBoard, normaliseBoard, dirFromStack, repoCandidates, pickRepo, otherMachines, sharedRepo, mergeBoards, execFailure } from "./model.js";
+import { parseBoard, normaliseBoard, dirFromStack, repoCandidates, pickRepo, otherMachines, sharedRepo, mergeBoards, mainWorktreeOf, execFailure } from "./model.js";
 
 export const MOD = "tuckerbox-board";
 
@@ -39,17 +39,24 @@ export function candidates(self = null) {
   return repoCandidates({ props: props() ?? {}, spaces: spaces(), panes: panes(), focused: focused(), self: self ?? props()?.pane ?? null });
 }
 
-// What a folder is, on a machine: the git checkout it is in and whether that
-// has .tuckerbox/config.toml. Kept a while, shared by every copy (the board,
+// What a folder is, on a machine: the repository's main checkout (the first
+// entry of `git worktree list`, so a change's worktree resolves to the
+// checkout it was made from; the folder's own top level when that is bare)
+// and whether that has .tuckerbox/config.toml. Kept a while, shared by every copy (the board,
 // the drawer), so locating every second costs nothing between looks.
 const PROBE_MS = { yes: 30000, no: 10000 };
 const probes = new Map(); // `${on}\0${cwd}` -> { at, ttl, result: Promise }
 
 async function look(cwd, on) {
   try {
-    const r = await exec("git", ["rev-parse", "--show-toplevel"], { cwd, on, timeout: 5000 });
-    if ((r.code ?? 1) !== 0) return { root: null, config: false };
-    const root = String(r.stdout ?? "").trim();
+    let root = null;
+    const w = await exec("git", ["worktree", "list", "--porcelain"], { cwd, on, timeout: 5000 });
+    if ((w.code ?? 1) === 0) root = mainWorktreeOf(w.stdout);
+    if (!root) {
+      const r = await exec("git", ["rev-parse", "--show-toplevel"], { cwd, on, timeout: 5000 });
+      if ((r.code ?? 1) !== 0) return { root: null, config: false };
+      root = String(r.stdout ?? "").trim();
+    }
     if (!root) return { root: null, config: false };
     const text = await readTextFile(`${root}/.tuckerbox/config.toml`, { on });
     return { root, config: text != null };
@@ -69,8 +76,8 @@ export function probe(cwd, on, now = Date.now()) {
 }
 
 // Where the board reads, for this copy: { found, root, cwd, on, space }.
-export async function locate(self = null) {
-  const c = candidates(self);
+// `c` is the candidates a caller already took, so the read is tied to them.
+export async function locate(self = null, c = candidates(self)) {
   const found = await Promise.all(c.cwds.map((cwd) => probe(cwd, c.on)));
   return pickRepo(c, found);
 }

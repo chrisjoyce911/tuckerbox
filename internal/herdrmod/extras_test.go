@@ -62,12 +62,13 @@ func read(t *testing.T, home, rel string) string {
 	return string(b)
 }
 
-// snapshot is every file under home with its bytes.
+// snapshot is every file under home with its bytes, except the install lock,
+// which is made once and never removed (removing it would race a waiter).
 func snapshot(t *testing.T, home string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
 	filepath.WalkDir(home, func(p string, d fs.DirEntry, err error) error {
-		if err == nil && !d.IsDir() {
+		if err == nil && !d.IsDir() && d.Name() != LockFile {
 			rel, _ := filepath.Rel(home, p)
 			b, _ := os.ReadFile(p)
 			out[filepath.ToSlash(rel)] = string(b)
@@ -83,6 +84,17 @@ type fakeHerdr struct {
 	home  string
 	down  bool
 	calls []string
+	// cloneText, when set, is what layout.clone writes instead of a copy.
+	cloneText string
+	// downAfterClone stops the window right after a clone.
+	downAfterClone bool
+}
+
+func (f *fakeHerdr) reach(context.Context) error {
+	if f.down {
+		return errors.New("no Herdr window")
+	}
+	return nil
 }
 
 func (f *fakeHerdr) do(_ context.Context, command string, args map[string]any) (string, error) {
@@ -98,8 +110,12 @@ func (f *fakeHerdr) do(_ context.Context, command string, args map[string]any) (
 	switch command {
 	case "layout.clone":
 		src, _ := os.ReadFile(layoutPath(f.home, args["name"].(string)))
+		if f.cloneText != "" {
+			src = []byte(f.cloneText)
+		}
 		os.WriteFile(layoutPath(f.home, args["as"].(string)), src, 0o644)
 		show(args["as"].(string))
+		f.down = f.downAfterClone
 	case "layout.switch":
 		show(args["name"].(string))
 	}
@@ -110,7 +126,7 @@ func extrasEnv(t *testing.T, home, goos string) (Env, *fakeHerdr) {
 	var dirs []string
 	e := env(t, home, passCheck(&dirs))
 	f := &fakeHerdr{home: home}
-	e.Do, e.GOOS = f.do, goos
+	e.Do, e.Reach, e.GOOS = f.do, f.reach, goos
 	return e, f
 }
 
@@ -328,6 +344,44 @@ func TestDrawerInAShippedLayoutClonesIt(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(did, "\n"), "switched back to main") {
 		t.Errorf("did %q", did)
+	}
+}
+
+// Owner decision on the extras review: every precondition of the requested
+// steps is checked before any change, so install --keys --drawer with Herdr
+// not running fails up front, changes nothing (not even the key) and says why.
+func TestKeysAndDrawerWithHerdrNotRunningChangeNothing(t *testing.T) {
+	home := herdrHome(t)
+	e, f := extrasEnv(t, home, "darwin")
+	f.down = true
+	before := snapshot(t, home)
+	did, err := InstallExtras(context.Background(), e, Options{Keys: true, Drawer: true})
+	if !errors.Is(err, ErrHerdrNotRunning) {
+		t.Fatalf("err %v", err)
+	}
+	for _, want := range []string{"--drawer", "nothing was changed", "open Herdr"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message %q lacks %q", err, want)
+		}
+	}
+	if len(did) != 0 || len(f.calls) != 0 {
+		t.Errorf("did %q, calls %v", did, f.calls)
+	}
+	got := snapshot(t, home)
+	if len(got) != len(before) {
+		t.Errorf("files %d, were %d", len(got), len(before))
+	}
+	for k, v := range before {
+		if got[k] != v {
+			t.Errorf("%s changed", k)
+		}
+	}
+	if _, err := os.Stat(journalPath(home)); err == nil {
+		t.Error("journal written")
+	}
+	// Keys alone don't need the window.
+	if _, err := InstallExtras(context.Background(), e, Options{Keys: true}); err != nil {
+		t.Errorf("keys alone: %v", err)
 	}
 }
 

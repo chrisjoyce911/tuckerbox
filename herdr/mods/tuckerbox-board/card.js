@@ -6,7 +6,7 @@ import { View, div } from "gpui-kit";
 import { v_flex, h_flex, TextView } from "gpui-base";
 import { theme, props, closeOverlay } from "herdr";
 import { loadDetail } from "./data.js";
-import { normaliseCard, cardAt, columnName, newestFirst, eventText, fmtLocal, taskGroups, approvalBadge, isActive } from "./model.js";
+import { normaliseCard, cardAt, columnName, newestFirst, eventText, fmtLocal, taskGroups, approvalBadge, isActive, showsApproval } from "./model.js";
 import { detailActions, invocation, actionLabel, defaultStep, rerunSteps, runGroups, canEdit, EDIT_FILES, ACTIONS } from "./actions.js";
 import { perform, validate, watchEdits, changed } from "./perform.js";
 import { editOf, editNote } from "./edits.js";
@@ -302,7 +302,7 @@ export class CardView extends View {
         .when(Boolean(c.ci),(el)=>el.child(div().px(5).rounded(4).bg(tm.raised).text_color(c.ci.state==="red"?tm.blocked:c.ci.state==="green"?tm.working:tm.dim).child(`CI ${c.ci.state}`)))
         .when(c.ship_round>0,(el)=>el.child(div().text_color(tm.dim).child(`ship round ${c.ship_round}`)))))
       .when(Boolean(c.reason), (el) => el.child(div().pt(6).text_size(12).text_color(c.state === "blocked" || c.state === "failed" ? tm.blocked : tm.muted).child(c.reason)))
-      .child(div().pt(8).child(this.approvalRow(c)))
+      .when(showsApproval(c), (el) => el.child(div().pt(8).child(this.approvalRow(c))))
       .when(Boolean(this.validationBox(c)), (el) => el.child(div().pt(8).child(this.validationBox(c))))
       .when(Boolean(this.error), (el) => el.child(div().pt(8).child(note("error", this.error, "error"))))
       .when(Boolean(this.notice), (el) => el.child(div().pt(8).child(note("notice", this.notice.text, this.notice.kind))))
