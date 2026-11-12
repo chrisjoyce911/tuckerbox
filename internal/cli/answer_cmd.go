@@ -162,15 +162,29 @@ func (a App) answerLive(ctx context.Context, change string, l located, ans runs.
 	return 0
 }
 
+// termSender is what answer needs of herdr-core to type into an agent's
+// terminal.
+type termSender interface {
+	Get(ctx context.Context, name string) (*agent.HCTerminal, error)
+	Send(ctx context.Context, name, text string) error
+}
+
 // sendWaiting types text into rs's terminal, and presses enter, when its
 // agent is live and waits for the person (run.json says so, or
 // herdr-core's status does), and returns the terminal's name; "" when it
 // doesn't wait, and nothing is typed.
-func (a App) sendWaiting(ctx context.Context, hc agent.HC, rs *runs.Run, text string) (string, error) {
-	if rs.Terminal == nil {
+//
+// The terminal must be the one rs names: its address and its change,
+// step and round labels. The change's terminal name is reused by every
+// step, so the workflow may have moved on since rs was read; the text is
+// then typed into no one. It is sent to the terminal's address, which
+// herdr-core never reuses, so a terminal that replaces it between the
+// lookup and the send doesn't get it either.
+func (a App) sendWaiting(ctx context.Context, hc termSender, rs *runs.Run, text string) (string, error) {
+	if rs.Terminal == nil || rs.Terminal.Address == "" {
 		return "", nil
 	}
-	name := rs.Terminal.Name
+	name, addr := rs.Terminal.Name, rs.Terminal.Address
 	t, err := hc.Get(ctx, name)
 	var he *agent.HCError
 	switch {
@@ -178,13 +192,20 @@ func (a App) sendWaiting(ctx context.Context, hc agent.HC, rs *runs.Run, text st
 		return "", nil
 	case err != nil:
 		return "", fmt.Errorf("asking herdr-core about terminal %s: %w", name, err)
+	case t == nil || t.Address != addr || !agent.MatchesStep(t, rs.Change, rs.Step, rs.Round):
+		// Gone, or another step's terminal under the name now.
+		return "", nil
 	case !t.Live():
 		return "", nil
 	case rs.AgentState != agent.AgentWaiting && !t.Waiting():
 		return "", nil
 	}
-	if err := hc.Send(ctx, name, text); err != nil {
-		return "", fmt.Errorf("typing into terminal %s: %w", name, err)
+	if err := hc.Send(ctx, addr, text); err != nil {
+		if errors.As(err, &he) && he.NotFound() {
+			// It ended (or was replaced) since we looked: nothing typed.
+			return "", nil
+		}
+		return "", fmt.Errorf("typing into terminal %s (%s): %w", name, addr, err)
 	}
 	return name, nil
 }

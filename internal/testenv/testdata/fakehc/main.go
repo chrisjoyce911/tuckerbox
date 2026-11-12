@@ -104,6 +104,30 @@ func hcError(code int, kind, msg string) {
 
 func notFound(name string) { hcError(3, "not_found", fmt.Sprintf("no terminal %q", name)) }
 
+// resolve returns the name of the terminal a command names: hc takes a
+// terminal's name or its address. An address no record has now (its
+// terminal was replaced under the same name) resolves to itself and is
+// not found.
+func resolve(target string) string {
+	if _, err := os.Stat(path(target, ".json")); err == nil {
+		return target
+	}
+	entries, _ := os.ReadDir(dir())
+	for _, e := range entries {
+		n, ok := strings.CutSuffix(e.Name(), ".json")
+		if !ok {
+			continue
+		}
+		if data, err := os.ReadFile(filepath.Join(dir(), e.Name())); err == nil {
+			var r record
+			if json.Unmarshal(data, &r) == nil && r.Address == target {
+				return n
+			}
+		}
+	}
+	return target
+}
+
 func readRecord(name string) (*record, error) {
 	data, err := os.ReadFile(path(name, ".json"))
 	if err != nil {
@@ -170,7 +194,7 @@ func main() {
 	case "host":
 		host(rest[0])
 	case "get":
-		name := lastPositional(rest)
+		name := resolve(lastPositional(rest))
 		getFault()
 		r, err := readRecord(name)
 		if err != nil {
@@ -203,7 +227,7 @@ func main() {
 	case "kill":
 		kill(lastPositional(rest))
 	case "read":
-		name := lastPositional(rest)
+		name := resolve(lastPositional(rest))
 		if _, err := readRecord(name); err != nil {
 			notFound(name)
 		}
@@ -214,11 +238,12 @@ func main() {
 		if len(pos) != 2 {
 			fail(2, "fakehc send: want <terminal> <text>")
 		}
-		r, err := readRecord(pos[0])
+		name := resolve(pos[0])
+		r, err := readRecord(name)
 		if err != nil || r.State != "live" {
 			notFound(pos[0])
 		}
-		f, err := os.OpenFile(path(pos[0], ".in"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		f, err := os.OpenFile(path(name, ".in"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		must(err)
 		fmt.Fprintln(f, pos[1])
 		f.Close()

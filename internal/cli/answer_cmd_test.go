@@ -366,7 +366,7 @@ func TestAnswerWithoutOpeningTheTab(t *testing.T) {
 	f.start("add-login")
 	f.waitAgent("add-login", "review")
 	waitFor(t, "the review agent's question", func() bool { return f.runOf("add-login").AgentState == agent.AgentWaiting })
-	name := f.runOf("add-login").Terminal.Name
+	name, addr := f.runOf("add-login").Terminal.Name, f.runOf("add-login").Terminal.Address
 
 	// Status and the board show what it asks.
 	res := f.tb("status")
@@ -385,8 +385,8 @@ func TestAnswerWithoutOpeningTheTab(t *testing.T) {
 	if res.code != 0 || !strings.Contains(res.stdout, "typed your answer into the review agent's terminal") {
 		t.Fatalf("answer: exit %d\n%s%s", res.code, res.stdout, res.stderr)
 	}
-	if !f.sent(name, reply) {
-		t.Errorf("hc send %s %q not recorded", name, reply)
+	if !f.sent(addr, reply) {
+		t.Errorf("hc send %s %q not recorded", addr, reply)
 	}
 	// The run goes on (the agent reports its result with the answer),
 	// never blocked, and run state holds no answer for a later brief.
@@ -417,13 +417,13 @@ func TestAnswerAnOrphanedWaitingAgent(t *testing.T) {
 	f.waitAgent("add-login", "build")
 	waitFor(t, "the build agent's question", func() bool { return f.runOf("add-login").AgentState == agent.AgentWaiting })
 	f.kill("add-login")
-	name := f.runOf("add-login").Terminal.Name
+	name, addr := f.runOf("add-login").Terminal.Name, f.runOf("add-login").Terminal.Address
 
 	res := f.tb("answer", "add-login", "the second one")
 	if res.code != 0 || !strings.Contains(res.stdout, "typed your answer") {
 		t.Fatalf("answer: exit %d\n%s%s", res.code, res.stdout, res.stderr)
 	}
-	if !f.sent(name, "the second one") {
+	if !f.sent(addr, "the second one") {
 		t.Error("send not recorded")
 	}
 	if ev := answeredEvents(f.events("add-login")); len(ev) != 1 || ev[0].Terminal != name {
@@ -440,8 +440,9 @@ func (f *cliFixture) tbCmd(args ...string) *exec.Cmd {
 	return cmd
 }
 
-// sent reports whether the fake hc was asked to send text to terminal name.
-func (f *cliFixture) sent(name, text string) bool {
+// sent reports whether the fake hc was asked to send text to terminal
+// target (a name or an address).
+func (f *cliFixture) sent(target, text string) bool {
 	file, err := os.Open(filepath.Join(f.env.HCDir, "calls.log"))
 	if err != nil {
 		return false
@@ -453,7 +454,7 @@ func (f *cliFixture) sent(name, text string) bool {
 		if json.Unmarshal(sc.Bytes(), &args) != nil || len(args) == 0 || args[0] != "send" {
 			continue
 		}
-		if args[len(args)-2] == name && args[len(args)-1] == text {
+		if args[len(args)-2] == target && args[len(args)-1] == text {
 			return true
 		}
 	}
