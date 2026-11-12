@@ -57,9 +57,9 @@ const tiny = button, closeButton = node;
 const model = new URL("../model.js", import.meta.url).href;
 const actions = new URL("../actions.js", import.meta.url).href;
 const body = source
-  .replace(/^import .* from "\.\/model\.js";\n/m, (l) => l.replace("./model.js", model))
-  .replace(/^import .* from "\.\/actions\.js";\n/m, (l) => l.replace("./actions.js", actions))
-  .replace(/^import .* from "(?!file:).*";\n/gm, "");
+  .replace(/^import .* from "\.\/model\.js";\r?\n/m, (l) => l.replace("./model.js", model))
+  .replace(/^import .* from "\.\/actions\.js";\r?\n/m, (l) => l.replace("./actions.js", actions))
+  .replace(/^import .* from "(?!file:).*";\r?\n/gm, "");
 const { CardView } = await import(`data:text/javascript;base64,${Buffer.from(stubs + body).toString("base64")}`);
 
 // A cx whose spawned tasks the test can wait for.

@@ -25,7 +25,7 @@ const stateChip = node, approvalChip = node, progressBar = node, editOf = () => 
 const ago = () => "recently", columnName = () => "In progress", activityLine = () => null;
 const sortedColumn = () => true, dropPosition = () => null, eventBox = () => null, liveDrop = () => null, priorityCard = (c) => c;
 `;
-const { BoardView } = await import(`data:text/javascript;base64,${Buffer.from(stubs + source.replace(/^import .*;\n/gm, "")).toString("base64")}`);
+const { BoardView } = await import(`data:text/javascript;base64,${Buffer.from(stubs + source.replace(/^import .*;\r?\n/gm, "")).toString("base64")}`);
 const fixture = JSON.parse(readFileSync(new URL("../fixtures/detail.json", import.meta.url), "utf8"));
 
 test("renders the In progress column and the step or queued badge on its cards", () => {

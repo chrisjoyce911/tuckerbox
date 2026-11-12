@@ -67,9 +67,9 @@ const tiny = button, closeButton = node;
 const model = new URL("../model.js", import.meta.url).href;
 const actions = new URL("../actions.js", import.meta.url).href;
 const body = source
-  .replace(/^import .* from "\.\/model\.js";\n/m, (l) => l.replace("./model.js", model))
-  .replace(/^import .* from "\.\/actions\.js";\n/m, (l) => l.replace("./actions.js", actions))
-  .replace(/^import .* from "(?!file:).*";\n/gm, "");
+  .replace(/^import .* from "\.\/model\.js";\r?\n/m, (l) => l.replace("./model.js", model))
+  .replace(/^import .* from "\.\/actions\.js";\r?\n/m, (l) => l.replace("./actions.js", actions))
+  .replace(/^import .* from "(?!file:).*";\r?\n/gm, "");
 const { CardView } = await import(`data:text/javascript;base64,${Buffer.from(stubs + body).toString("base64")}`);
 
 // The board's cards through the same stand-in, with the real model and
@@ -81,9 +81,9 @@ const MOD = "tuckerbox-board", loadAll = async () => null, locate = () => null, 
 const SPINNER = "";
 `;
 const boardBody = readFileSync(new URL("../board.js", import.meta.url), "utf8")
-  .replace(/^import .* from "\.\/model\.js";\n/m, (l) => l.replace("./model.js", model))
-  .replace(/^import .* from "\.\/actions\.js";\n/m, (l) => l.replace("./actions.js", actions))
-  .replace(/^import .* from "(?!file:).*";\n/gm, "");
+  .replace(/^import .* from "\.\/model\.js";\r?\n/m, (l) => l.replace("./model.js", model))
+  .replace(/^import .* from "\.\/actions\.js";\r?\n/m, (l) => l.replace("./actions.js", actions))
+  .replace(/^import .* from "(?!file:).*";\r?\n/gm, "");
 const { BoardView } = await import(`data:text/javascript;base64,${Buffer.from(boardStubs + boardBody).toString("base64")}`);
 const boardView = () => { const v = new BoardView(); v.board = { columns: [], steps: ["plan", "build", "review"], require_approval: true }; return v; };
 

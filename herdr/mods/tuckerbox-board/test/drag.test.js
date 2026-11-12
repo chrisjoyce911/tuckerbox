@@ -11,7 +11,7 @@ const stubs = `
 class View {}
 const { group, sortedColumn, dropPosition, eventBox, liveDrop, priorityCard } = globalThis.__model;
 `;
-const { BoardView } = await import(`data:text/javascript;base64,${Buffer.from(stubs + source.replace(/^import .*;\n/gm, "")).toString("base64")}`);
+const { BoardView } = await import(`data:text/javascript;base64,${Buffer.from(stubs + source.replace(/^import .*;\r?\n/gm, "")).toString("base64")}`);
 
 const doc = (machine, path, cards) => ({ version: 1, repo: "github.com/owner/shop", path, machine, require_approval: true, steps: ["build"],
   columns: [{ id: "approved", kind: "approved", name: "Approved" }, { id: "in_progress", kind: "in_progress", name: "In progress" }], cards });
