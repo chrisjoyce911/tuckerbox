@@ -47,16 +47,19 @@ on the board.
 ### New Capabilities
 
 - `change-priority`: the rank, the `priority` command, the priority and
-  admission orders, how priority writes keep approval, and priority on the
-  board.
+  admission orders, and how priority writes keep approval.
 
 ### Modified Capabilities
 
 - `change-runs`: `Parallel limit` starts queued runs in admission order
   instead of request order.
+- `board-data`: cards carry `priority` and `position`, and the sorted
+  columns list cards in priority order.
+- `herdr-board`: drag a card within its column to reorder it.
 
-The board additions are in `change-priority`, because `add-herdr-board`
-isn't archived yet. See design.md.
+The board additions were first written in `change-priority` and moved to
+`board-data` and `herdr-board` once `add-herdr-board` was archived. See
+design.md.
 
 ## Impact
 

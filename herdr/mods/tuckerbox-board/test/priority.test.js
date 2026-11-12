@@ -1,4 +1,4 @@
-// Priority on the board and drag to reorder (change-priority).   node --test test/
+// Priority on the board (board-data) and drag to reorder (herdr-board).   node --test test/
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

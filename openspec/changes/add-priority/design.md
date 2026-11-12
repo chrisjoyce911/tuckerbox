@@ -212,8 +212,10 @@ admission after they land, and the spec says so.
   drop, the card may land one place off, and the next read shows the truth.
 
 ### Where the requirements live
-`add-herdr-board` isn't archived, so the board requirements stay in
-`change-priority`. `change-runs` is archived, so `Parallel limit` gets a
+The board requirements were written in `change-priority` while
+`add-herdr-board` wasn't archived. It is now, so at archive time they
+moved to ADDED deltas: `Priority on the board` in `board-data` and
+`Drag to reorder` in `herdr-board`. `change-runs` is archived, so `Parallel limit` gets a
 MODIFIED delta: "in the order requested" becomes "in admission order".
 
 ### Autopilot

@@ -141,7 +141,7 @@ The command still exits non-zero with an error document.
 
 Proposed, Approved, In progress, and in the steps layout Queued and each
 step column, list their cards in priority order; Ready and Done keep their
-order (change-priority: Priority on the board). The mod groups cards in the
+order (board-data: Priority on the board). The mod groups cards in the
 document's order, so it sorts nothing itself.
 
 Default `[board] columns = "compact"` shows Proposed, Approved (when required),

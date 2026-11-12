@@ -74,7 +74,7 @@ type Card struct {
 	Archived   string       `json:"archived,omitempty"`
 	// Priority is the change's stored priority in the repository checkout
 	// on this machine, or null; Position is its place in priority order,
-	// from 1. Both only for active changes (change-priority: Priority on
+	// from 1. Both only for active changes (board-data: Priority on
 	// the board).
 	Priority *int64 `json:"priority"`
 	Position int    `json:"position,omitempty"`

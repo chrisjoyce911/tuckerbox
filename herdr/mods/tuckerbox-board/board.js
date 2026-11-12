@@ -189,7 +189,7 @@ export class BoardView extends View {
       .when(dragging, (el) => el.opacity(0.4))
       .when(Boolean(target), (el) => (target.below ? el.border_b(3) : el.border_t(3)))
       .cursor_pointer().hover((s) => s.border_color(flag ? tm.blocked : tm.accent))
-      // Drag to reorder (change-priority: Drag to reorder): a press starts it
+      // Drag to reorder (herdr-board: Drag to reorder): a press starts it
       // once the pointer moves; the card under the pointer, and which half of
       // it, says where it lands.
       .when(sortedColumn(c.column) && c.position > 0, (el) => el
