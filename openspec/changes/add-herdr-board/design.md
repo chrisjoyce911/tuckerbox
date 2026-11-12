@@ -174,3 +174,14 @@ The mod lives at `herdr/mods/tuckerbox-board/` in this repo, and its version mat
 - **Polling cost:** several machines × every 5 s × `tuckerbox board --json` means some process starts. Each call reads small files and should stay under 100 ms. To be measured, with the interval made configurable if needed.
 - **Derived columns can surprise.** A change jumps from Build back to... Build in round 2, which doesn't look like movement. The card shows the round, and the history shows the loop.
 - **The sidecar dependency file is Tuckerbox-specific.** It's harmless to OpenSpec, but people must know it exists. `tuckerbox check` and the board both show dependencies.
+
+## Board column layouts
+
+`[board] columns` defaults to `"compact"`: Proposed, Approved only when
+required, In progress, Ready, Done. `"steps"` retains Queued and a column per
+workflow step. This display preference follows existing machine-default and
+repository-override precedence. `require_approval` remains repository-only.
+In compact mode every queued or workflow run stays in `in_progress`; `badge`
+contains `queued` or its current step. The document's ordered `steps` array
+preserves re-run choices without requiring step columns. Obsolete steps use
+the layout's queue location and `queued` badge, keeping the per-card error.

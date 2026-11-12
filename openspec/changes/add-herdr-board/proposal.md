@@ -47,8 +47,9 @@ nothing stops `tuckerbox run` from starting a proposal nobody has read.
   The columns are derived from OpenSpec and run state, not stored anywhere.
 - **Herdr board mod:** a Herdr app mod, shipped in this repository and
   installed with `tuckerbox herdr install`.
-  - **Board:** Proposed and Approved columns, then a column per stage of
-    the repo's workflow. Each card shows its task progress, approval
+  - **Board:** Compact columns by default: Proposed, Approved when required,
+    In progress (step/queued badges), Ready and Done. `[board] columns = "steps"`
+    restores Queued and a column per workflow step. Each card shows its task progress, approval
     (approved, stale or none), agent, machine and state, and highlights
     changes that need you.
   - **Card detail:** the proposal, the task list with tick boxes, approval,
@@ -83,7 +84,8 @@ nothing stops `tuckerbox run` from starting a proposal nobody has read.
 
 ### Modified Capabilities
 
-None. The capabilities from `add-core-runner` aren't archived yet. This
+`repo-config` adds `board.columns` with the existing machine-default and
+repository-override precedence. The capabilities from `add-core-runner` aren't archived yet. This
 change depends on it and adds new capabilities beside them. Two of them
 add to `add-core-runner` behaviour: the run gate adds to `change-runs`, and
 `require_approval` and `editor` are new config keys (see design.md).
