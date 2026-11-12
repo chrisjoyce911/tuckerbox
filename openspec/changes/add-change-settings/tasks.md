@@ -17,15 +17,15 @@
 
 ## 2. Effective settings and runs (change-settings)
 
-- [ ] 2.1 Work out effective settings per step (change, repo, machine, default) with the source of each; drop an inherited model and effort when the change overrides the agent
-- [ ] 2.2 Test "Change wins"
-- [ ] 2.3 Test "Agent changed without a model"
-- [ ] 2.4 Honour a change's profile name only through machine profiles and `allowed_remotes`, as for repository steps
-- [ ] 2.5 Test "Profile not granted here"
-- [ ] 2.6 `run`, `resume` and `rerun` check overrides against the allow-list from the files the run gate judges (worktree, else the pinned commit); refuse before any worktree or run state changes
-- [ ] 2.7 Test "Allow-list narrowed later"
-- [ ] 2.8 Record effective settings and sources in `run.json` and the `step_started` history event; never record a profile's flags; document the fields in `internal/history`
-- [ ] 2.9 Test "History shows the override"
+- [x] 2.1 Work out effective settings per step (change, repo, machine, default) with the source of each; drop an inherited model and effort when the change overrides the agent
+- [x] 2.2 Test "Change wins"
+- [x] 2.3 Test "Agent changed without a model"
+- [x] 2.4 Honour a change's profile name only through machine profiles and `allowed_remotes`, as for repository steps
+- [x] 2.5 Test "Profile not granted here"
+- [x] 2.6 `run`, `resume` and `rerun` check overrides against the allow-list from the files the run gate judges (worktree, else the pinned commit); refuse before any worktree or run state changes
+- [x] 2.7 Test "Allow-list narrowed later"
+- [x] 2.8 Record effective settings and sources in `run.json` and the `step_started` history event; never record a profile's flags; document the fields in `internal/history`
+- [x] 2.9 Test "History shows the override"
 
 ## 3. `tuckerbox set` (change-settings)
 
