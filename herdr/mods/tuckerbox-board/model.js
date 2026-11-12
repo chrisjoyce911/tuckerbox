@@ -42,6 +42,8 @@ export function normaliseCard(c, src = {}) {
       by: str(a.by),
       at: str(a.at),
       committed: a.committed !== false,
+      // approval-publish: false while this machine's approve or unapprove isn't on the remote yet.
+      published: a.published !== false,
     },
     state: str(c?.state),
     reason: str(c?.reason),

@@ -104,6 +104,9 @@ func (a App) Run(args []string) int {
 		if line := a.forgeDoctorLine(); line != "" {
 			fmt.Fprintln(a.Stdout, line)
 		}
+		if line := a.approvalsDoctorLine(); line != "" {
+			fmt.Fprintln(a.Stdout, line)
+		}
 		if !doctor.OK(results) {
 			return 1
 		}

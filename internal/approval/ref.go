@@ -463,3 +463,23 @@ func JudgeWith(files Files, e *Entry) (Status, error) {
 	}
 	return st, nil
 }
+
+// CheckRemote reports whether the remote's approvals ref can be read and
+// pushed: ls-remote, then a dry-run push of the local ref (or of an empty
+// commit when there is none yet). It changes nothing on the remote.
+func (s Store) CheckRemote(ctx context.Context) error {
+	if _, err := s.git(ctx, nil, nil, "ls-remote", Remote, RefName); err != nil {
+		return fmt.Errorf("can't read %s from %s: %v", RefName, Remote, err)
+	}
+	c := s.resolve(ctx, RefName)
+	if c == "" {
+		var err error
+		if c, err = s.commit(ctx, "", nil); err != nil {
+			return err
+		}
+	}
+	if _, err := s.git(ctx, nil, nil, "push", "--dry-run", "--porcelain", Remote, c+":"+RefName+"-doctor"); err != nil {
+		return fmt.Errorf("can't push %s to %s: %v", RefName, Remote, err)
+	}
+	return nil
+}

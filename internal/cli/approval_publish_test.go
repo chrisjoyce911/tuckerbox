@@ -83,3 +83,43 @@ func TestCheckNotesTwoApprovals(t *testing.T) {
 		t.Errorf("check: %d %s %s", res.code, res.stdout, res.stderr)
 	}
 }
+
+// approval-publish: Approve on a train. With the remote out of reach the
+// approval counts here and approve says it isn't published; the next board
+// read publishes it.
+func TestApproveOffline(t *testing.T) {
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}, RequireApproval: true})
+	other := f.withRemote()
+	bare := testenv.Git(t, f.repo, "remote", "get-url", "origin")
+	testenv.Git(t, f.repo, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "gone.git"))
+	res := f.tb("approve", "add-login")
+	if res.code != 0 || !strings.Contains(res.stdout, "not published") {
+		t.Fatalf("approve offline: %d %s %s", res.code, res.stdout, res.stderr)
+	}
+	if st := f.approvalState(f.repo, "add-login"); st != approval.Approved {
+		t.Errorf("offline approval doesn't count here: %s", st)
+	}
+	if res := f.tb("board", "--json"); !strings.Contains(res.stdout, `"published": false`) {
+		t.Errorf("board offline: %s", res.stdout)
+	}
+	testenv.Git(t, f.repo, "remote", "set-url", "origin", bare)
+	if res := f.tb("board", "--json"); res.code != 0 || strings.Contains(res.stdout, `"published": false`) {
+		t.Errorf("board after the network is back: %d %s", res.code, res.stdout)
+	}
+	if res := tbIn(t, other, "run", "--foreground", "add-login"); res.code != 0 {
+		t.Errorf("other machine after publishing: %d %s", res.code, res.stderr)
+	}
+}
+
+// approval-publish task 3.5: doctor reports whether approvals can be
+// published.
+func TestDoctorApprovalsLine(t *testing.T) {
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}})
+	if res := f.tb("doctor"); !strings.Contains(res.stdout, "approvals: no remote origin") {
+		t.Errorf("doctor without a remote: %s", res.stdout)
+	}
+	f.withRemote()
+	if res := f.tb("doctor"); !strings.Contains(res.stdout, "approvals: refs/tuckerbox/approvals on origin can be fetched and pushed") {
+		t.Errorf("doctor with a remote: %s", res.stdout)
+	}
+}

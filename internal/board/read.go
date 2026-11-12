@@ -151,7 +151,7 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 		if _, ok := folders[a.id]; ok {
 			continue
 		}
-		c, err := readCard(ctx, a.id, a.folder, doc.Machine, true, nil)
+		c, err := readCard(ctx, a.id, a.folder, doc.Machine, true, refView{})
 		c.addError(err)
 		c.Column, c.Archived = "done", a.date
 		if p, r, err := locate(repo, cfg.Worktree, worktrees, a.id); err == nil && r != nil {
@@ -265,8 +265,8 @@ func columns(cfg *config.Config) []Column {
 	return append(out, Column{ID: "ready", Kind: "ready", Name: "Ready"}, Column{ID: "done", Kind: "done", Name: "Done"})
 }
 
-func readCard(ctx context.Context, id, folder, machine string, archived bool, refs map[string]approval.Entry) (Card, error) {
-	c := Card{Change: id, Title: strings.ReplaceAll(id, "-", " "), Machine: machine, DependsOn: []Dependency{}, Approval: Approval{State: "none", Committed: archived}}
+func readCard(ctx context.Context, id, folder, machine string, archived bool, refs refView) (Card, error) {
+	c := Card{Change: id, Title: strings.ReplaceAll(id, "-", " "), Machine: machine, DependsOn: []Dependency{}, Approval: Approval{State: "none", Committed: archived, Published: true}}
 	var sidecar struct {
 		Title     string   `toml:"title"`
 		DependsOn []string `toml:"depends_on"`
@@ -302,14 +302,14 @@ func readCard(ctx context.Context, id, folder, machine string, archived bool, re
 		return c, nil
 	}
 	var entry *approval.Entry
-	if e, ok := refs[id]; ok {
+	if e, ok := refs.entries[id]; ok {
 		entry = &e
 	}
 	st, err := approval.JudgeWith(approval.Dir(folder), entry)
 	if err != nil {
 		return c, err
 	}
-	c.Approval = Approval{State: string(st.State), Committed: true}
+	c.Approval = Approval{State: string(st.State), Committed: true, Published: !refs.unpublished[id]}
 	if st.Approval != nil {
 		c.Approval.By, c.Approval.At = st.Approval.By, timestamp(st.Approval.At)
 	}
@@ -479,15 +479,20 @@ func (c *Card) addError(err error) {
 	c.Error += err.Error()
 }
 
+// refView is what a board read knows of the approvals ref.
+type refView struct {
+	entries     map[string]approval.Entry
+	unpublished map[string]bool
+}
+
 // refApprovals reads the approvals ref (approval-publish), fetching it from
 // the remote at most once a minute and publishing this machine's
 // unpublished approvals. A ref that can't be read leaves the sidecars.
-func refApprovals(ctx context.Context, root string) map[string]approval.Entry {
+func refApprovals(ctx context.Context, root string) refView {
 	s := approval.Store{Dir: root}
 	_ = s.Sync(ctx, time.Minute)
-	es, err := s.Entries(ctx)
-	if err != nil {
-		return nil
-	}
-	return es
+	var v refView
+	v.entries, _ = s.Entries(ctx)
+	v.unpublished, _ = s.Unpublished(ctx)
+	return v
 }

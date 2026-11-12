@@ -199,6 +199,7 @@ export class BoardView extends View {
       .child(h_flex().items_center().gap(6)
         .child(approvalChip(c.approval, { short: true }))
         .when(!c.approval.committed && c.approval.state !== "none", (el) => el.child(div().text_size(10.5).text_color(tm.blocked).child("not committed")))
+        .when(!c.approval.published, (el) => el.child(div().text_size(10.5).text_color(tm.blocked).child("not published")))
         .child(div().flex_1())
         .when(c.tasks.total > 0, (el) => el.child(progressBar(c.tasks, 46))))
       .when(Boolean(c.badge || c.step || c.agent || c.scope), (el) => el.child(h_flex().items_center().gap(6).text_size(10.5).text_color(tm.dim)

@@ -227,3 +227,16 @@ func TestJudgeWith(t *testing.T) {
 		t.Fatalf("edited after approval: %+v", st)
 	}
 }
+
+// approval-publish task 3.5: doctor's check of the approvals remote.
+func TestCheckRemote(t *testing.T) {
+	ctx := context.Background()
+	_, cs := clones(t, 1)
+	if err := (Store{Dir: cs[0]}).CheckRemote(ctx); err != nil {
+		t.Fatalf("reachable remote: %v", err)
+	}
+	gitT(t, cs[0], "remote", "set-url", "origin", filepath.Join(t.TempDir(), "gone.git"))
+	if err := (Store{Dir: cs[0]}).CheckRemote(ctx); err == nil {
+		t.Fatal("unreachable remote passed")
+	}
+}
