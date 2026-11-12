@@ -1,0 +1,2 @@
+title = "Configuration UI"
+depends_on = ["add-herdr-board", "fix-board-safety", "add-change-settings", "add-forge-shipping"]
