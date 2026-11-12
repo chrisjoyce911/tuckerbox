@@ -10,6 +10,7 @@ import (
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/deps"
 	"github.com/chrisjoyce911/tuckerbox/internal/priority"
+	"github.com/chrisjoyce911/tuckerbox/internal/settings"
 )
 
 func (a App) configEnv() (config.Env, func() (string, error)) {
@@ -66,7 +67,18 @@ func (a App) check() int {
 		fmt.Fprintln(a.Stderr, "tuckerbox check:", err)
 		return 1
 	}
-	if n := len(problems) + len(depProblems) + len(prioProblems); n > 0 {
+	// A config with problems may be incomplete: check the changes'
+	// settings against it only when it is valid.
+	settingsCfg := cfg
+	if len(problems) > 0 {
+		settingsCfg = nil
+	}
+	setProblems, setErr := settings.CheckAll(opts.RepoRoot, settingsCfg)
+	if setErr != nil {
+		fmt.Fprintln(a.Stderr, "tuckerbox check: change settings:", setErr)
+		depErr = errors.Join(depErr, setErr)
+	}
+	if n := len(problems) + len(depProblems) + len(prioProblems) + len(setProblems); n > 0 {
 		for _, p := range problems {
 			p.File = displayPath(opts.RepoRoot, p.File)
 			fmt.Fprintln(a.Stderr, p)
@@ -75,6 +87,9 @@ func (a App) check() int {
 			fmt.Fprintln(a.Stderr, p)
 		}
 		for _, p := range prioProblems {
+			fmt.Fprintln(a.Stderr, p)
+		}
+		for _, p := range setProblems {
 			fmt.Fprintln(a.Stderr, p)
 		}
 		noun := "problems"
