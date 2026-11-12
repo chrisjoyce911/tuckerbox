@@ -209,6 +209,18 @@ func (t Terminal) Run(ctx context.Context, s Step, opts Options) (Outcome, error
 
 	logf, err := openLog(o.LogPath)
 	if err != nil {
+		// Without a log the step can't run, but a live agent in its
+		// terminal (one the run would adopt, or one left from earlier) is
+		// not over: give an *EndError so the run keeps the terminal for
+		// resume and stop.
+		o.ExitCode = -1
+		cur, lerr := t.lookup(ctx, s, opts, io.Discard)
+		switch {
+		case lerr != nil:
+			return o, fmt.Errorf("step %s: log: %v; %w", s.Step, err, lerr)
+		case cur.Live():
+			return o, fmt.Errorf("step %s: %w", s.Step, &EndError{Name: name, Err: fmt.Errorf("its terminal is live, and the step log can't be opened: %w", err)})
+		}
 		return o, fmt.Errorf("step %s: log: %w", s.Step, err)
 	}
 	defer logf.Close()

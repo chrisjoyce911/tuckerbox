@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -404,6 +405,30 @@ func TestLeftoverTerminalFromOlderRound(t *testing.T) {
 
 // A live terminal of this step and round is adopted, not replaced: its
 // result is accepted and no second agent starts.
+// startOrphan starts the agent of step s as a run process that then died
+// would have left it: its brief written, its terminal live and labelled
+// for s's step and round.
+func (f *termFixture) startOrphan(s Step) {
+	t := f.t
+	t.Helper()
+	if err := s.State.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	pre := Outcome{BriefPath: s.State.Brief(s.Step, s.Round), ResultPath: s.State.Result(s.Step, s.Round), MessagePath: s.State.LastMessage(s.Step, s.Round)}
+	if err := f.be.prepare(s, &pre); err != nil {
+		t.Fatal(err)
+	}
+	inner, err := s.Agent.ExpandInteractive(Values{Brief: "go", TurnHook: TurnHookArgv(termTools.Tuckerbox, s.State, s.Step, s.Round, HookArgv)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	argv := HoldArgv(termTools.Tuckerbox, s.Term, stepEnv(s, pre.BriefPath, pre.ResultPath), inner)
+	if _, err := f.hc.Start(context.Background(), HCStart{Name: s.Term.Name, Cwd: s.Worktree, Argv: argv,
+		Labels: [][2]string{{LabelChange, s.Change}, {LabelStep, s.Step}, {LabelRound, strconv.Itoa(s.Round)}}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAdoptLiveTerminal(t *testing.T) {
 	f := newTermFixture(t)
 	gate := filepath.Join(f.env.Home, "gate")
@@ -411,22 +436,7 @@ func TestAdoptLiveTerminal(t *testing.T) {
 	s := f.step("build", "builder", 2, interactiveFake())
 	// The agent a run process started before it died: its brief written,
 	// its terminal live and labelled for build round 2.
-	if err := s.State.Ensure(); err != nil {
-		t.Fatal(err)
-	}
-	pre := Outcome{BriefPath: s.State.Brief("build", 2), ResultPath: s.State.Result("build", 2), MessagePath: s.State.LastMessage("build", 2)}
-	if err := f.be.prepare(s, &pre); err != nil {
-		t.Fatal(err)
-	}
-	inner, err := s.Agent.ExpandInteractive(Values{Brief: "go", TurnHook: TurnHookArgv(termTools.Tuckerbox, s.State, "build", 2, HookArgv)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	argv := HoldArgv(termTools.Tuckerbox, s.Term, stepEnv(s, pre.BriefPath, pre.ResultPath), inner)
-	if _, err := f.hc.Start(context.Background(), HCStart{Name: s.Term.Name, Cwd: s.Worktree, Argv: argv,
-		Labels: [][2]string{{LabelChange, s.Change}, {LabelStep, "build"}, {LabelRound, "2"}}}); err != nil {
-		t.Fatal(err)
-	}
+	f.startOrphan(s)
 	go func() {
 		time.Sleep(300 * time.Millisecond)
 		testenv.WriteFile(t, gate, "go\n")
@@ -454,22 +464,7 @@ func TestAdoptionLookupFails(t *testing.T) {
 	f := newTermFixture(t)
 	f.env.SetPlan(t, map[string]testenv.Action{"build": {WaitFor: filepath.Join(f.env.Home, "never")}})
 	s := f.step("build", "builder", 2, interactiveFake())
-	if err := s.State.Ensure(); err != nil {
-		t.Fatal(err)
-	}
-	pre := Outcome{BriefPath: s.State.Brief("build", 2), ResultPath: s.State.Result("build", 2), MessagePath: s.State.LastMessage("build", 2)}
-	if err := f.be.prepare(s, &pre); err != nil {
-		t.Fatal(err)
-	}
-	inner, err := s.Agent.ExpandInteractive(Values{Brief: "go", TurnHook: TurnHookArgv(termTools.Tuckerbox, s.State, "build", 2, HookArgv)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	argv := HoldArgv(termTools.Tuckerbox, s.Term, stepEnv(s, pre.BriefPath, pre.ResultPath), inner)
-	if _, err := f.hc.Start(context.Background(), HCStart{Name: s.Term.Name, Cwd: s.Worktree, Argv: argv,
-		Labels: [][2]string{{LabelChange, s.Change}, {LabelStep, "build"}, {LabelRound, "2"}}}); err != nil {
-		t.Fatal(err)
-	}
+	f.startOrphan(s)
 
 	f.setFault("get-fail", "0")
 	o, err := f.be.Run(context.Background(), s, termOpts)
@@ -497,6 +492,43 @@ func TestAdoptionLookupFails(t *testing.T) {
 }
 
 // Cancelling the run (stop) ends the agent's terminal.
+// A run adopting a live agent whose step log can't be opened does not
+// treat the step as failed with no agent left: Run returns an *EndError
+// naming the terminal, so the run keeps it, and stop can still end it.
+func TestAdoptionLogCannotBeOpened(t *testing.T) {
+	f := newTermFixture(t)
+	f.env.SetPlan(t, map[string]testenv.Action{"build": {WaitFor: filepath.Join(f.env.Home, "never")}})
+	s := f.step("build", "builder", 2, interactiveFake())
+	f.startOrphan(s)
+	// A directory where the step log should be: opening it to append fails.
+	if err := os.MkdirAll(s.State.Log("build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	o, err := f.be.Run(context.Background(), s, termOpts)
+	var endErr *EndError
+	if !errors.As(err, &endErr) || endErr.Name != s.Term.Name {
+		t.Fatalf("Run with an unopenable log: %v (outcome %+v)", err, o)
+	}
+	if o.Stopped || o.Result != nil {
+		t.Errorf("outcome %+v", o)
+	}
+	if !f.get(s.Term.Name).Live() {
+		t.Fatal("the adopted agent's terminal is not live")
+	}
+	if err := f.be.EndAgent(context.Background(), s.Term.Name); err != nil {
+		t.Fatal(err)
+	}
+	if f.get(s.Term.Name).Live() {
+		t.Error("the agent's terminal is live after it was ended")
+	}
+
+	// With no terminal live, the same failure is an ordinary error.
+	_, err = f.be.Run(context.Background(), s, termOpts)
+	if err == nil || errors.As(err, &endErr) {
+		t.Errorf("Run with an unopenable log and no agent: %v, want an ordinary error", err)
+	}
+}
+
 func TestStopEndsTerminal(t *testing.T) {
 	f := newTermFixture(t)
 	f.env.SetPlan(t, map[string]testenv.Action{"build": {WaitFor: filepath.Join(f.env.Home, "never")}})
