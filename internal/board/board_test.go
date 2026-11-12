@@ -507,3 +507,37 @@ func TestStagedApprovalDiffersFromWorkingCopy(t *testing.T) {
 		t.Fatal(ok, err)
 	}
 }
+
+// approval-publish: the board reads approvals from the approvals ref, and
+// an entry there wins over the sidecar.
+func TestBoardReadsApprovalsRef(t *testing.T) {
+	ctx := context.Background()
+	testTools.Setup(t)
+	root := testTools.NewRepo(t, testenv.RepoOptions{Changes: []string{"add-login", "add-users"}, RequireApproval: true})
+	dir := approval.DirOf(root, "add-login")
+	hash, err := approval.Hash(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := approval.Store{Dir: root}
+	if err := s.Record(ctx, "add-login", approval.Entry{State: approval.EntryApproved, Hash: hash, By: "Owner", At: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := approval.Approve(approval.DirOf(root, "add-users"), "Old", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Record(ctx, "add-users", approval.Entry{State: approval.EntryWithdrawn, By: "Owner", At: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	doc := read(t, root, "")
+	got := map[string]Approval{}
+	for _, c := range doc.Cards {
+		got[c.Change] = c.Approval
+	}
+	if got["add-login"].State != "approved" || got["add-login"].By != "Owner" {
+		t.Errorf("add-login approval = %+v", got["add-login"])
+	}
+	if got["add-users"].State != "none" {
+		t.Errorf("add-users after withdrawal = %+v", got["add-users"])
+	}
+}

@@ -45,6 +45,8 @@ type Status struct {
 	Approval *Approval
 	// Hash is the hash of the change's files now.
 	Hash string
+	// FromRef: judged from the approvals ref, not the sidecar.
+	FromRef bool
 }
 
 // ParseSidecar returns the approval in a tuckerbox.toml's contents, or nil

@@ -2,8 +2,10 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -37,8 +39,9 @@ func (a App) approve(args []string) int {
 	if !ok {
 		return 1
 	}
-	var ap approval.Approval
+	var ap approval.Entry
 	var invalid *edits.Result
+	var pubErr error
 	err = edits.WithChangeLock(ctx, p, "tuckerbox approve", func() error {
 		res, err := edits.Validator{}.Validate(ctx, p)
 		if err != nil {
@@ -52,8 +55,16 @@ func (a App) approve(args []string) int {
 		if by == "" {
 			return fmt.Errorf("git user.name is not set in %s; set it (git config user.name \"Your Name\") so the approval says who approved", p.Dir)
 		}
-		ap, err = approval.Approve(approval.DirOf(p.Dir, change), by, time.Now())
-		return err
+		hash, err := approval.Hash(approval.DirOf(p.Dir, change))
+		if err != nil {
+			return err
+		}
+		ap = approval.Entry{State: approval.EntryApproved, Hash: hash, By: by, At: time.Now().Truncate(time.Second)}
+		pubErr = approval.Store{Dir: p.Dir}.Record(ctx, change, ap)
+		if errors.Is(pubErr, approval.ErrOffline) {
+			return nil
+		}
+		return pubErr
 	})
 	if err != nil {
 		return a.errf("approve", "%v", err)
@@ -62,9 +73,18 @@ func (a App) approve(args []string) int {
 		fmt.Fprint(a.Stderr, invalid.Text())
 		return a.errf("approve", "change %s is not valid; fix it before approving. Nothing changed", change)
 	}
-	fmt.Fprintf(a.Stdout, "approved %s in %s (by %s at %s, %s)\n", change, p.Describe(), ap.By, ap.At.Format(time.RFC3339), ap.Hash)
-	fmt.Fprintf(a.Stdout, "not committed: commit and push %s; the approval only counts elsewhere, and for a run on a new worktree, once it is on the branch the run starts from\n", sidecarRel(change))
+	fmt.Fprintf(a.Stdout, "approved %s as in %s (by %s at %s, %s)\n", change, p.Describe(), ap.By, ap.At.Format(time.RFC3339), ap.Hash)
+	published(a, pubErr)
 	return 0
+}
+
+// published says where an approve or unapprove now counts.
+func published(a App, err error) {
+	if errors.Is(err, approval.ErrOffline) {
+		fmt.Fprintf(a.Stdout, "not published: %v\n", err)
+		return
+	}
+	fmt.Fprintf(a.Stdout, "published on %s: it counts on every machine now; nothing to commit\n", approval.RefName)
 }
 
 // unapprove: tuckerbox unapprove <change>
@@ -79,21 +99,61 @@ func (a App) unapprove(args []string) int {
 		return 1
 	}
 	var removed bool
-	err = edits.WithChangeLock(context.Background(), p, "tuckerbox unapprove", func() error {
-		var err error
-		removed, err = approval.Unapprove(approval.DirOf(p.Dir, change))
-		return err
+	var pubErr error
+	ctx := context.Background()
+	err = edits.WithChangeLock(ctx, p, "tuckerbox unapprove", func() error {
+		st, err := currentApproval(ctx, p.Dir, change)
+		if err != nil {
+			return err
+		}
+		if st.Approval == nil {
+			return nil
+		}
+		removed = true
+		by := gitUserName(ctx, p.Dir)
+		pubErr = approval.Store{Dir: p.Dir}.Record(ctx, change, approval.Entry{State: approval.EntryWithdrawn, By: by, At: time.Now()})
+		if errors.Is(pubErr, approval.ErrOffline) {
+			return nil
+		}
+		return pubErr
 	})
 	if err != nil {
 		return a.errf("unapprove", "%v", err)
 	}
 	if !removed {
-		fmt.Fprintf(a.Stdout, "%s has no approval in %s; nothing changed\n", change, p.Describe())
+		fmt.Fprintf(a.Stdout, "%s has no approval; nothing changed\n", change)
 		return 0
 	}
-	fmt.Fprintf(a.Stdout, "removed the approval of %s in %s\n", change, p.Describe())
-	fmt.Fprintf(a.Stdout, "not committed: commit and push %s so other machines see it\n", sidecarRel(change))
+	fmt.Fprintf(a.Stdout, "withdrew the approval of %s\n", change)
+	published(a, pubErr)
 	return 0
+}
+
+// currentApproval judges change's approval in dir from the approvals ref
+// (synced from the remote) or, without an entry there, its sidecar.
+func currentApproval(ctx context.Context, dir, change string) (approval.Status, error) {
+	e, err := refEntry(ctx, dir, change)
+	if err != nil {
+		return approval.Status{}, err
+	}
+	return approval.JudgeWith(approval.DirOf(dir, change), e)
+}
+
+// refEntry fetches the approvals ref and returns change's entry on it, or
+// nil. Offline, the local ref is used as it is.
+func refEntry(ctx context.Context, dir, change string) (*approval.Entry, error) {
+	s := approval.Store{Dir: dir}
+	if err := s.Sync(ctx, 0); err != nil {
+		return nil, err
+	}
+	es, err := s.Entries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if e, ok := es[change]; ok {
+		return &e, nil
+	}
+	return nil, nil
 }
 
 // runGate is the early approval check in tuckerbox run, for a clear
@@ -151,8 +211,12 @@ func approvalGate(repo runs.Repo) func(context.Context, string, runs.StartPoint)
 // starts from. With note, a refusal on a commit mentions an approval in
 // the checkout that is not on it.
 func judgeStart(ctx context.Context, repo runs.Repo, change string, sp runs.StartPoint, note bool) error {
+	entry, err := refEntry(ctx, repo.Root, change)
+	if err != nil {
+		return fmt.Errorf("change %s: reading %s: %v", change, approval.RefName, err)
+	}
 	if sp.Worktree != "" {
-		st, err := approval.Judge(approval.DirOf(sp.Worktree, change))
+		st, err := approval.JudgeWith(approval.DirOf(sp.Worktree, change), entry)
 		if err != nil {
 			return fmt.Errorf("change %s: reading its approval in %s: %v", change, sp.Worktree, err)
 		}
@@ -169,12 +233,12 @@ func judgeStart(ctx context.Context, repo runs.Repo, change string, sp runs.Star
 	if !rev.Exists() {
 		return fmt.Errorf("change %s is not %s; commit it there first", change, strings.TrimPrefix(where, "on "))
 	}
-	st, err := approval.Judge(rev)
+	st, err := approval.JudgeWith(rev, entry)
 	if err != nil {
 		return fmt.Errorf("change %s: reading its approval %s: %v", change, where, err)
 	}
 	extra := ""
-	if note && st.State != approval.Approved {
+	if note && st.State != approval.Approved && !st.FromRef {
 		if local, err := approval.Judge(approval.DirOf(repo.Root, change)); err == nil && local.Approval != nil &&
 			(st.Approval == nil || local.Approval.Hash != st.Approval.Hash || !local.Approval.At.Equal(st.Approval.At)) {
 			extra = fmt.Sprintf("; the checkout %s has an approval (%s) that is not on %s: commit and push %s",
@@ -197,9 +261,9 @@ func gateError(change string, st approval.Status, where, note string) error {
 	default:
 		msg = fmt.Sprintf("change %s: not approved: there is no approval %s; run tuckerbox approve %s", change, where, change)
 		if ref, ok := strings.CutPrefix(where, "on the base branch "); ok {
-			msg = fmt.Sprintf("change %s: not approved: the base branch %s has no approval for it; run tuckerbox approve %s, then commit and push it", change, ref, change)
+			msg = fmt.Sprintf("change %s: not approved: the base branch %s has no approval for it; run tuckerbox approve %s", change, ref, change)
 		} else if ref, ok := strings.CutPrefix(where, "on its branch "); ok {
-			msg = fmt.Sprintf("change %s: not approved: its branch %s has no approval for it; approve it there (commit the approval on %s) or delete the branch", change, ref, ref)
+			msg = fmt.Sprintf("change %s: not approved: its branch %s has no approval for it; run tuckerbox approve %s, or delete the branch", change, ref, change)
 		}
 	}
 	return &notApprovedError{State: st.State, msg: msg + note}
@@ -212,3 +276,37 @@ type notApprovedError struct {
 }
 
 func (e *notApprovedError) Error() string { return e.msg }
+
+// approvalConflicts notes the changes approved both on the approvals ref
+// and in their tuckerbox.toml with different hashes (the ref counts).
+func approvalConflicts(a App, root string) {
+	ctx := context.Background()
+	s := approval.Store{Dir: root}
+	_ = s.Sync(ctx, time.Minute)
+	es, err := s.Entries(ctx)
+	if err != nil {
+		fmt.Fprintf(a.Stderr, "tuckerbox check: warning: reading %s: %v\n", approval.RefName, err)
+		return
+	}
+	names := make([]string, 0, len(es))
+	for c := range es {
+		names = append(names, c)
+	}
+	sort.Strings(names)
+	for _, c := range names {
+		e := es[c]
+		data, err := approval.DirOf(root, c).Read(approval.SidecarName)
+		if err != nil {
+			continue
+		}
+		old, err := approval.ParseSidecar(data)
+		if err != nil || old == nil || (e.State == approval.EntryApproved && old.Hash == e.Hash) {
+			continue
+		}
+		what := "approved on " + approval.RefName
+		if e.State != approval.EntryApproved {
+			what = "withdrawn on " + approval.RefName
+		}
+		fmt.Fprintf(a.Stdout, "note: %s is %s and has a different [approval] in %s; the ref counts\n", c, what, sidecarRel(c))
+	}
+}
