@@ -245,6 +245,21 @@ func TestSlotFreesDuringARenumber(t *testing.T) {
 	for i, id := range ids {
 		chans[id] = waitAdmit(ctx, f.join(id, int64(i+1)), f.common, 1)
 	}
+	// Stop the waiters that are still waiting, and wait for them to return,
+	// before the temporary folders are removed: a waiter still writing its
+	// queue files makes the cleanup fail with "directory not empty".
+	defer func() {
+		cancel()
+		for _, id := range ids[:4] {
+			select { // a channel a failed check already read stays empty
+			case s := <-chans[id]:
+				if s != nil {
+					s.Release()
+				}
+			case <-time.After(5 * time.Second):
+			}
+		}
+	}()
 	// The renumber reverses the order: e, d, c, b, a.
 	move, err := LockSidecar(f.common)
 	if err != nil {
