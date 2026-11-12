@@ -46,10 +46,25 @@ jobs:
 
   herdr-mod:
     # The board mod's action mapping and data rules; plain node, no npm install.
-    name: herdr mod
-    runs-on: ubuntu-latest
+    # On Linux, macOS and Windows: the answer transport differs per machine
+    # (sh, or PowerShell on Windows). The Linux run keeps the job name
+    # "herdr mod", which is a required status check.
+    name: ${{ matrix.os == 'ubuntu-latest' && 'herdr mod' || format('herdr mod ({0})', matrix.os) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # Git Bash on Windows, so the test glob expands the same everywhere.
+        shell: bash
     steps:
       - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          # An LTS release; node --test needs no npm install.
+          node-version: "24"
       - name: node --test
         run: node --test herdr/mods/tuckerbox-board/test/*.test.js
 
