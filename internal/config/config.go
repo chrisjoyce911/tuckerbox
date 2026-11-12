@@ -11,8 +11,10 @@
 // A value set in the repository config overrides the machine value for the
 // same key. Some keys are reserved to the machine and are refused in a
 // repository config: permission profiles, raw agent arguments and the editor.
-// One key is reserved to the repository and refused in machine config:
-// require_approval, so every machine applies the same run gate.
+// Two keys are reserved to the repository and refused in machine config:
+// require_approval, so every machine applies the same run gate, and the
+// [overrides] allow-list, so every machine allows the same change
+// overrides (see package settings).
 // A repository can only refer to a permission profile by name, and the
 // machine decides which repositories (by remote) may use it.
 //
@@ -42,6 +44,8 @@
 package config
 
 import (
+	"fmt"
+
 	"github.com/chrisjoyce911/tuckerbox/internal/forge"
 	"path/filepath"
 	"slices"
@@ -161,6 +165,24 @@ type Config struct {
 	// approved (see package approval). Repository only; true unless the
 	// repository config sets require_approval = false.
 	RequireApproval bool
+	// Overrides is the repository's [overrides] allow-list: what a change
+	// may choose for its own steps. nil when the repository config has no
+	// [overrides] table, so no change may override anything. Repository
+	// only.
+	Overrides *Overrides
+}
+
+// Overrides is the [overrides] table of repository config: the values a
+// change may pick for its steps in its tuckerbox.toml. A nil or empty list
+// means a change may not override that key. Permissions lists profile
+// names only; machine config still decides what each profile grants.
+type Overrides struct {
+	Agents []string
+	// Models lists the allowed models per agent name, because a model name
+	// only means something to one agent CLI.
+	Models      map[string][]string
+	Efforts     []string
+	Permissions []string
 }
 
 // Autopilot is the [autopilot] table: how tuckerbox autopilot works
@@ -280,6 +302,27 @@ func (c *Config) PermissionArgs(s Step) []string {
 		return nil
 	}
 	return slices.Clone(c.Permissions[s.Permissions].Args[s.Agent])
+}
+
+// ProfileProblem says why the permission profile prof cannot be used by a
+// step of this repository run by agent, or returns "" when it can: machine
+// config defines it, it allows this repository's remote, and it grants
+// flags for agent (when agent is not "").
+func (c *Config) ProfileProblem(prof, agent string) string {
+	p, defined := c.Permissions[prof]
+	switch {
+	case !defined:
+		return fmt.Sprintf("permission profile %q is not defined in machine config; only machine config may define permission profiles", prof)
+	case !remoteAllowed(p.AllowedRemotes, c.Remote):
+		shown := c.Remote
+		if shown == "" {
+			shown = "(none)"
+		}
+		return fmt.Sprintf("permission profile %q does not allow this repository's remote %s; add it to permissions.%s.allowed_remotes in machine config", prof, shown, prof)
+	case agent != "" && p.Args[agent] == nil:
+		return fmt.Sprintf("permission profile %q grants no flags for agent %q; add permissions.%s.args.%s in machine config", prof, agent, prof, agent)
+	}
+	return ""
 }
 
 // IsBuiltinAgent reports whether name is a built-in agent.

@@ -73,6 +73,18 @@ max_rounds = 3          # then block the run (default 3; needs on_reject)
 # agent = "claude"
 # role = "fixer"
 
+# What a change may pick for its own steps in
+# openspec/changes/<id>/tuckerbox.toml ([steps.<step>] agent, model, effort,
+# permissions). With no [overrides], or a key missing here, a change may not
+# override that key. Repository only: machine config may not set it.
+# permissions lists profile names; machine config still decides what each
+# profile grants and which remotes may use it.
+# [overrides]
+# agents = ["claude", "codex"]
+# models = { claude = ["opus", "sonnet"], codex = ["gpt-5.5"] }
+# efforts = ["medium", "high"]
+# permissions = ["edit", "readonly"]
+
 # Where runs put worktrees and what they call branches. {change} is the change
 # id, {repo} this folder's name. A relative path is relative to this repo.
 # These are the defaults.

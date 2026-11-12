@@ -115,6 +115,33 @@ args = { claude = ["--permission-mode", "acceptEdits"] }
 
 A step in the repository then asks for it by name with `permissions = "edit"`.
 
+A change can pick its own agent, model, effort and permission profile per step, in `openspec/changes/<change>/tuckerbox.toml`, within limits the repository sets. The step tables use the same names as repository config, and may hold only those four keys. `machines` lists the machines the change prefers, in order; it has no effect in solo mode:
+
+```toml
+# openspec/changes/add-login/tuckerbox.toml
+machines = ["studio", "mini"]
+
+[steps.build]
+agent = "codex"
+model = "gpt-5.5"
+effort = "high"
+
+[steps.review]
+permissions = "readonly"
+```
+
+The repository decides what a change may pick with `[overrides]` in `.tuckerbox/config.toml` (machine config may not set it, so every machine allows the same). Nothing is allowed by default: with no `[overrides]`, or a key missing from it, a change may not override that key. Models are listed per agent, because a model name only means something to one CLI. `permissions` lists profile names only: the machine's `[permissions.<name>]` still decides the flags and which remotes may use it, so a change can't grant itself anything.
+
+```toml
+[overrides]
+agents = ["claude", "codex"]
+models = { claude = ["opus", "sonnet"], codex = ["gpt-5.5"] }
+efforts = ["medium", "high"]
+permissions = ["edit", "readonly"]
+```
+
+`tuckerbox check` reports, for each active change, a step the repository doesn't define in `[steps]`, a key other than the four (agent arguments and flags belong in a machine profile), a value the allow-list doesn't hold (with the allowed values; a model is judged against the step's agent after the change's own `agent`), and a profile this machine doesn't define or grant for the step's agent.
+
 The board defaults to Proposed, Approved (when approval is required), In progress,
 Ready and Done. In-progress cards carry their step or `queued` as a badge.
 To show Queued and one column per workflow step, set this in repository config
