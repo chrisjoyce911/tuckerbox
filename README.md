@@ -43,6 +43,8 @@ tuckerbox run fix-login            # one change, in the background
 tuckerbox run --all                # every valid active change
 tuckerbox run --foreground fix-login   # one change, attached to this terminal
 tuckerbox status                   # every run on this machine (--json for dashboards)
+tuckerbox board                    # this repository’s changes, approval and workflow columns
+tuckerbox board --change fix-login --json  # board plus proposal, tasks, rounds and history
 tuckerbox logs fix-login --follow  # watch the running step's agent
 tuckerbox stop fix-login           # stop the agent; the run is marked stopped
 tuckerbox resume fix-login         # continue a stopped or blocked run
