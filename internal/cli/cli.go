@@ -24,7 +24,7 @@ Commands:
   stop <change>             Stop a run's agent and mark the run stopped
   resume <change>           Continue a stopped or blocked run
   rerun <change> <step>     Start a run again from a step
-  version                   Print the version, commit, Go version and platform
+  version [--json]          Print the version, commit, Go version and platform
   doctor                    Check that git, openspec and the agent CLIs are installed
   check                     Validate .tuckerbox/config.toml with machine config
   init                      Write a commented starter .tuckerbox/config.toml
@@ -58,11 +58,7 @@ func (a App) Run(args []string) int {
 		fmt.Fprint(a.Stdout, usage)
 		return 0
 	case "version", "--version":
-		if len(rest) > 0 {
-			return a.tooMany(cmd)
-		}
-		fmt.Fprint(a.Stdout, version.Get().String())
-		return 0
+		return a.version(cmd, rest)
 	case "doctor":
 		if len(rest) > 0 {
 			return a.tooMany(cmd)
@@ -104,6 +100,31 @@ func (a App) Run(args []string) int {
 		fmt.Fprintf(a.Stderr, "tuckerbox: unknown command %q\n\n%s", cmd, usage)
 		return 2
 	}
+}
+
+// version prints the version information as text, or as JSON with --json.
+// Any other argument is a usage error.
+func (a App) version(cmd string, args []string) int {
+	asJSON := false
+	for _, arg := range args {
+		if arg != "--json" || asJSON {
+			fmt.Fprintf(a.Stderr, "tuckerbox %s: unknown argument %q (takes no arguments except --json)\n", cmd, arg)
+			return 2
+		}
+		asJSON = true
+	}
+	info := version.Get()
+	if !asJSON {
+		fmt.Fprint(a.Stdout, info.String())
+		return 0
+	}
+	data, err := info.JSON()
+	if err != nil {
+		fmt.Fprintln(a.Stderr, "tuckerbox:", err)
+		return 1
+	}
+	a.Stdout.Write(data)
+	return 0
 }
 
 func (a App) tooMany(cmd string) int {

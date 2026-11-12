@@ -7,6 +7,7 @@
 package version
 
 import (
+	"encoding/json"
 	"fmt"
 	"runtime"
 	"runtime/debug"
@@ -18,13 +19,15 @@ var (
 	Commit  = "unknown"
 )
 
-// Info is the version information of the running binary.
+// Info is the version information of the running binary. The JSON field
+// names are read by other machines (the Herdr board, doctor), so they are
+// stable: never rename or remove them.
 type Info struct {
-	Version   string
-	Commit    string
-	GoVersion string
-	OS        string
-	Arch      string
+	Version   string `json:"version"`
+	Commit    string `json:"commit"`
+	GoVersion string `json:"go"`
+	OS        string `json:"os"`
+	Arch      string `json:"arch"`
 }
 
 // Get returns the running binary's version information. When Commit was not
@@ -72,4 +75,14 @@ func vcsRevision() string {
 func (i Info) String() string {
 	return fmt.Sprintf("tuckerbox %s\ncommit: %s\ngo: %s\nplatform: %s/%s\n",
 		i.Version, i.Commit, i.GoVersion, i.OS, i.Arch)
+}
+
+// JSON formats the information as the `tuckerbox version --json` output: one
+// JSON object followed by a newline.
+func (i Info) JSON() ([]byte, error) {
+	data, err := json.Marshal(i)
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
 }
