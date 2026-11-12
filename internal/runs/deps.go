@@ -21,8 +21,8 @@ type depLookup struct {
 	// only once archived, whatever its run says (task-scope: Partial runs
 	// don't ship).
 	archiveOnly bool
-	states map[string]statedir.Dir // worktree -> state dir
-	runs   map[string]Run          // change -> effective run, this poll
+	states      map[string]statedir.Dir // worktree -> state dir
+	runs        map[string]Run          // change -> effective run, this poll
 }
 
 func newDepLookup(repo Repo) *depLookup {
