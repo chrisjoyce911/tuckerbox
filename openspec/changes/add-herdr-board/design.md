@@ -159,7 +159,7 @@ It defaults to `true`, and only the repository config may set it. A machine that
 `add-core-runner` must be archived first, as already planned.
 
 ### Where the mod lives
-The mod lives at `herdr/mods/tuckerbox-board/` in this repo, and its version matches the binary. `tuckerbox herdr install` copies it into `~/.config/herdr-app/mods/` and runs `herdr-app check`. `tuckerbox doctor` warns when the installed mod is not the one the binary ships (older, or changed by hand), by a digest `tuckerbox herdr install` records in the mod's `version.json`.
+The mod lives at `herdr/mods/tuckerbox-board/` in this repo, and its version matches the binary. `tuckerbox herdr install` copies it into `~/.config/herdr-app/mods/` and runs `herdr-app check`. `tuckerbox doctor` warns when the installed mod is not the one the binary ships (older, or changed by hand), by the digest `tuckerbox herdr install` records in the mod's `version.json` and by comparing each shipped file's bytes.
 
 ## Risks / Trade-offs
 

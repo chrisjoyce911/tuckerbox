@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { normaliseBoard } from "../model.js";
 import { invocation, herdrCall, outcome, parseValidation } from "../actions.js";
-import { startEdit, step, tick, editOf, editNote, setValidation, markValidating, keyCard, editKey, reset, OPEN_MS } from "../edits.js";
+import { startEdit, tick, editOf, editNote, setValidation, markValidating, keyCard, editKey, reset, OPEN_MS, machineOfPane } from "../edits.js";
 
 const board = normaliseBoard(JSON.parse(readFileSync(new URL("../fixtures/board.json", import.meta.url), "utf8")));
 const card = (id, on = null) => ({ ...board.cards.find((c) => c.change === id), on });
@@ -91,26 +91,33 @@ test("validate --json: invalid still prints the document", () => {
   assert.deepEqual(parseValidation({ code: 1, stdout: "", stderr: "tuckerbox validate: no change x" }), { error: "tuckerbox validate: no change x" });
 });
 
+// The board's own space s1 here; a remote space on mini.
+const SPACES = [
+  { id: "s1", machine: null, tabs: [{ id: "t1" }, { id: "t2" }] },
+  { id: "s9", machine: null, tabs: [{ id: "t9" }] },
+  { id: "mini/s2", machine: "mini", tabs: [{ id: "mini/t5" }] },
+];
+const here = (c) => ({ on: null, space: "s1", folder: c.path });
+
 test("Edit leaves the change invalid: the pane closes, validate runs, the card shows the error", () => {
   const c = card("add-login-page");
-  const before = [{ pane: "p1", terminal: "t1" }, { pane: "p2", mod: MOD, terminal: null }];
-  startEdit(c, "spec:login", before, 1000);
+  const before = [{ pane: "p1", terminal: "t1", tab: "t1", cwd: "/work/shop" }, { pane: "p2", mod: MOD, terminal: null, tab: "t1" }];
+  startEdit(c, "spec:login", before, 1000, here(c));
   assert.equal(editOf(c).state, "opening");
   assert.match(editNote(editOf(c)).text, /Opening the editor/);
-  // The pane appears.
-  const during = [...before, { pane: "p9", terminal: "t9" }];
-  assert.deepEqual(tick(during, 1500), []);
+  // Its pane appears, in the space and folder: claimed.
+  const during = [...before, { pane: "p9", terminal: "t9", tab: "t1", cwd: "/work/shop" }];
+  assert.deepEqual(tick(during, 1500, SPACES), []);
   assert.equal(editOf(c).state, "editing");
   assert.equal(editOf(c).pane, "p9");
   assert.equal(editNote(editOf(c)).validate, false);
-  // Still open: nothing.
-  assert.deepEqual(tick(during, 60000), []);
+  assert.deepEqual(tick(during, 60000, SPACES), []);
   // It closes: once, and only once, the card is handed back to validate.
-  const closed = tick(before, 61000);
+  const closed = tick(before, 61000, SPACES);
   assert.deepEqual(closed.map((k) => keyCard(k).change), ["add-login-page"]);
   assert.deepEqual(keyCard(closed[0]), { on: null, path: "/work/shop", change: "add-login-page" });
   assert.equal(editOf(c).state, "validating");
-  assert.deepEqual(tick(before, 62000), []);
+  assert.deepEqual(tick(before, 62000, SPACES), []);
   setValidation(c, { valid: false, errors: ["specs/login/spec.md: Requirement must have at least one scenario"] });
   const n = editNote(editOf(c));
   assert.equal(n.tone, "blocked");
@@ -118,15 +125,83 @@ test("Edit leaves the change invalid: the pane closes, validate runs, the card s
   assert.equal(n.validate, true);
 });
 
+test("an unrelated new terminal isn't taken for the editor", () => {
+  const c = card("add-login-page");
+  startEdit(c, "tasks", [], 0, here(c));
+  // Another space, another folder, another machine, a mod pane: none is it.
+  tick([
+    { pane: "p20", terminal: "t20", tab: "t9", cwd: "/work/shop" },
+    { pane: "p21", terminal: "t21", tab: "t2", cwd: "/home/me" },
+    { pane: "mini/p22", terminal: "mini/t22", tab: "mini/t5", cwd: "/work/shop" },
+    { pane: "p23", mod: MOD, terminal: null, tab: "t1" },
+    { pane: "p24", terminal: "t24", tab: "t1", cwd: null },
+  ], 100, SPACES);
+  assert.equal(editOf(c).state, "opening");
+  // The real editor then appears and is claimed; closing p21 changes nothing.
+  const now = [{ pane: "p21", terminal: "t21", tab: "t2", cwd: "/home/me" }, { pane: "p25", terminal: "t25", tab: "t2", cwd: "/work/shop/openspec" }];
+  tick(now, 200, SPACES);
+  assert.equal(editOf(c).pane, "p25");
+  assert.deepEqual(tick([now[1]], 300, SPACES), [], "the unrelated pane closing doesn't validate");
+  assert.equal(tick([], 400, SPACES).length, 1, "the editor's pane closing does");
+});
+
+test("a remote edit claims only a pane on its machine, in its folder", () => {
+  const c = card("add-login-page", "mini");
+  // space.new on mini: the space isn't known beforehand.
+  startEdit(c, "proposal", [], 0, { on: "mini", space: null, folder: "/srv/shop" });
+  tick([{ pane: "p30", terminal: "t30", tab: "t1", cwd: "/srv/shop" }], 50, SPACES);
+  assert.equal(editOf(c).state, "opening", "a local pane in the same path isn't it");
+  tick([{ pane: "p30", terminal: "t30", tab: "t1", cwd: "/srv/shop" }, { pane: "mini/p31", terminal: "mini/t31", tab: "mini/t6", cwd: "/srv/shop" }], 60, SPACES);
+  assert.equal(editOf(c).pane, "mini/p31");
+});
+
+test("two edits at once: each claims its own pane, or both fall back to Validate", () => {
+  const a = card("add-login-page");
+  const b = { ...card("order-emails"), path: "/work/other" };
+  startEdit(a, "tasks", [], 0, here(a));
+  startEdit(b, "design", [], 0, { on: null, space: "s1", folder: "/work/other" });
+  // One pane per folder: each gets its own.
+  const panes = [{ pane: "p40", terminal: "t40", tab: "t1", cwd: "/work/other" }, { pane: "p41", terminal: "t41", tab: "t1", cwd: "/work/shop" }];
+  tick(panes, 10, SPACES);
+  assert.equal(editOf(a).pane, "p41");
+  assert.equal(editOf(b).pane, "p40");
+  // Closing one validates only that edit.
+  assert.deepEqual(tick([panes[1]], 20, SPACES).map((k) => keyCard(k).change), ["order-emails"]);
+  assert.equal(editOf(a).state, "editing");
+
+  // Two edits in the same checkout, one new pane: it could be either's.
+  reset();
+  const c = card("add-login-page");
+  const d = card("add-wishlist");
+  startEdit(c, "tasks", [], 0, here(c));
+  startEdit(d, "tasks", [], 0, here(d));
+  tick([{ pane: "p50", terminal: "t50", tab: "t1", cwd: "/work/shop" }], 10, SPACES);
+  for (const x of [c, d]) {
+    assert.equal(editOf(x).state, "unwatched", x.change);
+    assert.equal(editOf(x).pane, null);
+    assert.match(editNote(editOf(x)).text, /couldn't tell which pane is the editor/);
+    assert.equal(editNote(editOf(x)).validate, true);
+  }
+  // A pane already claimed by one edit is never another's.
+  reset();
+  startEdit(c, "tasks", [], 0, here(c));
+  tick([{ pane: "p60", terminal: "t60", tab: "t1", cwd: "/work/shop" }], 10, SPACES);
+  startEdit(d, "tasks", [], 20, here(d)); // before-set empty: p60 looks new to it
+  tick([{ pane: "p60", terminal: "t60", tab: "t1", cwd: "/work/shop" }], 30, SPACES);
+  assert.equal(editOf(c).pane, "p60");
+  assert.equal(editOf(d).state, "opening");
+});
+
 test("pane close can't be seen: not validated since the edit, Validate offered", () => {
   const c = card("order-emails");
-  startEdit(c, "tasks", [], 0);
-  assert.equal(step(editOf(c), [], OPEN_MS - 1).state, "opening");
-  tick([], OPEN_MS + 1);
+  startEdit(c, "tasks", [], 0, here(c));
+  tick([], OPEN_MS - 1, SPACES);
+  assert.equal(editOf(c).state, "opening");
+  tick([], OPEN_MS + 1, SPACES);
   const n = editNote(editOf(c));
   assert.equal(editOf(c).state, "unwatched");
   assert.equal(n.validate, true);
-  assert.match(n.text, /Not validated since the edit/);
+  assert.match(n.text, /couldn't see the editor's pane/);
   markValidating(c);
   assert.equal(editOf(c).state, "validating");
   setValidation(c, { valid: true, errors: [] });
@@ -138,10 +213,12 @@ test("pane close can't be seen: not validated since the edit, Validate offered",
 test("edits are kept per card: machine, checkout and change", () => {
   const a = card("add-login-page");
   const b = card("add-login-page", "mini");
-  startEdit(a, "tasks", [], 0);
+  startEdit(a, "tasks", [], 0, here(a));
   assert.equal(editOf(b), null);
   assert.notEqual(editKey(a), editKey(b));
-  // A mod pane appearing (the proposal view) is not the editor's pane.
-  tick([{ pane: "p5", mod: MOD, terminal: null }], 10);
-  assert.equal(editOf(a).state, "opening");
+});
+
+test("pane ids name their machine", () => {
+  assert.equal(machineOfPane("p3"), null);
+  assert.equal(machineOfPane("mini/p3"), "mini");
 });

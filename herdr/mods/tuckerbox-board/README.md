@@ -30,7 +30,9 @@ stores no task state, writes no files and never moves a card by itself
 the binary's version, commit and a digest of the files. Herdr's home is
 `$HERDR_APP_HOME`, else `~/.config/herdr-app`; without it nothing is
 written. `tuckerbox doctor` says whether the installed copy is the one the
-binary ships, by that digest.
+binary ships: the digest in `version.json`, and every shipped file's bytes
+(it names a file changed or missing; files Herdr adds, such as
+`gpui-kit.d.ts`, don't count).
 
 ## Trying it
 
@@ -154,11 +156,14 @@ else as a new space on the card's machine, since Herdr keeps tabs and splits
 on their space's machine.
 
 **Edit and validate:** Herdr's `run()` returns no ids, so the board notes
-the panes before opening the editor and takes the first new terminal pane
-within 6 s as the editor's. When it goes, the board runs `tuckerbox validate
-<id> --json` and shows the result on the card and in its detail, in memory
-only. If no pane appears, the card says it wasn't validated since the edit
-and the detail offers Validate.
+the panes before opening the editor and claims a new terminal pane as the
+editor's only when it is that edit's: on the card's machine (remote pane ids
+start with `<machine>/`), in the space it opened in when known, started in
+the card's checkout, and claimed by no other edit. When it goes, the board
+runs `tuckerbox validate <id> --json` and shows the result on the card and in
+its detail, in memory only. If no such pane appears within 10 s, or it could
+belong to two edits, or two panes could be it, the board doesn't guess: the
+card says it wasn't validated since the edit and the detail offers Validate.
 
 | Action | Offered | Command |
 |---|---|---|

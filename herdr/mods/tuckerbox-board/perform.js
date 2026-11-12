@@ -44,8 +44,13 @@ export async function perform(inv, opts = {}) {
     return r;
   }
   try {
-    const call = herdrCall(inv, { shown: shownSpace(), spaces: spaces(), panes: panes(), mod: MOD });
-    if (inv.place === "pane") startEdit(inv.card, inv.argv[3], panes());
+    const at = shownSpace();
+    const call = herdrCall(inv, { shown: at, spaces: spaces(), panes: panes(), mod: MOD });
+    // The editor's pane opens in the shown space (terminal.open) or in a new
+    // space on the card's machine (space.new), in the card's checkout.
+    if (inv.place === "pane") {
+      startEdit(inv.card, inv.argv[3], panes(), Date.now(), { on: inv.on, space: call.command === "terminal.open" ? at?.id ?? null : null, folder: inv.cwd });
+    }
     run(call.command, call.args);
     if (inv.place === "pane") return { ok: true, message: `Editing ${inv.argv[3]} in a pane: it validates when the pane closes` };
     if (inv.place === "tab") return { ok: true, message: `Following ${inv.argv[3]} in a tab` };
@@ -69,5 +74,5 @@ export async function validate(card) {
 // Called from every copy's timer: moves the edit records on and validates
 // the ones whose pane closed. Idempotent across copies.
 export function watchEdits() {
-  return tick(panes()).map((key) => validate(keyCard(key)));
+  return tick(panes(), Date.now(), spaces()).map((key) => validate(keyCard(key)));
 }
