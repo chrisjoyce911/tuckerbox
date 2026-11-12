@@ -2,7 +2,10 @@
 // It owns no persistent state. Version 1 allows additive JSON fields only.
 package board
 
-import "github.com/chrisjoyce911/tuckerbox/internal/agent"
+import (
+	"github.com/chrisjoyce911/tuckerbox/internal/agent"
+	"github.com/chrisjoyce911/tuckerbox/internal/scope"
+)
 
 const Version = 1
 
@@ -57,6 +60,8 @@ type Card struct {
 	EditFolder string       `json:"edit_folder"`
 	DependsOn  []Dependency `json:"depends_on"`
 	Archived   string       `json:"archived,omitempty"`
+	// Scope is the card's run's task scope; absent for the whole change.
+	Scope *scope.Scope `json:"scope,omitempty"`
 }
 type Detail struct {
 	Change   string  `json:"change"`
@@ -65,6 +70,18 @@ type Detail struct {
 	Tasks    []Task  `json:"tasks"`
 	Rounds   []Round `json:"rounds"`
 	History  []Event `json:"history"`
+	// Groups are tasks.md's task groups, in order.
+	Groups []Group `json:"groups"`
+}
+
+// Group is a task group in card detail. Ticked and Total count its tasks
+// other than (ship) tasks, which shipping ticks: a group with Ticked <
+// Total has tasks a run can still take on.
+type Group struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Ticked int    `json:"ticked"`
+	Total  int    `json:"total"`
 }
 type Spec struct {
 	Capability string `json:"capability"`
@@ -83,6 +100,8 @@ type Round struct {
 	Summary  string          `json:"summary"`
 	Findings []agent.Finding `json:"findings"`
 	Ended    string          `json:"ended"`
+	// Scope is the task scope the round ran with; "" for the whole change.
+	Scope string `json:"scope"`
 }
 type Event struct {
 	At       string          `json:"at"`
@@ -96,4 +115,6 @@ type Event struct {
 	Summary  string          `json:"summary,omitempty"`
 	Findings []agent.Finding `json:"findings,omitempty"`
 	Reason   string          `json:"reason,omitempty"`
+	Scope    string          `json:"scope,omitempty"`
+	OldScope string          `json:"old_scope,omitempty"`
 }

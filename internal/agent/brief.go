@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/chrisjoyce911/tuckerbox/internal/scope"
 )
 
 //go:embed roles/*.md
@@ -74,6 +76,9 @@ type Brief struct {
 	// Earlier holds accepted results from earlier rounds whose findings the
 	// agent must address, oldest first.
 	Earlier []Result
+	// Scope is the run's task scope, or nil for the whole change. The
+	// brief lists its tasks with their text from tasks.md under Root.
+	Scope *scope.Scope
 }
 
 // ChangeFiles returns the change's planning files, relative to root with
@@ -136,7 +141,33 @@ func (b Brief) Render() (string, error) {
 			fmt.Fprintf(&s, "- `%s` (not written yet)\n", f)
 		}
 	}
+	tasks := b.tasks()
+	for _, t := range tasks {
+		if t.Ship {
+			s.WriteString("\nTasks whose text starts with `(ship)` are done by shipping the change, not by a step: don't tick them.\n")
+			break
+		}
+	}
 	s.WriteString("\n")
+
+	if b.Scope != nil {
+		s.WriteString("## Scope\n\n")
+		s.WriteString("This run covers only these tasks:\n")
+		text := map[string]string{}
+		for _, t := range tasks {
+			text[t.Number] = t.Text
+		}
+		for _, n := range b.Scope.Tasks {
+			if t, ok := text[n]; ok {
+				fmt.Fprintf(&s, "- %s %s\n", n, t)
+			} else {
+				fmt.Fprintf(&s, "- %s (no longer in tasks.md)\n", n)
+			}
+		}
+		s.WriteString("\nWork on, tick and judge only these tasks. Tasks outside the scope are not part of this run: ")
+		s.WriteString("don't do them, don't tick them, and don't reject the change because they are undone. ")
+		s.WriteString("Work or ticks outside the scope are a finding.\n\n")
+	}
 
 	if len(b.Earlier) > 0 {
 		s.WriteString("## Findings from earlier rounds\n\n")
@@ -182,6 +213,15 @@ func (b Brief) Render() (string, error) {
 	s.WriteString("if it differs from your final message, the file wins.\n\n")
 	fmt.Fprintf(&s, "    %s\n", b.ResultPath)
 	return s.String(), nil
+}
+
+// tasks reads the change's tasks.md under Root; none when it can't.
+func (b Brief) tasks() []scope.Task {
+	data, err := os.ReadFile(filepath.Join(b.Root, "openspec", "changes", b.Change, "tasks.md"))
+	if err != nil {
+		return nil
+	}
+	return scope.Parse(string(data))
 }
 
 // Write renders the brief to file p, creating its directory.

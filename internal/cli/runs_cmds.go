@@ -681,6 +681,8 @@ type statusRun struct {
 	Branch   string `json:"branch"`
 	Pid      int    `json:"pid,omitempty"`
 	Created  string `json:"created"`
+	// Scope is the run's task scope; absent for the whole change.
+	Scope *scope.Scope `json:"scope,omitempty"`
 }
 
 // StatusVersion is the format version of tuckerbox status --json.
@@ -715,7 +717,7 @@ func (a App) statusRuns() ([]statusRun, error) {
 		out = append(out, statusRun{
 			Repo: e.Repo, Change: v.Change, State: string(v.State), Step: v.Step, Round: v.Round,
 			Since: rfc3339(v.Since), Reason: v.Reason, Worktree: v.Worktree, Branch: v.Branch,
-			Pid: v.Pid, Created: rfc3339(v.Created),
+			Pid: v.Pid, Created: rfc3339(v.Created), Scope: v.Scope,
 		})
 	}
 	return out, nil
@@ -739,14 +741,18 @@ func (a App) status(args []string) int {
 		fmt.Fprintln(a.Stdout, "no runs on this machine")
 		return 0
 	}
-	rows := [][]string{{"REPO", "CHANGE", "STATE", "STEP", "ROUND", "SINCE", "REASON"}}
+	rows := [][]string{{"REPO", "CHANGE", "STATE", "STEP", "TASKS", "ROUND", "SINCE", "REASON"}}
 	for _, r := range list {
 		since, _ := time.Parse(time.RFC3339, r.Since)
 		step := r.Step
 		if step == "" {
 			step = "-"
 		}
-		rows = append(rows, []string{filepath.Base(r.Repo), r.Change, r.State, step, strconv.Itoa(r.Round), displayTime(since), r.Reason})
+		tasks := "all"
+		if r.Scope != nil {
+			tasks = r.Scope.Spec
+		}
+		rows = append(rows, []string{filepath.Base(r.Repo), r.Change, r.State, step, tasks, strconv.Itoa(r.Round), displayTime(since), r.Reason})
 	}
 	writeTable(a.Stdout, rows)
 	return 0
