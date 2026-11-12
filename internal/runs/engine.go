@@ -1,0 +1,525 @@
+package runs
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/chrisjoyce911/tuckerbox/internal/agent"
+	"github.com/chrisjoyce911/tuckerbox/internal/config"
+	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
+)
+
+// Mode is how a run starts.
+type Mode int
+
+const (
+	// Start begins a change's run, or continues it from its current step
+	// if it already has one that is not ready.
+	Start Mode = iota
+	// Resume continues a stopped or blocked run from its current step.
+	Resume
+	// Rerun starts again from a named step.
+	Rerun
+)
+
+// Request is one run to make.
+type Request struct {
+	Change string
+	Mode   Mode
+	// Step is the step to start from, for Rerun.
+	Step string
+	// Worktree is the change's existing worktree, for Resume and Rerun.
+	// When "", the worktree is found or made from the config patterns.
+	Worktree string
+}
+
+// Engine runs one change's workflow in this process.
+type Engine struct {
+	Repo   Repo
+	Config *config.Config
+	// StateHome is the user state directory holding the machine index; ""
+	// leaves the index alone.
+	StateHome string
+	// Log receives progress lines; nil discards them.
+	Log io.Writer
+	// Poll is how often a queued run retries for a slot and a run checks
+	// for a stop request (default 250ms).
+	Poll time.Duration
+	// Agent tunes agent.Run.
+	Agent agent.Options
+	// OnLocked is called once the change lock is held, run.json exists and
+	// the run has joined the slot queue. tuckerbox run starts changes one
+	// by one and waits for this before starting the next, so queued runs
+	// start in the order they were requested.
+	OnLocked func(ws Workspace, r *Run)
+	// Now returns the time; nil means time.Now.
+	Now func() time.Time
+
+	mu    sync.Mutex
+	saved Run
+}
+
+// ActiveError means the change already has an active run.
+type ActiveError struct {
+	Change, Worktree string
+	Pid              int
+}
+
+func (e *ActiveError) Error() string {
+	msg := fmt.Sprintf("change %s already has an active run", e.Change)
+	if e.Pid > 0 {
+		msg += fmt.Sprintf(" (pid %d)", e.Pid)
+	}
+	return msg + " in " + e.Worktree + "; see tuckerbox status, or tuckerbox stop " + e.Change
+}
+
+func (e *ActiveError) Unwrap() error { return ErrLocked }
+
+// StateError means the run is in a state the request can't start from.
+type StateError struct {
+	Change string
+	State  State
+	Hint   string
+}
+
+func (e *StateError) Error() string {
+	msg := fmt.Sprintf("change %s is %s", e.Change, e.State)
+	if e.Hint != "" {
+		msg += "; " + e.Hint
+	}
+	return msg
+}
+
+// StopFile is the stop request file in a state directory. tuckerbox stop
+// creates it; the engine sees it, stops the agent, records stopped and
+// removes it. Signals do the same on Unix; on Windows the file is the
+// graceful way.
+func StopFile(d statedir.Dir) string { return filepath.Join(string(d), "stop") }
+
+// EngineLog is the engine's own log in a state directory.
+func EngineLog(d statedir.Dir) string { return filepath.Join(string(d), "run.log") }
+
+func (e *Engine) now() time.Time {
+	if e.Now != nil {
+		return e.Now()
+	}
+	return time.Now()
+}
+
+func (e *Engine) logf(change, format string, args ...any) {
+	if e.Log == nil {
+		return
+	}
+	fmt.Fprintf(e.Log, "%s %s: %s\n", e.now().Format(time.RFC3339), change, fmt.Sprintf(format, args...))
+}
+
+func (e *Engine) poll() time.Duration {
+	if e.Poll > 0 {
+		return e.Poll
+	}
+	return 250 * time.Millisecond
+}
+
+// OpenWorkspace returns the existing worktree at path.
+func OpenWorkspace(ctx context.Context, path string) (Workspace, error) {
+	st, err := statedir.Resolve(ctx, path)
+	if err != nil {
+		return Workspace{}, err
+	}
+	ws := Workspace{Path: path, State: st}
+	if b, err := git(ctx, path, "symbolic-ref", "--short", "HEAD"); err == nil {
+		ws.Branch = b
+	}
+	return ws, nil
+}
+
+// Run takes the change through the workflow and returns its final run
+// state. It returns an error, and changes nothing, when the change already
+// has an active run (*ActiveError) or the request does not fit the run's
+// state (*StateError). A run that stops, blocks or fails is not an error:
+// see the returned Run's State and Reason.
+//
+// Cancelling ctx stops the run: the agent is stopped and the run recorded
+// as stopped.
+func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
+	var ws Workspace
+	var err error
+	if req.Worktree != "" {
+		ws, err = OpenWorkspace(ctx, req.Worktree)
+	} else {
+		ws, err = e.Repo.EnsureWorktree(ctx, e.Config.Worktree, req.Change, func(msg string) { e.logf(req.Change, "%s", msg) })
+	}
+	if err != nil {
+		return nil, err
+	}
+	if ws.Created {
+		e.logf(req.Change, "created worktree %s on branch %s from %s", ws.Path, ws.Branch, ws.Base)
+	}
+
+	// Pick: the change lock, taken atomically.
+	lock, err := TryChangeLock(ws.State.RunLock())
+	if errors.Is(err, ErrLocked) {
+		pid, _ := readPid(ws.State.PidFile())
+		return nil, &ActiveError{Change: req.Change, Worktree: ws.Path, Pid: pid}
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Release()
+	if err := ws.State.Ensure(); err != nil {
+		return nil, err
+	}
+	_ = os.Remove(StopFile(ws.State))
+
+	rs, startIdx, err := e.prepare(req, ws)
+	if err != nil {
+		return nil, err
+	}
+	pidPath := ws.State.PidFile()
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
+		return nil, err
+	}
+	defer os.Remove(pidPath)
+
+	rs.Pid = os.Getpid()
+	rs.AgentPid = 0
+	rs.State = Queued
+	rs.Reason, rs.Tail = "", ""
+	if err := e.save(ws, rs); err != nil {
+		return nil, err
+	}
+	if e.StateHome != "" {
+		if err := Remember(e.StateHome, IndexEntry{Repo: e.Repo.Main, Change: req.Change, Worktree: ws.Path, State: string(ws.State)}); err != nil {
+			e.logf(req.Change, "warning: machine index: %v", err)
+		}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stopReq := e.watchStop(ctx, cancel, ws)
+
+	// TakeSlot: wait in queue order for one of max_parallel slots.
+	q, err := JoinQueue(e.Repo.Common, req.Change, ws.State.RunLock(), e.now().UnixNano())
+	if err != nil {
+		return e.finish(ws, rs, Failed, "joining the queue: "+err.Error())
+	}
+	if e.OnLocked != nil {
+		e.OnLocked(ws, rs)
+	}
+	slot, err := WaitSlot(ctx, e.Repo.Common, e.Config.MaxParallel, q, e.poll(), func() {
+		e.logf(req.Change, "queued: all %d slots are taken", e.Config.MaxParallel)
+	})
+	q.Leave()
+	if err != nil {
+		if ctx.Err() != nil {
+			return e.finish(ws, rs, Stopped, stopReason(stopReq, "while queued"))
+		}
+		return e.finish(ws, rs, Failed, "waiting for a slot: "+err.Error())
+	}
+	// Release: the slot is freed after the final state is written (the
+	// deferred lock release runs after this one).
+	defer slot.Release()
+	e.logf(req.Change, "running in slot %d", slot.N)
+
+	return e.steps(ctx, ws, rs, startIdx, stopReq)
+}
+
+// prepare reads or makes the run state for req and returns the index of
+// the step to start from. The caller holds the change lock.
+func (e *Engine) prepare(req Request, ws Workspace) (*Run, int, error) {
+	steps := e.Config.Steps
+	if len(steps) == 0 {
+		return nil, 0, errors.New("the workflow has no steps")
+	}
+	rs, err := ReadRun(ws.State.RunFile())
+	switch {
+	case errors.Is(err, ErrNoRun):
+		if req.Mode == Resume {
+			return nil, 0, &StateError{Change: req.Change, State: "not started", Hint: "use tuckerbox run " + req.Change}
+		}
+		now := e.now()
+		rs = &Run{
+			Change: req.Change, Repo: e.Repo.Root, Worktree: ws.Path, Branch: ws.Branch, Base: ws.Base,
+			Step: steps[0].ID, Round: 1, Created: now, Since: now,
+		}
+		if req.Mode == Rerun {
+			rs.Step = req.Step
+		}
+		e.saved = Run{}
+		idx, err := e.stepIndex(rs.Step)
+		return rs, idx, err
+	case err != nil:
+		return nil, 0, err
+	}
+	e.saved = *rs
+	// We hold the lock, so a queued or running state is from a process
+	// that died: it counts as stopped.
+	cur := rs.Effective(false)
+	switch req.Mode {
+	case Start:
+		if cur.State == Ready {
+			return nil, 0, &StateError{Change: req.Change, State: Ready, Hint: "its work is on branch " + rs.Branch + "; use tuckerbox rerun " + req.Change + " <step> to run a step again"}
+		}
+	case Resume:
+		switch cur.State {
+		case Stopped, Blocked:
+		case Failed:
+			return nil, 0, &StateError{Change: req.Change, State: Failed, Hint: "use tuckerbox rerun " + req.Change + " " + rs.Step + " to run the step again"}
+		default:
+			return nil, 0, &StateError{Change: req.Change, State: cur.State, Hint: "only a stopped or blocked run can be resumed"}
+		}
+		rs.Rejections = nil
+	case Rerun:
+		rs.Step = req.Step
+		rs.Rejections = nil
+	}
+	if rs.Step == "" {
+		rs.Step = steps[0].ID
+	}
+	idx, err := e.stepIndex(rs.Step)
+	if err != nil {
+		return nil, 0, err
+	}
+	// A new attempt at a step is a new round, so nothing an earlier
+	// attempt's agent writes can be accepted.
+	rs.Round++
+	rs.Worktree, rs.Repo = ws.Path, e.Repo.Root
+	if ws.Branch != "" {
+		rs.Branch = ws.Branch
+	}
+	return rs, idx, nil
+}
+
+func (e *Engine) stepIndex(id string) (int, error) {
+	var ids []string
+	for i, s := range e.Config.Steps {
+		if s.ID == id {
+			return i, nil
+		}
+		ids = append(ids, s.ID)
+	}
+	return 0, fmt.Errorf("step %q is not in the workflow (%s)", id, strings.Join(ids, ", "))
+}
+
+// steps runs the workflow from step index i.
+func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopReq *stopRequest) (*Run, error) {
+	steps := e.Config.Steps
+	templates := map[string]agent.Template{}
+	for name, a := range e.Config.Agents {
+		templates[name] = agent.Template{Name: name, Command: a.Command}
+	}
+	for i < len(steps) {
+		st := steps[i]
+		if ctx.Err() != nil {
+			return e.finish(ws, rs, Stopped, stopReason(stopReq, "before step "+st.ID))
+		}
+		rs.State, rs.Step, rs.Reason, rs.Tail = Running, st.ID, "", ""
+		if err := e.save(ws, rs); err != nil {
+			return rs, err
+		}
+		tmpl, err := agent.Resolve(st.Agent, templates)
+		if err != nil {
+			return e.finish(ws, rs, Failed, err.Error())
+		}
+		model, effort := st.Model, st.Effort
+		if a, ok := e.Config.Agents[st.Agent]; ok {
+			model = firstNonEmpty(model, a.Model)
+			effort = firstNonEmpty(effort, a.Effort)
+		}
+		e.logf(rs.Change, "step %s round %d: starting agent %s", st.ID, rs.Round, st.Agent)
+		opts := e.Agent
+		opts.OnStart = func(pid int) {
+			rs.AgentPid = pid
+			_ = e.save(ws, rs)
+		}
+		out, err := agent.Run(ctx, agent.Step{
+			Change: rs.Change, Step: st.ID, Role: st.Role, Round: rs.Round,
+			Agent: tmpl, Model: model, Effort: effort,
+			Permissions: e.Config.PermissionArgs(st),
+			Worktree:    ws.Path, State: ws.State, Base: rs.Base,
+			Earlier: rs.Earlier(),
+		}, opts)
+		rs.AgentPid = 0
+		switch {
+		case err != nil:
+			return e.finish(ws, rs, Failed, err.Error())
+		case out.Stopped:
+			return e.finish(ws, rs, Stopped, stopReason(stopReq, "during step "+st.ID))
+		case out.Result == nil:
+			rs.Tail = out.Tail
+			return e.finish(ws, rs, Failed, fmt.Sprintf("step %s: %s", st.ID, out.FailureReason()))
+		}
+		res := out.Result
+		rs.History = append(rs.History, Entry{
+			Step: st.ID, Round: rs.Round, Status: res.Status, Summary: res.Summary,
+			Findings: res.Findings, ExitCode: out.ExitCode, Ended: e.now(),
+		})
+		e.logf(rs.Change, "step %s round %d: %s: %s", st.ID, rs.Round, res.Status, oneLine(res.Summary))
+		switch res.Status {
+		case agent.Done:
+			i++
+		case agent.Rejected:
+			if rs.Rejections == nil {
+				rs.Rejections = map[string]int{}
+			}
+			rs.Rejections[st.ID]++
+			n := rs.Rejections[st.ID]
+			if st.OnReject == "" {
+				return e.finish(ws, rs, Blocked, fmt.Sprintf("step %s rejected the change and has no on_reject: %s", st.ID, oneLine(res.Summary)))
+			}
+			if n >= st.MaxRounds {
+				return e.finish(ws, rs, Blocked, fmt.Sprintf("review limit reached: step %s rejected %d times (max_rounds = %d)", st.ID, n, st.MaxRounds))
+			}
+			j, err := e.stepIndex(st.OnReject)
+			if err != nil {
+				return e.finish(ws, rs, Failed, err.Error())
+			}
+			// Accept with a rejection: the next round.
+			rs.Round++
+			i = j
+		case agent.Blocked:
+			return e.finish(ws, rs, Blocked, fmt.Sprintf("step %s is blocked: %s", st.ID, oneLine(res.Summary)))
+		default: // agent.Failed
+			return e.finish(ws, rs, Failed, fmt.Sprintf("step %s failed: %s", st.ID, oneLine(res.Summary)))
+		}
+	}
+	return e.ship(ws, rs)
+}
+
+// ship finishes a run whose last step is done. In local mode the work is
+// committed on the change's branch and nothing is pushed.
+func (e *Engine) ship(ws Workspace, rs *Run) (*Run, error) {
+	if e.Config.Ship != "" && e.Config.Ship != config.ShipLocal {
+		return e.finish(ws, rs, Failed, fmt.Sprintf("ship mode %q is not supported yet", e.Config.Ship))
+	}
+	msg := fmt.Sprintf("%s: work from tuckerbox run\n\nCommitted by Tuckerbox (ship = \"local\") after the last step, %s, reported done.\n",
+		rs.Change, rs.Step)
+	made, err := CommitAll(context.Background(), ws.Path, msg)
+	if err != nil {
+		return e.finish(ws, rs, Failed, "final commit: "+err.Error())
+	}
+	if made {
+		e.logf(rs.Change, "committed the remaining work on branch %s", rs.Branch)
+	}
+	rs.Step = ""
+	return e.finish(ws, rs, Ready, "")
+}
+
+// finish records the run's final state for this process. The caller's
+// deferred releases then free the slot and the change lock.
+func (e *Engine) finish(ws Workspace, rs *Run, s State, reason string) (*Run, error) {
+	rs.State, rs.Reason = s, reason
+	rs.Pid, rs.AgentPid = 0, 0
+	if s != Failed {
+		rs.Tail = ""
+	}
+	if reason != "" {
+		e.logf(rs.Change, "%s: %s", s, reason)
+	} else {
+		e.logf(rs.Change, "%s", s)
+	}
+	if err := e.save(ws, rs); err != nil {
+		return rs, err
+	}
+	_ = os.Remove(StopFile(ws.State))
+	return rs, nil
+}
+
+// save writes run.json, moving Since when the state, step or round changed.
+func (e *Engine) save(ws Workspace, rs *Run) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if rs.State != e.saved.State || rs.Step != e.saved.Step || rs.Round != e.saved.Round || rs.Since.IsZero() {
+		rs.Since = e.now()
+	}
+	if err := WriteRun(ws.State.RunFile(), rs); err != nil {
+		return err
+	}
+	e.saved = *rs
+	return nil
+}
+
+type stopRequest struct {
+	mu   sync.Mutex
+	seen bool
+}
+
+func (s *stopRequest) set() {
+	s.mu.Lock()
+	s.seen = true
+	s.mu.Unlock()
+}
+
+func (s *stopRequest) get() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.seen
+}
+
+// watchStop cancels the run when the stop file appears.
+func (e *Engine) watchStop(ctx context.Context, cancel func(), ws Workspace) *stopRequest {
+	req := &stopRequest{}
+	p := StopFile(ws.State)
+	go func() {
+		t := time.NewTicker(e.poll())
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if _, err := os.Stat(p); err == nil {
+					req.set()
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return req
+}
+
+func stopReason(r *stopRequest, when string) string {
+	if r != nil && r.get() {
+		return "stopped by tuckerbox stop " + when
+	}
+	return "stopped " + when
+}
+
+func readPid(p string) (int, error) {
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(strings.TrimSpace(string(data)))
+}
+
+// ReadPid returns the pid in a state directory's pid file, or 0.
+func ReadPid(d statedir.Dir) int {
+	pid, _ := readPid(d.PidFile())
+	return pid
+}
+
+func firstNonEmpty(ss ...string) string {
+	for _, s := range ss {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func oneLine(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > 200 {
+		s = s[:200] + "…"
+	}
+	return s
+}
