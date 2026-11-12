@@ -2,152 +2,16 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/approval"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
+	"github.com/chrisjoyce911/tuckerbox/internal/edits"
 	"github.com/chrisjoyce911/tuckerbox/internal/runs"
-	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 )
-
-// editPlace is where approve and unapprove act on a change: its worktree
-// on this machine if it has one, else the repository checkout.
-type editPlace struct {
-	Folder string // checkout or worktree root
-	// State is the worktree's state directory; "" in the checkout, where
-	// no run can be using the files (runs work in their own worktree).
-	State statedir.Dir
-}
-
-// changeWorktree returns change's worktree root on this machine, or "".
-// It looks for a worktree whose run is of change, then for one at the
-// configured worktree path.
-func changeWorktree(ctx context.Context, repo runs.Repo, wcfg config.Worktree, change string) string {
-	wts, err := repo.Worktrees(ctx)
-	if err != nil {
-		return ""
-	}
-	for _, wt := range wts {
-		if st, err := statedir.Resolve(ctx, wt); err == nil {
-			if r, err := runs.ReadRun(st.RunFile()); err == nil && r.Change == change {
-				return wt
-			}
-		}
-	}
-	want := repo.WorktreePath(wcfg, change)
-	for _, wt := range wts {
-		if samePlace(wt, want) {
-			return wt
-		}
-	}
-	return ""
-}
-
-func samePlace(a, b string) bool {
-	if ea, err := filepath.EvalSymlinks(a); err == nil {
-		a = ea
-	}
-	if eb, err := filepath.EvalSymlinks(b); err == nil {
-		b = eb
-	}
-	return filepath.Clean(a) == filepath.Clean(b)
-}
-
-// worktreeConfig reads the worktree settings, falling back to the defaults
-// when the config can't be loaded: approving needs no workflow.
-func (a App) worktreeConfig(root string) config.Worktree {
-	env, _ := a.configEnv()
-	opts, err := config.Discover(env, root)
-	if err != nil {
-		return config.Worktree{}
-	}
-	cfg, _ := config.Load(opts)
-	if cfg == nil {
-		return config.Worktree{}
-	}
-	return cfg.Worktree
-}
-
-// findEditPlace resolves where change's files are edited. The change edits
-// work (change-edits 3.1) shares this rule; swap to its helper once it lands.
-func (a App) findEditPlace(ctx context.Context, change string) (runs.Repo, editPlace, error) {
-	if err := statedir.CheckID("change", change); err != nil {
-		return runs.Repo{}, editPlace{}, err
-	}
-	_, getwd := a.configEnv()
-	wd, err := getwd()
-	if err != nil {
-		return runs.Repo{}, editPlace{}, err
-	}
-	repo, err := runs.OpenRepo(ctx, wd)
-	if err != nil {
-		return repo, editPlace{}, err
-	}
-	p := editPlace{Folder: repo.Root}
-	if wt := changeWorktree(ctx, repo, a.worktreeConfig(repo.Root), change); wt != "" {
-		p.Folder = wt
-		st, err := statedir.Resolve(ctx, wt)
-		if err != nil {
-			return repo, p, err
-		}
-		p.State = st
-	}
-	if fi, err := os.Stat(string(approval.DirOf(p.Folder, change))); err != nil || !fi.IsDir() {
-		return repo, p, fmt.Errorf("no change %s in %s", change, p.Folder)
-	}
-	return repo, p, nil
-}
-
-// lockForEdit takes the change's run lock while approve or unapprove
-// writes, so no run can start meanwhile, and refuses while a run is queued
-// or running, naming its state. With no worktree there is nothing to lock.
-//
-// This uses the run lock in internal/runs directly until the change edits
-// work (change-edits 3.6) adds its shared helper; swap it then.
-func lockForEdit(p editPlace, change string) (release func(), err error) {
-	if p.State == "" {
-		return func() {}, nil
-	}
-	l, err := runs.TryChangeLock(p.State.RunLock())
-	if errors.Is(err, runs.ErrLocked) {
-		what := "has an active run"
-		if r, rerr := runs.ReadRun(p.State.RunFile()); rerr == nil && r.Change == change {
-			what = "is " + string(r.State)
-			if r.Step != "" {
-				what += " (step " + r.Step + ")"
-			}
-		}
-		return nil, fmt.Errorf("change %s %s in %s; try again once the run stops", change, what, p.Folder)
-	}
-	if err != nil {
-		return nil, err
-	}
-	return func() { _ = l.Release() }, nil
-}
-
-// validateStrict runs openspec validate --strict on change in folder, as
-// tuckerbox validate does (change-edits 3.4; swap to it once it lands). It
-// returns the output when the change is invalid.
-func validateStrict(ctx context.Context, folder, change string) (bool, string, error) {
-	c := exec.CommandContext(ctx, "openspec", "validate", change, "--type", "change", "--strict", "--no-interactive")
-	c.Dir = folder
-	c.Env = append(os.Environ(), "NO_COLOR=1", "OPENSPEC_TELEMETRY=0")
-	out, err := c.CombinedOutput()
-	if err == nil {
-		return true, "", nil
-	}
-	var ee *exec.ExitError
-	if !errors.As(err, &ee) {
-		return false, "", fmt.Errorf("running openspec validate %s: %w", change, err)
-	}
-	return false, strings.TrimSpace(string(out)), nil
-}
 
 func gitUserName(ctx context.Context, dir string) string {
 	out, err := exec.CommandContext(ctx, "git", "-C", dir, "config", "user.name").Output()
@@ -169,35 +33,37 @@ func (a App) approve(args []string) int {
 	}
 	change := pos[0]
 	ctx := context.Background()
-	_, p, err := a.findEditPlace(ctx, change)
-	if err != nil {
-		return a.errf("approve", "%v", err)
-	}
-	release, err := lockForEdit(p, change)
-	if err != nil {
-		return a.errf("approve", "%v", err)
-	}
-	defer release()
-	ok, out, err := validateStrict(ctx, p.Folder, change)
-	if err != nil {
-		return a.errf("approve", "%v", err)
-	}
+	p, ok := a.editPlace("approve", change)
 	if !ok {
-		if out != "" {
-			fmt.Fprintln(a.Stderr, out)
+		return 1
+	}
+	var ap approval.Approval
+	var invalid *edits.Result
+	err = edits.WithChangeLock(ctx, p, "tuckerbox approve", func() error {
+		res, err := edits.Validator{}.Validate(ctx, p)
+		if err != nil {
+			return err
 		}
-		return a.errf("approve", "change %s is not valid (openspec validate --strict); fix it before approving. Nothing changed", change)
-	}
-	by := gitUserName(ctx, p.Folder)
-	if by == "" {
-		return a.errf("approve", "git user.name is not set in %s; set it (git config user.name \"Your Name\") so the approval says who approved", p.Folder)
-	}
-	ap, err := approval.Approve(approval.DirOf(p.Folder, change), by, time.Now())
+		if !res.Valid {
+			invalid = res
+			return nil
+		}
+		by := gitUserName(ctx, p.Dir)
+		if by == "" {
+			return fmt.Errorf("git user.name is not set in %s; set it (git config user.name \"Your Name\") so the approval says who approved", p.Dir)
+		}
+		ap, err = approval.Approve(approval.DirOf(p.Dir, change), by, time.Now())
+		return err
+	})
 	if err != nil {
 		return a.errf("approve", "%v", err)
 	}
-	fmt.Fprintf(a.Stdout, "approved %s in %s (by %s at %s, %s)\n", change, p.Folder, ap.By, ap.At.Format(time.RFC3339), ap.Hash)
-	fmt.Fprintf(a.Stdout, "not committed: commit and push %s; the approval only counts elsewhere, and for a run on a new worktree, once it is on the base branch\n", sidecarRel(change))
+	if invalid != nil {
+		fmt.Fprint(a.Stderr, invalid.Text())
+		return a.errf("approve", "change %s is not valid; fix it before approving. Nothing changed", change)
+	}
+	fmt.Fprintf(a.Stdout, "approved %s in %s (by %s at %s, %s)\n", change, p.Describe(), ap.By, ap.At.Format(time.RFC3339), ap.Hash)
+	fmt.Fprintf(a.Stdout, "not committed: commit and push %s; the approval only counts elsewhere, and for a run on a new worktree, once it is on the branch the run starts from\n", sidecarRel(change))
 	return 0
 }
 
@@ -208,25 +74,24 @@ func (a App) unapprove(args []string) int {
 		return a.usageErr("unapprove", "usage: tuckerbox unapprove <change>")
 	}
 	change := pos[0]
-	ctx := context.Background()
-	_, p, err := a.findEditPlace(ctx, change)
-	if err != nil {
-		return a.errf("unapprove", "%v", err)
+	p, ok := a.editPlace("unapprove", change)
+	if !ok {
+		return 1
 	}
-	release, err := lockForEdit(p, change)
-	if err != nil {
-		return a.errf("unapprove", "%v", err)
-	}
-	defer release()
-	removed, err := approval.Unapprove(approval.DirOf(p.Folder, change))
+	var removed bool
+	err = edits.WithChangeLock(context.Background(), p, "tuckerbox unapprove", func() error {
+		var err error
+		removed, err = approval.Unapprove(approval.DirOf(p.Dir, change))
+		return err
+	})
 	if err != nil {
 		return a.errf("unapprove", "%v", err)
 	}
 	if !removed {
-		fmt.Fprintf(a.Stdout, "%s has no approval in %s; nothing changed\n", change, p.Folder)
+		fmt.Fprintf(a.Stdout, "%s has no approval in %s; nothing changed\n", change, p.Describe())
 		return 0
 	}
-	fmt.Fprintf(a.Stdout, "removed the approval of %s in %s\n", change, p.Folder)
+	fmt.Fprintf(a.Stdout, "removed the approval of %s in %s\n", change, p.Describe())
 	fmt.Fprintf(a.Stdout, "not committed: commit and push %s so other machines see it\n", sidecarRel(change))
 	return 0
 }

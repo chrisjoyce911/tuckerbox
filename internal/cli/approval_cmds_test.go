@@ -123,7 +123,7 @@ func TestApproveDuringRun(t *testing.T) {
 	wt := filepath.Join(filepath.Dir(f.repo), "repo-worktrees", "add-login")
 	for _, cmd := range []string{"approve", "unapprove"} {
 		res := f.tb(cmd, "add-login")
-		if res.code == 0 || !strings.Contains(res.stderr, "running (step build)") {
+		if res.code == 0 || !strings.Contains(res.stderr, "running step build") {
 			t.Errorf("%s during build: %d %s", cmd, res.code, res.stderr)
 		}
 	}
