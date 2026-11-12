@@ -61,7 +61,7 @@
 
 ## 6. Integration
 
-- [ ] 6.1 End to end in a scratch repository: allow Codex, set the build step to Codex, approve, run to `ready`, check history and the card show Codex from `change`
+- [x] 6.1 End to end in a scratch repository: allow Codex, set the build step to Codex, approve, run to `ready`, check history and the card show Codex from `change`
 - [ ] 6.2 `go vet ./...`, `go test -race ./...`, `CGO_ENABLED=0 go build ./...` and `scripts/tla-check.sh` pass on Linux, macOS and Windows CI
 
 ## Workflow follow-up
