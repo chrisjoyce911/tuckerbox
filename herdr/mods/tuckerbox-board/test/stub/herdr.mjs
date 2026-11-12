@@ -4,12 +4,14 @@ export function reset() {
   Object.assign(state, {
     props: {}, machines: [], spaces: [], panes: [], focused: null, theme: {}, placement: null,
     exec: async () => ({ code: 1, stdout: "", stderr: "not stubbed" }),
+    hc: async () => ({ code: 1, stdout: "", stderr: "not stubbed" }),
     readTextFile: async () => null,
     runs: [], overlays: [], notices: [],
   });
 }
 reset();
 export const exec = (...a) => state.exec(...a);
+export const hc = (...a) => state.hc(...a);
 export const readTextFile = (...a) => state.readTextFile(...a);
 export const appHome = () => "/herdr-home";
 export const props = () => state.props;

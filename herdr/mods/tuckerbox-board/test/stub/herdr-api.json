@@ -80,6 +80,7 @@
     ],
     "herdr": [
       "exec",
+      "hc",
       "readTextFile",
       "appHome",
       "props",
