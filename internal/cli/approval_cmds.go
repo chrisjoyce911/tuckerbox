@@ -231,9 +231,12 @@ func (a App) unapprove(args []string) int {
 	return 0
 }
 
-// runGate judges, for tuckerbox run, whether changes are approved in the
-// files their runs will use: the worktree if the change has one, else the
-// base branch a new worktree would come from (fetched once).
+// runGate is the early approval check in tuckerbox run, for a clear
+// message before any process starts. It judges what the run will start
+// from: the change's worktree if it has one, else the commit a new worktree
+// would be made at (the change's branch if it exists, else the fetched
+// base, fetched once). The engine judges again, authoritatively, under the
+// change lock (see approvalGate).
 type runGate struct {
 	a    App
 	repo runs.Repo
@@ -243,17 +246,11 @@ type runGate struct {
 	done bool
 }
 
-// check returns nil when change may start, or why not.
-func (g *runGate) check(ctx context.Context, change string) error {
+// check returns the commit a new worktree would start at ("" when the
+// change has a worktree or approval is off), or why change may not start.
+func (g *runGate) check(ctx context.Context, change string) (string, error) {
 	if !g.cfg.RequireApproval {
-		return nil
-	}
-	if wt := changeWorktree(ctx, g.repo, g.cfg.Worktree, change); wt != "" {
-		st, err := approval.Judge(approval.DirOf(wt, change))
-		if err != nil {
-			return fmt.Errorf("change %s: reading its approval in %s: %v", change, wt, err)
-		}
-		return gateError(change, st, "in its worktree "+wt, "")
+		return "", nil
 	}
 	if !g.done {
 		g.done = true
@@ -262,28 +259,58 @@ func (g *runGate) check(ctx context.Context, change string) error {
 		})
 	}
 	if g.err != nil {
-		return g.err
+		return "", g.err
 	}
-	rev, err := approval.NewRev(ctx, g.repo.Root, g.base, change)
+	sp, err := g.repo.ResolveStart(ctx, g.cfg.Worktree, change, g.base, nil)
+	if err != nil {
+		return "", err
+	}
+	return sp.Rev, judgeStart(ctx, g.repo, change, sp, true)
+}
+
+// approvalGate is the engine's runs.Engine.Gate when approval is
+// required.
+func approvalGate(repo runs.Repo) func(context.Context, string, runs.StartPoint) error {
+	return func(ctx context.Context, change string, sp runs.StartPoint) error {
+		return judgeStart(ctx, repo, change, sp, false)
+	}
+}
+
+// judgeStart refuses change unless it is approved where sp says the run
+// starts from. With note, a refusal on a commit mentions an approval in
+// the checkout that is not on it.
+func judgeStart(ctx context.Context, repo runs.Repo, change string, sp runs.StartPoint, note bool) error {
+	if sp.Worktree != "" {
+		st, err := approval.Judge(approval.DirOf(sp.Worktree, change))
+		if err != nil {
+			return fmt.Errorf("change %s: reading its approval in %s: %v", change, sp.Worktree, err)
+		}
+		return gateError(change, st, "in its worktree "+sp.Worktree, "")
+	}
+	where := "on the base branch " + sp.Ref
+	if sp.Branch {
+		where = "on its branch " + sp.Ref
+	}
+	rev, err := approval.NewRev(ctx, repo.Root, sp.Rev, change)
 	if err != nil {
 		return err
 	}
 	if !rev.Exists() {
-		return fmt.Errorf("change %s is not on the base branch %s; commit it there first", change, g.base)
+		return fmt.Errorf("change %s is not %s; commit it there first", change, strings.TrimPrefix(where, "on "))
 	}
 	st, err := approval.Judge(rev)
 	if err != nil {
-		return fmt.Errorf("change %s: reading its approval on %s: %v", change, g.base, err)
+		return fmt.Errorf("change %s: reading its approval %s: %v", change, where, err)
 	}
-	note := ""
-	if st.State != approval.Approved {
-		if local, err := approval.Judge(approval.DirOf(g.repo.Root, change)); err == nil && local.Approval != nil &&
+	extra := ""
+	if note && st.State != approval.Approved {
+		if local, err := approval.Judge(approval.DirOf(repo.Root, change)); err == nil && local.Approval != nil &&
 			(st.Approval == nil || local.Approval.Hash != st.Approval.Hash || !local.Approval.At.Equal(st.Approval.At)) {
-			note = fmt.Sprintf("; the checkout %s has an approval (%s) that is not on %s: commit and push %s",
-				g.repo.Root, local.State, g.base, sidecarRel(change))
+			extra = fmt.Sprintf("; the checkout %s has an approval (%s) that is not on %s: commit and push %s",
+				repo.Root, local.State, sp.Ref, sidecarRel(change))
 		}
 	}
-	return gateError(change, st, "on the base branch "+g.base, note)
+	return gateError(change, st, where, extra)
 }
 
 // gateError is nil for an approved change, else says which state stops
@@ -298,8 +325,10 @@ func gateError(change string, st approval.Status, where, note string) error {
 			change, where, st.Approval.By, st.Approval.At.Format(time.RFC3339), change)
 	default:
 		msg = fmt.Sprintf("change %s: not approved: there is no approval %s; run tuckerbox approve %s", change, where, change)
-		if base, ok := strings.CutPrefix(where, "on the base branch "); ok {
-			msg = fmt.Sprintf("change %s: not approved: the base branch %s has no approval for it; run tuckerbox approve %s, then commit and push it", change, base, change)
+		if ref, ok := strings.CutPrefix(where, "on the base branch "); ok {
+			msg = fmt.Sprintf("change %s: not approved: the base branch %s has no approval for it; run tuckerbox approve %s, then commit and push it", change, ref, change)
+		} else if ref, ok := strings.CutPrefix(where, "on its branch "); ok {
+			msg = fmt.Sprintf("change %s: not approved: its branch %s has no approval for it; approve it there (commit the approval on %s) or delete the branch", change, ref, ref)
 		}
 	}
 	return &notApprovedError{State: st.State, msg: msg + note}

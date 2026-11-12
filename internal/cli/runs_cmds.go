@@ -105,6 +105,7 @@ func (a App) run(args []string) int {
 	ctx := context.Background()
 	ospec := runs.OpenSpec{Dir: repo.Root}
 	changes := pos
+	startRevs := map[string]string{} // the commit each change was checked at
 	if all {
 		ids, err := ospec.List(ctx)
 		if err != nil {
@@ -117,7 +118,8 @@ func (a App) run(args []string) int {
 				fmt.Fprintf(a.Stderr, "tuckerbox run: skipping %s: %v\n", id, err)
 				continue
 			}
-			if err := gate.check(ctx, id); err != nil {
+			rev, err := gate.check(ctx, id)
+			if err != nil {
 				var na *notApprovedError
 				if errors.As(err, &na) {
 					fmt.Fprintf(a.Stdout, "%s: skipped, not approved (%s)\n", id, na.State)
@@ -126,6 +128,7 @@ func (a App) run(args []string) int {
 				continue
 			}
 			changes = append(changes, id)
+			startRevs[id] = rev
 		}
 		if len(changes) == 0 {
 			fmt.Fprintln(a.Stdout, "no valid active changes to run")
@@ -145,10 +148,12 @@ func (a App) run(args []string) int {
 				bad = true
 				continue
 			}
-			if err := gate.check(ctx, id); err != nil {
+			rev, err := gate.check(ctx, id)
+			if err != nil {
 				a.errf("run", "%v", err)
 				bad = true
 			}
+			startRevs[id] = rev
 		}
 		if bad {
 			fmt.Fprintln(a.Stderr, "tuckerbox run: nothing started")
@@ -156,11 +161,15 @@ func (a App) run(args []string) int {
 		}
 	}
 	if fg {
-		return a.foreground(repo, cfg, runs.Request{Change: changes[0], Mode: runs.Start})
+		return a.foreground(repo, cfg, runs.Request{Change: changes[0], Mode: runs.Start, StartRev: startRevs[changes[0]]})
 	}
 	code := 0
 	for _, id := range changes {
-		err := a.spawn(repo.Root, []string{"--mode", "start", id})
+		engineArgs := []string{"--mode", "start", id}
+		if rev := startRevs[id]; rev != "" {
+			engineArgs = append([]string{"--start-rev", rev}, engineArgs...)
+		}
+		err := a.spawn(repo.Root, engineArgs)
 		var se *runs.StateError
 		var ae *runs.ActiveError
 		var ee *runs.EditingError
@@ -273,16 +282,16 @@ func (s *switchWriter) set(w io.Writer) {
 // engine runs one run in this process. Users reach it through run, resume
 // and rerun; --handshake is for the detached process they start.
 //
-//	tuckerbox engine [--handshake] --mode start|resume|rerun [--step s] [--worktree p] <change>
+//	tuckerbox engine [--handshake] --mode start|resume|rerun [--step s] [--worktree p] [--start-rev c] <change>
 func (a App) engine(args []string) int {
 	var handshake bool
-	var mode, step, worktree string
+	var mode, step, worktree, startRev string
 	pos, err := parseArgs(args, map[string]*bool{"handshake": &handshake},
-		map[string]*string{"mode": &mode, "step": &step, "worktree": &worktree})
+		map[string]*string{"mode": &mode, "step": &step, "worktree": &worktree, "start-rev": &startRev})
 	if err != nil || len(pos) != 1 {
 		return a.usageErr("engine", "usage: tuckerbox engine --mode start|resume|rerun [--step s] [--worktree p] <change>")
 	}
-	req := runs.Request{Change: pos[0], Step: step, Worktree: worktree}
+	req := runs.Request{Change: pos[0], Step: step, Worktree: worktree, StartRev: startRev}
 	switch mode {
 	case "start":
 		req.Mode = runs.Start
@@ -340,6 +349,9 @@ func (a App) engine(args []string) int {
 
 func (a App) newEngine(repo runs.Repo, cfg *config.Config, log io.Writer) *runs.Engine {
 	e := &runs.Engine{Repo: repo, Config: cfg, Log: log}
+	if cfg.RequireApproval {
+		e.Gate = approvalGate(repo)
+	}
 	if home, err := a.stateHome(); err == nil {
 		e.StateHome = home
 	} else {

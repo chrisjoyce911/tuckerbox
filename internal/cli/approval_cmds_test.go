@@ -242,3 +242,91 @@ func TestCheckRefusesMachineRequireApproval(t *testing.T) {
 		t.Errorf("check: %d %s", res.code, res.stderr)
 	}
 }
+
+// Review finding 1: a change whose branch exists without a worktree is
+// judged on that branch, the one its worktree is made from, not the base.
+func TestRunGateRetainedBranch(t *testing.T) {
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}, RequireApproval: true})
+	testenv.Git(t, f.repo, "branch", "add-login") // made before any approval
+	f.mustApprove("add-login")
+	f.commit("approve add-login on main")
+	for _, args := range [][]string{
+		{"run", "--foreground", "add-login"},
+		{"run", "add-login"},
+		{"engine", "--mode", "start", "add-login"}, // the engine refuses by itself
+	} {
+		res := f.tb(args...)
+		if res.code == 0 || !strings.Contains(res.stderr, "its branch add-login has no approval") {
+			t.Errorf("%v: %d %s", args, res.code, res.stderr)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(f.repo), "repo-worktrees", "add-login")); err == nil {
+		t.Error("worktree made")
+	}
+	if len(f.status().Runs) != 0 {
+		t.Error("run recorded")
+	}
+	// With the approval on the branch, it starts from the branch.
+	testenv.Git(t, f.repo, "branch", "-f", "add-login", "main")
+	if res := f.tb("run", "--foreground", "add-login"); res.code != 0 {
+		t.Fatalf("approved branch: %d %s", res.code, res.stderr)
+	}
+}
+
+// Review finding 2: approval is judged again by the engine under the change
+// lock. An unapprove that slips in after tuckerbox run's early check (here:
+// before the engine run starts) stops the run, and leaves its state as it was.
+func TestRunGateUnderLockAfterUnapprove(t *testing.T) {
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"a"}, RequireApproval: true})
+	f.mustApprove("a")
+	f.commit("approve a")
+	f.env.SetPlan(t, map[string]testenv.Action{"a:review": {Status: "blocked", Summary: "needs a person"}})
+	if res := f.tb("run", "--foreground", "a"); res.code != 0 {
+		t.Fatalf("first run: %d %s", res.code, res.stderr)
+	}
+	if s, _ := f.state("a"); s != "blocked" {
+		t.Fatalf("a is %s", s)
+	}
+	// tuckerbox run a: its early check passes, then unapprove runs, then
+	// the engine it spawns starts.
+	if res := f.tb("unapprove", "a"); res.code != 0 {
+		t.Fatalf("unapprove: %d %s", res.code, res.stderr)
+	}
+	res := f.tb("engine", "--mode", "start", "a")
+	wt := filepath.Join(filepath.Dir(f.repo), "repo-worktrees", "a")
+	if res.code == 0 || !strings.Contains(res.stderr, "no approval in its worktree "+wt) {
+		t.Errorf("engine after unapprove: %d %s", res.code, res.stderr)
+	}
+	if s, _ := f.state("a"); s != "blocked" {
+		t.Errorf("refused start changed the run: %s", s)
+	}
+	if got := len(f.env.Starts(t)); got != 2 {
+		t.Errorf("agent started again: %d starts", got)
+	}
+}
+
+// Review finding 2, base branch: the engine makes the worktree at the
+// commit tuckerbox run checked, even when the base moved on to text that
+// is not approved; without that commit it judges the base as it is now.
+func TestRunGatePinsCheckedCommit(t *testing.T) {
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"a"}, RequireApproval: true})
+	f.mustApprove("a")
+	f.commit("approve a")
+	checked := testenv.Git(t, f.repo, "rev-parse", "HEAD")
+	testenv.WriteFile(t, filepath.Join(f.changeDir("a"), "design.md"), "# Design\n\nNot approved.\n")
+	f.commit("edit a after approval")
+
+	res := f.tb("engine", "--mode", "start", "a")
+	if res.code == 0 || !strings.Contains(res.stderr, "approval is stale on the base branch main") {
+		t.Errorf("engine without the checked commit: %d %s", res.code, res.stderr)
+	}
+	f.noWorktree("a")
+
+	if res := f.tb("engine", "--mode", "start", "--start-rev", checked, "a"); res.code != 0 {
+		t.Fatalf("engine at the checked commit: %d %s %s", res.code, res.stdout, res.stderr)
+	}
+	wt := filepath.Join(filepath.Dir(f.repo), "repo-worktrees", "a")
+	if _, err := os.Stat(filepath.Join(wt, "openspec", "changes", "a", "design.md")); err == nil {
+		t.Error("worktree has the unapproved design: not made at the checked commit")
+	}
+}
