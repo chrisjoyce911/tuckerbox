@@ -40,3 +40,29 @@ Agent permission settings (extra command-line flags, permission modes, sandbox a
 #### Scenario: Loop to an undefined step
 - **WHEN** a step declares `on_reject = "bulid"` and no step has that id
 - **THEN** `tuckerbox check` exits non-zero and names the step, the key and the unknown id
+
+### Requirement: Board layout setting
+`[board] columns` SHALL accept `"compact"` (default) or `"steps"`. It MAY be set in machine config as a default; a repository value SHALL override it under the existing machine-default precedence rules. `tuckerbox check` SHALL reject an unknown value with the source file and key `board.columns`.
+
+#### Scenario: Default layout
+- **WHEN** neither config sets `board.columns`
+- **THEN** the board uses compact layout
+
+#### Scenario: Machine default
+- **WHEN** machine config sets `board.columns = "steps"` and repository config omits it
+- **THEN** the board uses steps layout
+
+#### Scenario: Repository override
+- **WHEN** machine config sets `board.columns = "steps"` and repository config sets `board.columns = "compact"`
+- **THEN** the board uses compact layout
+
+#### Scenario: Unknown layout
+- **WHEN** the effective `board.columns` value in either file is unknown, including an empty string
+- **THEN** `tuckerbox check` exits non-zero and names that file, `board.columns` and the invalid value
+
+### Requirement: Approval setting
+The repository config key `require_approval` SHALL default to `true`. It SHALL be read only from the repository's `.tuckerbox/config.toml`, so every machine applies the same gate. `tuckerbox check` SHALL fail when machine config sets it, and name the key.
+
+#### Scenario: Machine config sets the key
+- **WHEN** machine config contains `require_approval = false`
+- **THEN** `tuckerbox check` exits non-zero and says `require_approval` belongs in repository config

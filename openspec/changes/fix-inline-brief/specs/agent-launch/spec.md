@@ -18,11 +18,15 @@ A step SHALL name an agent, defined by a command template with placeholders: `{b
 - **THEN** `tuckerbox check` exits non-zero and says the command must pass one of them
 
 ### Requirement: Step brief
-Before starting a step, Tuckerbox SHALL write a brief file, kept for logs and history, and SHALL give the agent the brief's text in its command, so the agent needs no read outside its worktree. The brief holds the step's role prompt, the change id and the paths of its proposal, design, tasks and spec deltas, the result format the final message ends with, and findings from earlier rounds when the step re-runs after a rejection.
+Before starting a step, Tuckerbox SHALL write a brief file, kept for logs and history, and SHALL give the agent the brief's text in its command, so the agent needs no read outside its worktree. The brief holds the step's role prompt, the change id and the paths of its proposal, design, tasks and spec deltas, the result format the final message ends with, findings from earlier rounds when the step re-runs after a rejection, and the run's task scope, if it has one (see task-scope).
 
 #### Scenario: Build after rejection
 - **WHEN** the build step starts after the review step rejected round 1
 - **THEN** its brief includes round 1's findings
+
+#### Scenario: Brief for a scope
+- **WHEN** a step starts for a run with scope `2` covering tasks 2.1 and 2.2
+- **THEN** its brief lists 2.1 and 2.2 with their text, and says that tasks outside the scope are not part of this run: not to be done, ticked, or rejected for being undone
 
 #### Scenario: Agent reads no file
 - **WHEN** a step starts a fake agent that may not read the state folder, with `{brief}` in its command
