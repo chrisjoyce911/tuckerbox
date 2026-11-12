@@ -42,7 +42,7 @@ func (e *Engine) startEvents(ws Workspace, rs *Run, mode Mode, prev Run, by stri
 	kind := history.Started
 	sc := rs.Scope.SpecOrEmpty()
 	if prev.Change != "" {
-		if prev.State == Queued || prev.State == Running {
+		if prev.State == Queued || prev.State == Running || prev.State == Shipping {
 			e.event(ws, rs, history.Event{Kind: history.Stopped, Step: prev.Step, Round: prev.Round, Reason: Crashed})
 		}
 		kind = history.Resumed
@@ -78,6 +78,8 @@ func finishKind(s State) history.Kind {
 		return history.Stopped
 	case Ready:
 		return history.Ready
+	case Merged:
+		return history.Kind("merged")
 	default:
 		return history.Failed
 	}

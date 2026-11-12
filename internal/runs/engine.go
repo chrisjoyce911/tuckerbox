@@ -14,6 +14,7 @@ import (
 
 	"github.com/chrisjoyce911/tuckerbox/internal/agent"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
+	"github.com/chrisjoyce911/tuckerbox/internal/forge"
 	"github.com/chrisjoyce911/tuckerbox/internal/history"
 	"github.com/chrisjoyce911/tuckerbox/internal/scope"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
@@ -99,8 +100,12 @@ func (x *Expect) mismatch(rs *Run) string {
 
 // Engine runs one change's workflow in this process.
 type Engine struct {
-	Repo   Repo
-	Config *config.Config
+	// Forge overrides the authenticated session in local fake-forge tests.
+	Forge        func(context.Context) (forge.Client, func(string) string, error)
+	ShipSleep    func(context.Context, time.Duration) error
+	workflowSlot *Slot
+	Repo         Repo
+	Config       *config.Config
 	// StateHome is the user state directory holding the machine index; ""
 	// leaves the index alone.
 	StateHome string
@@ -308,6 +313,11 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 		notified = true
 	}
 
+	if rs.ShippingStarted {
+		notify()
+		return e.forgeShip(ctx, ws, rs, true)
+	}
+
 	dw, fail := e.newDepWait(ws, rs)
 	if fail != "" {
 		return e.finish(ws, rs, Failed, fail)
@@ -361,6 +371,7 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	// Release: the slot is freed after the final state is written (the
 	// deferred lock release runs after this one).
 	defer slot.Release()
+	e.workflowSlot = slot
 	e.logf(req.Change, "running in slot %d", slot.N)
 
 	return e.steps(ctx, ws, rs, startIdx, stopReq)
@@ -446,6 +457,10 @@ func (e *Engine) prepare(req Request, ws Workspace) (*Run, int, error) {
 	case Resume:
 		switch cur.State {
 		case Stopped, Blocked:
+		case Ready:
+			if e.Config.Ship != config.ShipMR || rs.MR == nil || rs.MR.State != "open" {
+				return nil, 0, &StateError{Change: req.Change, State: Ready, Hint: "only a stopped or blocked run can be resumed"}
+			}
 		case Failed:
 			return nil, 0, &StateError{Change: req.Change, State: Failed, Hint: "use tuckerbox rerun " + req.Change + " " + rs.Step + " to run the step again"}
 		default:
@@ -455,6 +470,13 @@ func (e *Engine) prepare(req Request, ws Workspace) (*Run, int, error) {
 	case Rerun:
 		rs.Step = req.Step
 		rs.Rejections = nil
+	}
+	if rs.ShippingStarted && req.Mode != Rerun {
+		rs.Round++
+		rs.Worktree = ws.Path
+		rs.Repo = e.Repo.Root
+		rs.Step = ""
+		return rs, len(steps), nil
 	}
 	if rs.Step == "" {
 		rs.Step = steps[0].ID
@@ -576,7 +598,7 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 			return e.finish(ws, rs, Failed, fmt.Sprintf("step %s failed: %s", st.ID, oneLine(res.Summary)))
 		}
 	}
-	return e.ship(ws, rs)
+	return e.ship(ctx, ws, rs)
 }
 
 // ship finishes a run whose last step is done. A scoped run is ready only
@@ -584,7 +606,7 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 // complete decides, with the ship mode, whether the run ships (see
 // shipDecision). In local mode the work is committed on the change's
 // branch and nothing is pushed.
-func (e *Engine) ship(ws Workspace, rs *Run) (*Run, error) {
+func (e *Engine) ship(ctx context.Context, ws Workspace, rs *Run) (*Run, error) {
 	// The worktree's tasks.md, read while this run holds the change lock:
 	// tuckerbox tasks and edit write it only under that lock.
 	tasks, err := readTasks(TasksFile(ws.Path, rs.Change))
@@ -601,7 +623,7 @@ func (e *Engine) ship(ws Workspace, rs *Run) (*Run, error) {
 	case outcomeBlocked:
 		return e.finish(ws, rs, Blocked, "tasks not ticked: "+strings.Join(left, ", "))
 	case outcomeShip:
-		return e.finish(ws, rs, Failed, fmt.Sprintf("ship mode %q is not supported yet", e.Config.Ship))
+		return e.forgeShip(ctx, ws, rs, false)
 	}
 	msg := fmt.Sprintf("%s: work from tuckerbox run\n\nCommitted by Tuckerbox (ship = \"local\") after the last step, %s, reported done.\n",
 		rs.Change, rs.Step)
@@ -638,7 +660,9 @@ func (e *Engine) finish(ws Workspace, rs *Run, s State, reason string) (*Run, er
 	if s == Ready || s == Blocked {
 		ev.Scope = rs.Scope.SpecOrEmpty()
 	}
-	e.event(ws, rs, ev)
+	if s != Merged {
+		e.event(ws, rs, ev)
+	}
 	_ = os.Remove(StopFile(ws.State))
 	return rs, nil
 }

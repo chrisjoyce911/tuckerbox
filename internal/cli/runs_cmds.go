@@ -20,6 +20,7 @@ import (
 	"github.com/chrisjoyce911/tuckerbox/internal/agent"
 	"github.com/chrisjoyce911/tuckerbox/internal/approval"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
+	"github.com/chrisjoyce911/tuckerbox/internal/forge"
 	"github.com/chrisjoyce911/tuckerbox/internal/runs"
 	"github.com/chrisjoyce911/tuckerbox/internal/scope"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
@@ -176,6 +177,9 @@ func (a App) run(args []string) int {
 			fmt.Fprintln(a.Stderr, "tuckerbox run: nothing started")
 			return 1
 		}
+	}
+	if !a.shippingPreflight(ctx, repo, cfg, changes) {
+		return 1
 	}
 	if fg {
 		return a.foreground(repo, cfg, runs.Request{Change: changes[0], Mode: runs.Start, StartRev: startRevs[changes[0]], Scope: tasks})
@@ -380,6 +384,9 @@ func (a App) engine(args []string) int {
 
 func (a App) newEngine(repo runs.Repo, cfg *config.Config, log io.Writer) *runs.Engine {
 	e := &runs.Engine{Repo: repo, Config: cfg, Log: log}
+	if a.Forge != nil {
+		e.Forge = func(ctx context.Context) (forge.Client, func(string) string, error) { return a.Forge(ctx, cfg) }
+	}
 	if cfg.RequireApproval {
 		e.Gate = approvalGate(repo)
 		e.ResumeGate = func(_ context.Context, change, worktree string) error {
