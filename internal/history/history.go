@@ -52,6 +52,14 @@
 //     resume or rerun for a run whose process died without recording a
 //     final state; its time is when that was found, not when it died.
 //   - ready: the last step was done and the run's work is on its branch.
+//   - scope_started: the run starts again from its first step for a new
+//     task scope (tuckerbox run --tasks): scope is the new scope, old_scope
+//     the one it had ("" or absent for the whole change). It comes where
+//     started, resumed or rerun would, and is followed by queued.
+//
+// started, resumed, rerun, ready and blocked carry scope, the run's task
+// scope as typed with next resolved (such as "2" or "2.1-2.4"); it is
+// absent for a run of the whole change.
 //
 // After a rejection that loops back, the next event is step_started for
 // the to step in the next round.
@@ -98,6 +106,7 @@ const (
 	Failed       Kind = "failed"
 	Stopped      Kind = "stopped"
 	Ready        Kind = "ready"
+	ScopeStarted Kind = "scope_started"
 )
 
 // Event is one line of history.jsonl.
@@ -129,6 +138,11 @@ type Event struct {
 	ExitCode *int `json:"exit_code,omitempty"`
 	// Reason says why, for blocked, failed and stopped.
 	Reason string `json:"reason,omitempty"`
+	// Scope is the run's task scope, for started, resumed, rerun, ready,
+	// blocked and scope_started; "" for the whole change.
+	Scope string `json:"scope,omitempty"`
+	// OldScope is the scope before, for scope_started.
+	OldScope string `json:"old_scope,omitempty"`
 }
 
 // Machine returns this machine's name for Event.Machine: its host name,

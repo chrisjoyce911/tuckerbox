@@ -36,7 +36,7 @@
 - [x] 2.21 Test: First group in merge mode (unit test of the ship decision here; end-to-end in `add-forge-shipping`)
 - [x] 2.22 Test: Last group in mr mode (unit test of the ship decision here; end-to-end in `add-forge-shipping`)
 - [x] 2.23 Test: Dependents in merge mode (archive on the base required; end-to-end in `add-forge-shipping`)
-- [ ] 2.24 Ship tasks: `(ship)` prefix; left out of scopes, `next` and `complete`; refuse a scope of only ship tasks; say in the brief not to tick them
+- [x] 2.24 Ship tasks: `(ship)` prefix; left out of scopes, `next` and `complete`; refuse a scope of only ship tasks; say in the brief not to tick them
 - [x] 2.25 In `mr`/`merge`, a run without a scope that isn't complete after its last step is `blocked` with the unticked tasks
 - [x] 2.26 Test: Final group with an archive task
 - [x] 2.27 Test: Scope of a ship task
@@ -45,18 +45,18 @@
 
 ## 3. Brief (agent-launch)
 
-- [ ] 3.1 Add the Scope section to the brief: each task's number and text, and the in-scope rules
-- [ ] 3.2 Test: Build after rejection still lists the findings with a scope set
-- [ ] 3.3 Test: Brief for a scope
+- [x] 3.1 Add the Scope section to the brief: each task's number and text, and the in-scope rules
+- [x] 3.2 Test: Build after rejection still lists the findings with a scope set
+- [x] 3.3 Test: Brief for a scope
 
 ## 4. Status, history and board data (task-scope)
 
-- [ ] 4.1 `status` shows the scope; `status --json` adds `scope` within the current version
-- [ ] 4.2 History: `scope` on `started`, `resumed`, `rerun`, `ready` and `blocked`; new `scope_started` event; document both in `internal/history`
-- [ ] 4.3 Board: `scope` on cards and rounds; `groups` (number, title, ticked, total) in card detail
-- [ ] 4.4 Test: Next scope in history
-- [ ] 4.5 Test: Status of a scoped run
-- [ ] 4.6 Test: Groups in card detail
+- [x] 4.1 `status` shows the scope; `status --json` adds `scope` within the current version
+- [x] 4.2 History: `scope` on `started`, `resumed`, `rerun`, `ready` and `blocked`; new `scope_started` event; document both in `internal/history`
+- [x] 4.3 Board: `scope` on cards and rounds; `groups` (number, title, ticked, total) in card detail
+- [x] 4.4 Test: Next scope in history
+- [x] 4.5 Test: Status of a scoped run
+- [x] 4.6 Test: Groups in card detail
 
 ## 5. Board mod (task-scope)
 

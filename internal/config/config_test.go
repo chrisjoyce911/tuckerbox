@@ -386,7 +386,7 @@ func TestLoopToUndefinedStep(t *testing.T) {
 func TestStepValidation(t *testing.T) {
 	repo := `
 max_parallel = 0
-ship = "mr"
+ship = "unknown"
 [workflow]
 steps = ["plan", "build", "plan", "review"]
 [steps.plan]
@@ -409,7 +409,7 @@ role = "planner"
 	ps := f.problems()
 	rp := f.repoPath()
 	wantProblem(t, ps, rp, "max_parallel", "at least 1")
-	wantProblem(t, ps, rp, "ship", "not supported yet")
+	wantProblem(t, ps, rp, "ship", "unknown ship mode")
 	wantProblem(t, ps, rp, "workflow.steps", `"plan" is listed twice`)
 	wantProblem(t, ps, rp, "steps.plan.agent", `unknown agent "gemini"`)
 	wantProblem(t, ps, rp, "steps.plan.role", `unknown role "dreamer"`)

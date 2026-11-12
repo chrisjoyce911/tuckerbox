@@ -164,13 +164,13 @@ func TestParseResult(t *testing.T) {
 
 func TestRolePrompts(t *testing.T) {
 	root := t.TempDir()
-	for _, role := range []string{"planner", "builder", "reviewer"} {
+	for _, role := range []string{"planner", "builder", "reviewer", "fixer"} {
 		p, src, err := RolePrompt(root, role)
 		if err != nil || src != "built-in" || !strings.Contains(p, role) {
 			t.Errorf("%s: %q %q %v", role, src, p, err)
 		}
 	}
-	if got := strings.Join(BuiltinRoles(), ","); got != "builder,planner,reviewer" {
+	if got := strings.Join(BuiltinRoles(), ","); got != "builder,fixer,planner,reviewer" {
 		t.Errorf("built-in roles %s", got)
 	}
 

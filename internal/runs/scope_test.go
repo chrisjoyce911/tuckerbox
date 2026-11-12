@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
+	"github.com/chrisjoyce911/tuckerbox/internal/history"
 	"github.com/chrisjoyce911/tuckerbox/internal/scope"
 	"github.com/chrisjoyce911/tuckerbox/internal/testenv"
 )
@@ -439,5 +440,37 @@ func TestDependentsInMergeMode(t *testing.T) {
 	testenv.Git(t, f.dir, "commit", "-q", "-m", "archive a")
 	if r := f.run(Request{Change: "b"}); r.State != Blocked || r.Reason != "tasks not ticked: 1.1" {
 		t.Fatalf("b: %s %q", r.State, r.Reason)
+	}
+}
+
+// Scenario: Next scope in history. started, ready and blocked carry the
+// scope; starting again for scope 2 records scope_started (old 1, new 2),
+// then queued.
+func TestNextScopeInHistory(t *testing.T) {
+	f := setup(t, testenv.RepoOptions{Changes: []string{"add-login"}})
+	f.withTasks(scopedTasks, "add-login")
+	f.env.SetPlan(t, map[string]testenv.Action{"build:1": tick("1.1", "1.2"), "build:2": tick("2.1")})
+	f.run(Request{Change: "add-login", Scope: "1"})
+	if r := f.run(Request{Change: "add-login", Scope: "2"}); r.State != Blocked {
+		t.Fatalf("scope 2: %s", r.State)
+	}
+	f.env.SetPlan(t, map[string]testenv.Action{"build": tick("2.2")})
+	f.run(Request{Change: "add-login", Mode: Rerun, Step: "build"})
+	events, err := history.Read(history.File(f.state("add-login")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range events {
+		switch e.Kind {
+		case history.Started, history.Resumed, history.Rerun, history.Ready, history.Blocked, history.Queued:
+			got = append(got, string(e.Kind)+" "+e.Scope)
+		case history.ScopeStarted:
+			got = append(got, string(e.Kind)+" "+e.OldScope+"->"+e.Scope)
+		}
+	}
+	want := []string{"started 1", "queued ", "ready 1", "scope_started 1->2", "queued ", "blocked 2", "rerun 2", "queued ", "ready 2"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("history\n got %q\nwant %q", got, want)
 	}
 }

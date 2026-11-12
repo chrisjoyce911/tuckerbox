@@ -42,6 +42,7 @@
 package config
 
 import (
+	"github.com/chrisjoyce911/tuckerbox/internal/forge"
 	"path/filepath"
 	"slices"
 )
@@ -76,7 +77,7 @@ var BuiltinAgents = []string{"claude", "codex"}
 
 // BuiltinRoles are the roles with a built-in prompt. A repository may add or
 // override roles with .tuckerbox/roles/<role>.md.
-var BuiltinRoles = []string{"planner", "builder", "reviewer"}
+var BuiltinRoles = []string{"planner", "builder", "reviewer", "fixer"}
 
 // Placeholders are the names an agent command template may use, written as
 // {name} inside an argument. {brief} is required.
@@ -94,8 +95,12 @@ var Placeholders = []string{"brief", "workdir", "model", "effort", "lastmessage"
 type ShipMode string
 
 // ShipLocal leaves the work committed on the change's branch and pushes
-// nothing. It is the only mode in this release.
-const ShipLocal ShipMode = "local"
+// nothing. ShipMR and ShipMerge opt into the forge shipping stage.
+const (
+	ShipLocal ShipMode = "local"
+	ShipMR    ShipMode = "mr"
+	ShipMerge ShipMode = "merge"
+)
 
 // Config is the resolved configuration for one repository on this machine:
 // the machine config merged with the repository config, defaults filled in.
@@ -121,7 +126,13 @@ type Config struct {
 	// MaxParallel is the most changes from this repository that run at once.
 	MaxParallel int
 	// Ship is the ship mode.
-	Ship ShipMode
+	Ship        ShipMode
+	Shipping    Shipping
+	Forge       forge.Settings
+	ForgeTarget forge.Target
+	Forges      map[string]ForgeHost
+	Machine     string
+	FixSteps    map[string]Step
 	// Worktree holds the worktree and branch settings for runs.
 	Worktree Worktree
 	// BoardColumns defaults to compact; steps shows each workflow step separately.
@@ -233,7 +244,8 @@ func (c *Config) Step(id string) (Step, bool) {
 			return s, true
 		}
 	}
-	return Step{}, false
+	s, ok := c.FixSteps[id]
+	return s, ok
 }
 
 // PermissionArgs returns the extra arguments the step's permission profile

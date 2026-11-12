@@ -53,8 +53,19 @@ role = "reviewer"
 on_reject = "build"     # on "rejected", go back to this step (this step or an earlier one)
 max_rounds = 3          # then block the run (default 3; needs on_reject)
 
-# Every [steps.<id>] table must be listed in workflow.steps; one that is not
-# can never run, and tuckerbox check reports it.
+# Every step must be listed in workflow.steps or named as a shipping fix step.
+# Shipping example (set ship = "mr" above; API tokens belong in machine config):
+# [shipping]
+# remote = "origin"
+# fix_ci = "fix_ci"
+# fix_review = "fix_ci"
+# max_rounds = 3
+# merge_method = "merge"
+# archive = true
+# wait_timeout = "2h"
+# [steps.fix_ci]
+# agent = "claude"
+# role = "fixer"
 
 # Where runs put worktrees and what they call branches. {change} is the change
 # id, {repo} this folder's name. A relative path is relative to this repo.

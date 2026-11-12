@@ -58,7 +58,8 @@
           { "severity": "high", "file": "web/login.go", "detail": "The form uses GET, so the password ends up in the access log." },
           { "severity": "medium", "file": "web/templates/login.html", "detail": "The error message says which field was wrong." }
         ],
-        "ended": "2026-11-11T16:02:00+10:00"
+        "ended": "2026-11-11T16:02:00+10:00",
+        "scope": ""
       },
       {
         "round": 2,
@@ -68,7 +69,8 @@
         "findings": [
           { "severity": "medium", "file": "web/templates/login.html", "detail": "The error message still differs for an unknown email." }
         ],
-        "ended": "2026-11-12T07:40:00+10:00"
+        "ended": "2026-11-12T07:40:00+10:00",
+        "scope": ""
       },
       {
         "round": 3,
@@ -78,7 +80,8 @@
         "findings": [
           { "severity": "low", "file": "", "detail": "Task 2.2 is still open." }
         ],
-        "ended": "2026-11-12T08:15:30+10:00"
+        "ended": "2026-11-12T08:15:30+10:00",
+        "scope": ""
       }
     ],
     "history": [
@@ -105,6 +108,11 @@
       { "at": "2026-11-12T08:00:00+10:00", "event": "handoff", "step": "build", "round": 3, "agent": "claude", "machine": "studio", "to": "review", "summary": "Unknown email gets the same message." },
       { "at": "2026-11-12T08:00:01+10:00", "event": "step_started", "step": "review", "round": 3, "agent": "codex", "machine": "studio" },
       { "at": "2026-11-12T08:15:30+10:00", "event": "blocked", "step": "review", "round": 3, "agent": "codex", "machine": "studio", "reason": "review limit reached" }
+    ],
+    "groups": [
+      { "number": 1, "title": "Page", "ticked": 2, "total": 2 },
+      { "number": 2, "title": "Sign in", "ticked": 1, "total": 2 },
+      { "number": 3, "title": "Header", "ticked": 0, "total": 1 }
     ]
   }
 }

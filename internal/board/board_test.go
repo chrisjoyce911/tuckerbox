@@ -350,8 +350,9 @@ func assertShape(t *testing.T, d *Document, fixture string) {
 	shape(actual, "", got)
 	// priority is a number or null, and position is absent on archived cards.
 	optional := map[string]bool{".cards[].archived": true, ".cards[].error": true, ".columns[].step": true,
-		".cards[].priority": true, ".cards[].position": true}
-	for _, k := range []string{"result", "to", "summary", "findings", "reason"} {
+		".cards[].priority": true, ".cards[].position": true,
+		".cards[].scope": true, ".cards[].scope.spec": true, ".cards[].scope.tasks": true, ".cards[].scope.tasks[]": true}
+	for _, k := range []string{"result", "to", "summary", "findings", "reason", "scope", "old_scope"} {
 		optional[".detail.history[]."+k] = true
 	}
 	for k, v := range want {

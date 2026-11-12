@@ -135,6 +135,74 @@ command = ["myagent", "--prompt-file", "{brief}", "--last-message", "{lastmessag
 
 `doctor` exits non-zero only when a required tool (`git` or `openspec`) is missing. Agent CLIs are optional. It does not yet check whether an agent is signed in, and says `sign-in not checked`.
 
+## Forge configuration
+
+Shipping configuration and API clients are available; the shipping engine is
+being implemented in `add-forge-shipping`. Keep production runs in `local`
+mode until that implementation is complete. The repository chooses the mode:
+`local` commits locally, `mr` will stop at a green merge request for a person to
+merge, and `merge` will merge the exact green head when forge protection allows.
+
+```toml
+# Repository .tuckerbox/config.toml
+ship = "mr"
+
+[workflow]
+steps = ["build", "review"]
+[steps.build]
+agent = "claude"
+role = "builder"
+[steps.review]
+agent = "codex"
+role = "reviewer"
+
+[shipping]
+remote = "origin"
+fix_ci = "fix_ci"
+fix_review = "fix_ci"
+max_rounds = 3
+merge_method = "merge"  # merge, squash or rebase; GitLab uses project strategy
+archive = true
+labels = []
+review_from = []
+wait_timeout = "2h"
+
+[steps.fix_ci]
+agent = "claude"
+role = "fixer"
+
+# For self-hosted forges, name the kind (github or gitlab):
+# [forge]
+# kind = "gitlab"
+# api_url = "https://git.example.org/api/v4"
+```
+
+API URLs must use HTTPS on the push remote's host. SSH aliases resolve through
+local `ssh -G` configuration. GitHub.com and GitLab.com are detected automatically;
+other hosts require a kind in repository `[forge]` or machine `[forges]` config.
+Authenticated API requests refuse redirects. GitHub's signed log downloads use
+separate HTTPS requests without credentials or cookies.
+
+```toml
+# Machine config only; never commit tokens or token sources to a repository.
+machine = "studio"
+[forges."git.example.org"]
+kind = "gitlab"
+token_env = "WORK_GITLAB_TOKEN"
+borrow_cli_token = false
+```
+
+Tokens come first from the named variable, then `GH_TOKEN` / `GITHUB_TOKEN`
+on github.com or `GITLAB_TOKEN` on gitlab.com only. Setting `borrow_cli_token = true`
+allows the host-specific stored token from `gh` or `glab` to be read with a
+five-second timeout. Borrowing is off by default; no login or refresh is run.
+Tokens are masked in forge text and are never added to agent environments.
+Git pushes retain git's own credentials. `tuckerbox doctor` reports the forge,
+project, token source and API read/push permissions in `mr` and `merge` repositories.
+GitHub tokens need repository contents and pull-request write access, plus checks
+and Actions read access. GitLab tokens need `api` scope and project Developer
+access or greater; branch protection can still restrict pushes and merges.
+
 ## Develop
 
 ```sh
