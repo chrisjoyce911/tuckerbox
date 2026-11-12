@@ -180,9 +180,10 @@ export function group(board) {
   return cols;
 }
 
-// Columns listed in priority order, where a card can be dragged to reorder
-// it (change-priority: Priority on the board, Drag to reorder). Ready and
-// Done keep their order, and cards never move between columns.
+// Columns listed in priority order, where a card can be dragged to
+// reorder it (board-data: Priority on the board; herdr-board: Drag to
+// reorder). Ready and Done keep their order, and cards never move between
+// columns.
 export function sortedColumn(id) {
   return ["proposed", "approved", "in_progress", "queued"].includes(id) || String(id ?? "").startsWith("step:");
 }
@@ -238,7 +239,7 @@ export function liveDrop(drop, point) {
 }
 
 // The card a reorder runs for: `tuckerbox priority` writes the checkout on
-// the board's machine (change-priority: Drag to reorder), so it runs there
+// the board's machine (herdr-board: Drag to reorder), so it runs there
 // whatever machine the card's run is on.
 export function priorityCard(card, board) {
   return { ...card, on: board?.on ?? null, path: board?.path ?? "" };

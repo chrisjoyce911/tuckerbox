@@ -53,7 +53,7 @@ With `ship = "local"`, a run that finishes its last step SHALL leave the work co
 - **THEN** the branch holds the commits, the worktree is kept, and the run's state is `ready`
 
 ### Requirement: Parallel limit
-Tuckerbox SHALL run at most `max_parallel` changes at once per repository on one machine. It SHALL queue further changes and start them in the order requested as slots free up. At most one run per change SHALL be active on a machine at any time. This holds even when several `tuckerbox` processes start runs at once. Model: `formal/runs.tla`, invariants `OneRunPerChange` and `WithinLimit`.
+Tuckerbox SHALL run at most `max_parallel` changes at once per repository on one machine. It SHALL queue further changes and start them in admission order (see change-priority) as slots free up. At most one run per change SHALL be active on a machine at any time. This holds even when several `tuckerbox` processes start runs at once. Model: `formal/runs.tla`, invariants `OneRunPerChange` and `WithinLimit`.
 
 #### Scenario: More changes than slots
 - **WHEN** `max_parallel = 2` and the user runs `tuckerbox run --all` with four valid changes
@@ -62,6 +62,10 @@ Tuckerbox SHALL run at most `max_parallel` changes at once per repository on one
 #### Scenario: Change already running
 - **WHEN** a change already has an active run and the user starts it again
 - **THEN** Tuckerbox refuses and points to the active run
+
+#### Scenario: Unranked changes keep request order
+- **WHEN** `max_parallel = 1`, no change has a priority, and the user starts A, then B, then C
+- **THEN** B starts before C
 
 ### Requirement: Stop, resume and re-run
 `tuckerbox stop <change>` SHALL end the active step's agent and mark the run `stopped`. `tuckerbox resume <change>` SHALL continue a `stopped` or `blocked` run from its current step. `tuckerbox rerun <change> <step>` SHALL start again from the named step. None of these SHALL alter files in the worktree.

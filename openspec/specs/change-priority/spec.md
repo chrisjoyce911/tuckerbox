@@ -1,10 +1,9 @@
-# Spec Delta
+# change-priority Specification
 
 ## Purpose
+Defines how the owner ranks OpenSpec changes and how Tuckerbox orders changes and queued runs by that rank.
 
-Defines how the owner ranks OpenSpec changes, how Tuckerbox orders changes and queued runs by that rank, and how the board shows and changes the order.
-
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Priority rank
 A change MAY have `priority = <n>`, a positive integer, in its `tuckerbox.toml`. Lower SHALL come first. A change without one SHALL come after every ranked change. `tuckerbox check` SHALL fail on a value that is not a positive integer, naming the file. Ordering SHALL treat such a value as no priority.
@@ -114,21 +113,3 @@ When a slot frees, the queued run first in admission order SHALL take it. Runs w
 #### Scenario: Slot frees during a renumber
 - **WHEN** a move renumbers five changes and a slot frees while it writes them
 - **THEN** no run takes the slot until the move ends, and then the first run in the new order takes it
-
-### Requirement: Priority on the board
-Each active card SHALL include its `priority` value, or none, and its `position` in priority order. The Proposed, Approved and In progress columns, and in the steps layout Queued and each step column, SHALL list cards in priority order. Ready and Done SHALL keep their order. Positions SHALL come from the board's own machine.
-
-#### Scenario: Board order
-- **WHEN** two Approved cards, A with priority 2000 and B with 1000, are read
-- **THEN** B is listed before A, with positions in priority order
-
-### Requirement: Drag to reorder
-In the board mod, the owner SHALL be able to drag a card within a sorted column, not into another column. A drop SHALL run `tuckerbox priority <change> <n>` on the board's own machine, with `n` the position that puts the card where it was dropped. The board SHALL show the command's error, and the order SHALL change only when the next board read shows it.
-
-#### Scenario: Drag above a card
-- **WHEN** the owner drags D, at position 5, above B, at position 2, in the Approved column
-- **THEN** the board runs `tuckerbox priority D 2`, and D is listed above B on the next read
-
-#### Scenario: Drag down
-- **WHEN** the owner drags A, at position 1, below C, at position 3
-- **THEN** the board runs `tuckerbox priority A 3`
