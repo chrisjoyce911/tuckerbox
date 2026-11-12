@@ -1,7 +1,7 @@
 // The board: a header with the repository and its counts, then one column per
 // stage (derived by tuckerbox, never stored here) holding the change cards.
 import { View, div, svg } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
+import { v_flex, h_flex, Scrollbar } from "gpui-base";
 import { theme, props, openOverlay, closeOverlay, spaces, panes, focused, run, notify } from "herdr";
 import { MOD, loadAll, locate, candidates, fixturesFolder } from "./data.js";
 import { group, counts, columnName, due, isShown, ago, needsYou, needsYouReason, newlyNeeding, toastCall, candidatesKey, openGate, showsApproval, NO_CONFIG, sortedColumn, dropPosition, eventBox, liveDrop, priorityCard } from "./model.js";
@@ -322,8 +322,15 @@ export class BoardView extends View {
       return this.empty("Can't read the board", b.error.message,
         button("retry", "Try again", (_e, cx) => { this.last = 0; this.refresh(cx); }));
     }
-    return h_flex().id("columns").flex_1().min_h(0).p(12).gap(10).overflow_x_scrollbar()
-      .children(group(b).map((c) => this.column(c)));
+    // The row scrolls sideways under a bar that is always drawn. The bar
+    // overflow_x_scrollbar() paints follows the theme, which on macOS (by
+    // default) shows it only while the row is already scrolling, so a narrow
+    // pane had nothing to drag. Herdr's own scrolling, no wheel handler here.
+    return v_flex().id("columns-area").flex_1().min_h(0)
+      .child(h_flex().id("columns").flex_1().min_h(0).p(12).pb(6).gap(10).overflow_x_scroll()
+        .children(group(b).map((c) => this.column(c))))
+      .child(div().id("columns-bar").relative().flex_none().h(10).mx(12).mb(6)
+        .child(Scrollbar.horizontal("columns").mode("always").absolute().inset_0()));
   }
 
   render() {

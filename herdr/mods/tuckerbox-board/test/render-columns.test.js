@@ -61,7 +61,15 @@ function columnsOf(props) {
 for (const [name, props] of [["Narrow docked pane", { folder: "/work/shop", machine: null }], ["Wide window", { overlay: "o1" }]]) {
   test(`${name}: one sideways scroll row of fixed 236 px columns, none dropped, header outside it`, () => {
     const { root, row, cols } = columnsOf(props);
-    assert.ok(has(row, "overflow_x_scrollbar"), "the row scrolls sideways with Herdr's scrollbar");
+    // The spec says overflow_x_scrollbar(); its bar follows the theme and on
+    // macOS only shows while scrolling, so the row is overflow_x_scroll()
+    // with its own always-drawn bar (pull request #75).
+    assert.ok(has(row, "overflow_x_scroll"), "the row scrolls sideways with Herdr's scrolling");
+    const bars = all(root).filter((x) => x.kind === "scrollbar");
+    assert.equal(bars.length, 1, "one bar");
+    assert.deepEqual(bars[0].args, ["columns"], "the bar drives the column row");
+    assert.deepEqual(callsOf(bars[0], "mode"), [["always"]], "the bar is always drawn");
+    assert.ok(!all(row).includes(bars[0]), "the bar is outside the row, so it never scrolls away");
     assert.deepEqual(cols.map(idOf), group(board).map((c) => `col-${c.id}`), "every column is drawn");
     for (const c of cols) {
       assert.deepEqual(callsOf(c, "w"), [[236]], `${idOf(c)} is 236 px`);

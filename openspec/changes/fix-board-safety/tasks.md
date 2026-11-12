@@ -43,8 +43,8 @@
 - [x] 2.13 Board and card detail: no approval chip on Done cards
 - [x] 2.14 Node test "Archived change"
 - [x] 2.15 Node test "Active change without approval"
-- [ ] 2.16 Reproduce in a 500 px docked pane why Ready and Done can't be reached, and record the cause in the implementing pull request before changing layout
-- [ ] 2.17 `board.js`: fix the cause found; columns `flex_none` at 236 px in a row with `overflow_x_scrollbar()`; header outside the row; no wheel handler of its own
+- [x] 2.16 Reproduce in a 500 px docked pane why Ready and Done can't be reached, and record the cause in the implementing pull request before changing layout
+- [x] 2.17 `board.js`: fix the cause found; columns `flex_none` at 236 px in a row with `overflow_x_scrollbar()`; header outside the row; no wheel handler of its own
 - [x] 2.18 Strict Herdr API stub for tests: a committed list of the `gpui-kit.d.ts` members the board uses (with the Herdr version), a stub that throws on anything else, and a check script that compares the list with an installed `gpui-kit.d.ts` when present
 - [ ] 2.19 Node test "Narrow docked pane" (render test with the strict stub: the row is `overflow_x_scrollbar`, every column is 236 px and none is dropped), then check by hand in a 500 px docked pane that dragging the scrollbar and swiping reach Ready and Done
 - [ ] 2.20 Node test "Wide window" (same render test at a width where all columns fit), and check by hand in the board window that no scrollbar shows

@@ -1,6 +1,7 @@
 {
   "taken_from": "gpui-kit.d.ts and herdr.d.ts written by herdr-app 0.1.15 (gpui-shell 0.7.1)",
   "element": [
+    "absolute",
     "bg",
     "border_1",
     "border_b",
@@ -20,21 +21,26 @@
     "h_full",
     "hover",
     "id",
+    "inset_0",
     "items_center",
     "items_start",
     "justify_center",
     "line_through",
     "loop",
     "max_w",
+    "mb",
     "min_h",
     "min_w",
+    "mode",
     "mt",
+    "mx",
     "on_click",
     "on_key_down",
     "on_mouse_down",
     "on_mouse_move",
     "on_mouse_up",
     "opacity",
+    "overflow_x_scroll",
     "overflow_x_scrollbar",
     "overflow_y_scrollbar",
     "p",
@@ -43,6 +49,7 @@
     "pt",
     "px",
     "py",
+    "relative",
     "rounded",
     "rounded_full",
     "selectable",
@@ -68,7 +75,8 @@
     "gpui-base": [
       "v_flex",
       "h_flex",
-      "TextView"
+      "TextView",
+      "Scrollbar"
     ],
     "herdr": [
       "exec",
