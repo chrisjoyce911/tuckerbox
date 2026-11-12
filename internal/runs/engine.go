@@ -142,6 +142,11 @@ type Engine struct {
 	// term is the run's terminal name, labels and slot, for the terminal
 	// backend.
 	term agent.TermInfo
+	// adopting is the live agent this run adopted, from when its slot is
+	// taken back until its step's backend runs it.
+	adopting *adoption
+	// afterSlot, when set, is called once the run holds its slot (tests).
+	afterSlot func()
 }
 
 // ActiveError means the change already has an active run.
@@ -448,6 +453,7 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	}
 
 	var slot *Slot
+	e.adopting = nil
 	if adopt != nil {
 		n := *rs.Slot
 		e.logf(req.Change, "adopting the live agent in terminal %s (step %s round %d): taking its slot %d", adopt.Name, rs.Step, rs.Round, n)
@@ -464,13 +470,7 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 			if s != nil {
 				s.Release()
 			}
-			ectx, ecancel := context.WithTimeout(context.Background(), 2*time.Minute)
-			err := adopt.Backend.EndAgent(ectx, adopt.Name)
-			ecancel()
-			if err != nil {
-				return e.unwatched(ws, rs, &agent.EndError{Name: adopt.Name, Err: err})
-			}
-			return e.finish(ws, rs, Stopped, stopReason(stopReq, "while taking its slot back"))
+			return e.stopAdopted(ws, rs, adopt, stopReason(stopReq, "while taking its slot back"))
 		case err != nil:
 			// The agent may still work in its terminal: keep its name and
 			// slot so that stop and resume find it.
@@ -485,6 +485,9 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 			}
 		default:
 			slot = s
+			// Until its step's backend has it, the adopted agent is this
+			// run's to end on a stop (see steps).
+			e.adopting = adopt
 		}
 	}
 	dw, fail := e.newDepWait(ws, rs)
@@ -547,6 +550,9 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 		return rs, err
 	}
 	e.logf(req.Change, "running in slot %d", slot.N)
+	if e.afterSlot != nil {
+		e.afterSlot()
+	}
 
 	return e.steps(ctx, ws, rs, startIdx, stopReq)
 }
@@ -690,6 +696,12 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 	for i < len(steps) {
 		st := steps[i]
 		if ctx.Err() != nil {
+			if e.adopting != nil {
+				// Stopped after the adopted agent's slot was taken back but
+				// before its step watches it: it still works in its
+				// terminal.
+				return e.stopAdopted(ws, rs, e.adopting, stopReason(stopReq, "before step "+st.ID))
+			}
 			return e.finish(ws, rs, Stopped, stopReason(stopReq, "before step "+st.ID))
 		}
 		rs.State, rs.Step, rs.Reason, rs.Tail = Running, st.ID, "", ""
@@ -717,6 +729,8 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 			Worktree:    ws.Path, State: ws.State, Base: rs.Base,
 			Earlier: rs.Earlier(), Scope: rs.Scope, Term: e.term,
 		}, opts)
+		// The backend has had the adopted agent: it ends it on a stop.
+		e.adopting = nil
 		var endErr *agent.EndError
 		if errors.As(err, &endErr) {
 			return e.unwatched(ws, rs, endErr)
@@ -814,6 +828,21 @@ func (e *Engine) ship(ctx context.Context, ws Workspace, rs *Run) (*Run, error) 
 	// Recorded in the same run.json write that makes the run ready.
 	rs.Complete = len(left) == 0
 	return e.finish(ws, rs, Ready, "")
+}
+
+// stopAdopted ends the live agent a resumed run adopted but has not yet
+// handed to its step's backend, and knows it is gone, before it records
+// the run stopped. An agent whose terminal will not end leaves the run as
+// found: running, with its terminal and slot, for stop or resume.
+func (e *Engine) stopAdopted(ws Workspace, rs *Run, adopt *adoption, reason string) (*Run, error) {
+	e.adopting = nil
+	ectx, ecancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	err := adopt.Backend.EndAgent(ectx, adopt.Name)
+	ecancel()
+	if err != nil {
+		return e.unwatched(ws, rs, &agent.EndError{Name: adopt.Name, Err: err})
+	}
+	return e.finish(ws, rs, Stopped, reason)
 }
 
 // unwatched leaves the run as a run process that died would: running,
