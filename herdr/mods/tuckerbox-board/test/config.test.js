@@ -288,6 +288,39 @@ test("Save as a pull request", async () => {
   assert.equal(v.settings.pending.repo.size, 0);
 });
 
+test("Edits made while a save runs are kept", async () => {
+  shop();
+  setReply = (args) => args.includes("--dry-run")
+    ? { code: 0, stdout: JSON.stringify({ ok: true, dry_run: true, file: "repo", target: "local", reason: "", problems: [], changes: [] }) }
+    : { code: 0, stdout: JSON.stringify({ ok: true, dry_run: false, file: "repo", target: "local", reason: "", problems: [], changes: [], message: "saved" }) };
+  const { v, cx } = await openSettings();
+  await click(v.render(), "field-repo-max_parallel-change", cx);
+  v.settings.editing.box.set_value("3");
+  await click(v.render(), "field-repo-max_parallel-apply", cx);
+  await checks(cx);
+  // Hold the save's command.
+  const exec = state.exec;
+  const g = gate();
+  state.exec = async (cmd, args, opts) => { if (args[1] === "set" && !args.includes("--dry-run")) await g.p; return exec(cmd, args, opts); };
+  await click(v.render(), "save-repo", cx);
+  // While it runs: the same field again, and another field.
+  await click(v.render(), "field-repo-max_parallel-change", cx);
+  v.settings.editing.box.set_value("5");
+  await click(v.render(), "field-repo-max_parallel-apply", cx);
+  await click(v.render(), "field-repo-ship-change", cx);
+  await click(v.render(), "field-repo-ship-pick-merge", cx);
+  g.open();
+  await cx.settle();
+  const save = sets.filter((x) => !x.args.includes("--dry-run"));
+  assert.deepEqual(save.map((x) => x.args.slice(5)), [["max_parallel=3"]]);
+  assert.deepEqual([...v.settings.pending.repo], [["max_parallel", "5"], ["ship", "merge"]], "the later edits stay");
+  assert.ok(text(v.render()).join(" ").includes("2 edits made during the save are still pending"));
+  // They are checked again.
+  await checks(cx);
+  assert.ok(sets.at(-1).args.includes("--dry-run") && sets.at(-1).args.includes("max_parallel=5"));
+  assert.ok(callsOf(find(v.render(), "save-repo"), "on_click").length > 0, "and can be saved");
+});
+
 test("Machine edits save with --machine and the machine revision", () => {
   const cfg = normaliseConfig(fixture);
   const p = edit(new Map(), cfg, "machine", "editor", "hx");

@@ -126,19 +126,30 @@ export class SettingsView {
     if (this.config.fixtures) { this.notice = { text: `Fixtures: would run ${argv.join(" ")}`, kind: "info" }; cx.notify(); return; }
     this.busy = `save-${section}`;
     const want = this.want;
+    // What this save sends: edits made while it runs are not in it, and stay.
+    const sent = new Map(this.pending[section]);
+    const gen = this.gen[section];
     cx.notify();
     cx.spawn(async (cx) => {
       const r = parseSet(await configExec(argv, this.at));
       this.busy = null;
       if (want !== this.want) return;
       if (r.ok) {
-        this.pending[section].clear();
+        const left = savedOut(this.pending[section], sent);
         this.checks[section] = null;
         this.gen[section]++;
         this.conflicts[section].clear();
         const lines = [r.message, r.link ? `Merge request: ${r.link}` : "", ...r.changes.map((c) => `${c.change}: ${c.key} ${c.message}`)].filter(Boolean);
+        if (left) lines.push(`${left} edit${left === 1 ? "" : "s"} made during the save ${left === 1 ? "is" : "are"} still pending.`);
         this.notice = { text: lines.join("\n") || "Saved.", kind: "info", link: r.link };
-        this.load(cx);
+        // The edits left are judged against the file as saved: one that now
+        // matches it is dropped; the rest are checked again.
+        this.load(cx, (_before, after) => {
+          if (after.error) return;
+          for (const [key, v] of [...this.pending[section]]) {
+            try { edit(this.pending[section], after, section, key, v); } catch { /* kept as it was */ }
+          }
+        });
       } else if (r.error?.code === "changed_since_read") {
         // settings-view: Save conflicts. Edits kept; read again; mark what moved.
         this.notice = { text: "Someone saved this file since it was read. It has been read again: check the marked keys and save again.", kind: "error" };
@@ -149,7 +160,7 @@ export class SettingsView {
         // The command's own message; the edits stay.
         const why = [r.error?.message, ...r.problems.filter((p) => p.new).map((p) => `${p.key}: ${p.message}`)].filter(Boolean);
         this.notice = { text: why.join("\n") || "The save failed.", kind: "error" };
-        if (r.problems.length) this.checks[section] = r;
+        if (r.problems.length && gen === this.gen[section]) this.checks[section] = r;
       }
       cx.notify();
     });
@@ -391,4 +402,11 @@ export class SettingsView {
 // With the dev fixtures nothing runs: a check says where it would go.
 function fixtureCheck(section) {
   return { ok: true, dryRun: true, target: section === "machine" ? "machine" : "local", reason: "fixtures: nothing runs", problems: [], changes: [], link: "", message: "", error: null };
+}
+
+// After a save: removes from pending each edit the save sent, unless it was
+// changed while the save ran. Returns how many edits are left.
+export function savedOut(pending, sent) {
+  for (const [key, v] of sent) if (pending.has(key) && pending.get(key) === v) pending.delete(key);
+  return pending.size;
 }
