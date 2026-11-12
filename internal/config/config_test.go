@@ -606,3 +606,73 @@ func TestBoardColumns(t *testing.T) {
 		}
 	}
 }
+
+// Scenario: Repository sets the backend.
+func TestRepoAgentBackendRefused(t *testing.T) {
+	f := newFixture(t, "agent_backend = \"terminal\"\n"+minimal, "")
+	ps := f.problems()
+	wantProblem(t, ps, f.repoPath(), "agent_backend", "belongs in machine config")
+}
+
+func TestMachineAgentBackend(t *testing.T) {
+	if cfg := newFixture(t, minimal, "").mustLoad(); cfg.AgentBackend != BackendAuto {
+		t.Errorf("default backend %q, want auto", cfg.AgentBackend)
+	}
+	for _, v := range []string{BackendAuto, BackendTerminal, BackendHeadless} {
+		cfg := newFixture(t, minimal, "agent_backend = \""+v+"\"\n").mustLoad()
+		if cfg.AgentBackend != v {
+			t.Errorf("backend %q, want %q", cfg.AgentBackend, v)
+		}
+		got, err := MachineBackend(newFixture(t, "", "agent_backend = \""+v+"\"\n").machine)
+		if err != nil || got != v {
+			t.Errorf("MachineBackend: %q, %v; want %q", got, err, v)
+		}
+	}
+	f := newFixture(t, minimal, "agent_backend = \"tmux\"\n")
+	wantProblem(t, f.problems(), f.machine, "agent_backend", "unknown agent backend")
+	if _, err := MachineBackend(f.machine); err == nil || !strings.Contains(err.Error(), "unknown agent backend") {
+		t.Errorf("MachineBackend on a bad value: %v", err)
+	}
+	if got, err := MachineBackend(filepath.Join(t.TempDir(), "none.toml")); err != nil || got != BackendAuto {
+		t.Errorf("MachineBackend without a file: %q, %v", got, err)
+	}
+}
+
+// An agent's interactive command, for the terminal backend: it must pass
+// {turnhook} and a brief, and repository config may grant no permissions
+// in it. An agent without one has none (it runs headless).
+func TestInteractiveAgentCommand(t *testing.T) {
+	repo := strings.Replace(minimal, `agent = "codex"`, `agent = "omp"`, 1) + `
+[agents.omp]
+command = ["omp", "{brief}"]
+interactive = ["omp", "--hook", "{turnhook}", "{brief}"]
+[agents.plain]
+command = ["plain", "{brief}"]
+`
+	cfg := newFixture(t, repo, "").mustLoad()
+	if got := cfg.Agents["omp"].Interactive; len(got) != 4 || got[2] != "{turnhook}" {
+		t.Errorf("omp interactive %q", got)
+	}
+	if got := cfg.Agents["plain"].Interactive; got != nil {
+		t.Errorf("plain interactive %q, want none", got)
+	}
+
+	bad := strings.Replace(minimal, `agent = "codex"`, `agent = "a"`, 1) + `
+[agents.a]
+command = ["a", "{brief}"]
+interactive = ["a", "{brief}", "--yolo"]
+[agents.b]
+command = ["b", "{brief}"]
+interactive = ["b", "{turnhook}", "{nope}"]
+[agents.c]
+command = ["c", "{brief}"]
+interactive = []
+`
+	f := newFixture(t, bad, "")
+	ps := f.problems()
+	wantProblem(t, ps, f.repoPath(), "agents.a.interactive", "{turnhook}")
+	wantProblem(t, ps, f.repoPath(), "agents.a.interactive", "--yolo", "machine config")
+	wantProblem(t, ps, f.repoPath(), "agents.b.interactive", "{nope}")
+	wantProblem(t, ps, f.repoPath(), "agents.b.interactive", "{brief}")
+	wantProblem(t, ps, f.repoPath(), "agents.c.interactive", "empty")
+}

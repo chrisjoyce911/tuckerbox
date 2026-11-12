@@ -76,7 +76,9 @@
       "v_flex",
       "h_flex",
       "TextView",
-      "Scrollbar"
+      "Scrollbar",
+      "Textarea",
+      "TextareaState"
     ],
     "herdr": [
       "exec",

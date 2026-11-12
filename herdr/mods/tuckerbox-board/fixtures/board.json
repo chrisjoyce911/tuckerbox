@@ -3,6 +3,7 @@
   "repo": "github.com/example/shop",
   "path": "/work/shop",
   "machine": "studio",
+  "os": "darwin",
   "require_approval": true,
   "autopilot": { "running": true, "pid": 4242, "started": "2026-11-12T08:00:00+10:00" },
   "steps": [
@@ -361,6 +362,24 @@
           "column": "step:build"
         }
       ],
+      "activity": {
+        "step": "plan",
+        "agent": "claude",
+        "model": "opus",
+        "effort": "high",
+        "round": 0,
+        "task": {
+          "number": "1.1",
+          "text": "Cart summary component"
+        },
+        "task_label": "on 1.1",
+        "last_tick": null,
+        "step_started": "",
+        "run_started": "2026-11-12T09:02:11+10:00",
+        "last_activity": "",
+        "agent_state": "",
+        "backend": "headless"
+      },
       "settings": [
         {
           "step": "plan",
@@ -451,6 +470,24 @@
       "machine": "studio",
       "edit_folder": "/work/shop-worktrees/fix-tax-rounding",
       "depends_on": [],
+      "activity": {
+        "step": "plan",
+        "agent": "claude",
+        "model": "opus",
+        "effort": "high",
+        "round": 1,
+        "task": {
+          "number": "1.1",
+          "text": "Round each line, then sum"
+        },
+        "task_label": "on 1.1",
+        "last_tick": null,
+        "step_started": "2026-11-12T09:10:40+10:00",
+        "run_started": "2026-11-12T09:10:30+10:00",
+        "last_activity": "2026-11-12T09:14:02+10:00",
+        "agent_state": "working",
+        "backend": "headless"
+      },
       "settings": [
         {
           "step": "plan",
@@ -541,6 +578,35 @@
       "machine": "studio",
       "edit_folder": "/work/shop-worktrees/add-users",
       "depends_on": [],
+      "activity": {
+        "step": "build",
+        "agent": "codex",
+        "model": "gpt-5.5",
+        "effort": "high",
+        "round": 2,
+        "task": {
+          "number": "2.3",
+          "text": "Hash passwords with bcrypt"
+        },
+        "task_label": "on 2.3",
+        "last_tick": {
+          "number": "2.2",
+          "at": "2026-11-12T09:01:12+10:00",
+          "ticked": true,
+          "step": "build",
+          "round": 2
+        },
+        "step_started": "2026-11-12T08:41:05+10:00",
+        "run_started": "2026-11-12T07:58:20+10:00",
+        "last_activity": "2026-11-12T09:12:47+10:00",
+        "agent_state": "working",
+        "backend": "terminal",
+        "terminal": {
+          "address": "t7",
+          "name": "tb-8a41d2c09be37f15",
+          "machine": "studio"
+        }
+      },
       "settings": [
         {
           "step": "plan",
@@ -823,6 +889,27 @@
       "machine": "studio",
       "edit_folder": "/work/shop-worktrees/order-emails",
       "depends_on": [],
+      "activity": {
+        "step": "plan",
+        "agent": "claude",
+        "model": "opus",
+        "effort": "high",
+        "round": 1,
+        "task": null,
+        "task_label": "all tasks in scope ticked",
+        "last_tick": {
+          "number": "1.1",
+          "at": "2026-11-11T17:30:00+10:00",
+          "ticked": true,
+          "step": "plan",
+          "round": 1
+        },
+        "step_started": "2026-11-11T17:20:00+10:00",
+        "run_started": "2026-11-11T17:19:41+10:00",
+        "last_activity": "2026-11-11T17:44:10+10:00",
+        "agent_state": "",
+        "backend": "headless"
+      },
       "settings": [
         {
           "step": "plan",

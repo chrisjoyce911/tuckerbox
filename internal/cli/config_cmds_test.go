@@ -177,3 +177,24 @@ func TestCheckDependencies(t *testing.T) {
 		t.Fatalf("clean: check exit %d: %s", code, errOut)
 	}
 }
+
+// Scenario: Repository sets the backend.
+func TestCheckRefusesRepoAgentBackend(t *testing.T) {
+	a, root, _, errOut := configApp(t)
+	if code := a.Run([]string{"init"}); code != 0 {
+		t.Fatalf("init exit %d: %s", code, errOut)
+	}
+	path := filepath.Join(root, config.RepoFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append([]byte("agent_backend = \"terminal\"\n"), data...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	errOut.Reset()
+	code := a.Run([]string{"check"})
+	if code == 0 || !strings.Contains(errOut.String(), "agent_backend") || !strings.Contains(errOut.String(), "belongs in machine config") {
+		t.Errorf("check exit %d: %s", code, errOut)
+	}
+}

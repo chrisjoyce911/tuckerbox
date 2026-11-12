@@ -2,6 +2,8 @@ package runs
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -86,32 +88,228 @@ func Active(path string) bool {
 // Slot is a held parallel slot: an exclusive lock on
 // <common-dir>/tuckerbox/slots/<n>.lock with n < max_parallel
 // (formal/runs.tla, action TakeSlot).
+//
+// Each slot also has an agent lock, <n>.agent.lock, which tuckerbox
+// agent-hold takes in an agent's terminal for as long as the agent lives.
+// An agent in a terminal outlives the run process that started it; when
+// that process dies the OS frees the slot's run lock but not its agent
+// lock, so the slot stays taken (formal/liveslots.tla, OrphanHoldsSlot).
+// Admission takes a slot only when both are free (WithinLimitLive).
+//
+// Whoever takes a slot's run lock writes a fresh token to its owner file,
+// <n>.owner, before it tests the agent lock. An agent's terminal passes its
+// run's token to agent-hold, which, once it holds the agent lock, starts
+// the agent only if the owner file still holds that token. An agent-hold
+// that starts late, after its run process died and another run was
+// admitted to the slot, so finds another token and refuses: the admission
+// wrote it before it found the agent lock free.
 type Slot struct {
 	N int
-	f *flock.Flock
+	// Owner is the token this run wrote to the slot's owner file.
+	Owner  string
+	common string
+	f      *flock.Flock
+}
+
+// SlotOwnerFile is slot n's owner file.
+func SlotOwnerFile(common string, n int) string {
+	return filepath.Join(SlotDir(common), strconv.Itoa(n)+".owner")
+}
+
+// SlotOwner returns the token in slot n's owner file, or "".
+func SlotOwner(common string, n int) string {
+	data, err := os.ReadFile(SlotOwnerFile(common, n))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// claimSlot writes a fresh token to slot n's owner file. The caller holds
+// the slot's run lock.
+func claimSlot(common string, n int) (string, error) {
+	var b [12]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	token := strconv.Itoa(os.Getpid()) + "-" + hex.EncodeToString(b[:])
+	p := SlotOwnerFile(common, n)
+	tmp := p + ".tmp-" + token
+	if err := os.WriteFile(tmp, []byte(token+"\n"), 0o644); err != nil {
+		return "", fmt.Errorf("claiming slot %d: %w", n, err)
+	}
+	if err := os.Rename(tmp, p); err != nil {
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("claiming slot %d: %w", n, err)
+	}
+	return token, nil
 }
 
 // SlotDir is the slot lock directory under the repository's common
 // Tuckerbox directory.
 func SlotDir(common string) string { return filepath.Join(common, "slots") }
 
+// SlotLock is slot n's run lock file.
+func SlotLock(common string, n int) string {
+	return filepath.Join(SlotDir(common), strconv.Itoa(n)+".lock")
+}
+
+// AgentLock is slot n's agent lock file.
+func AgentLock(common string, n int) string {
+	return filepath.Join(SlotDir(common), strconv.Itoa(n)+".agent.lock")
+}
+
 // TrySlot takes any free slot n < max, or returns nil when all are taken.
+// A slot is free when its run lock and its agent lock are both free: the
+// run lock is taken, then the agent lock tried; if an agent holds it the
+// run lock is let go and the next slot tried (liveslots.tla, Admit). The
+// agent lock is only tested, never kept: the run lock keeps every other
+// admission off the slot until this run's own agent takes it.
 func TrySlot(common string, max int) (*Slot, error) {
 	dir := SlotDir(common)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
 	for n := 0; n < max; n++ {
-		f := flock.New(filepath.Join(dir, strconv.Itoa(n)+".lock"))
+		f := flock.New(SlotLock(common, n))
+		ok, err := f.TryLock()
+		if err != nil {
+			return nil, fmt.Errorf("locking slot %d: %w", n, err)
+		}
+		if !ok {
+			continue
+		}
+		// Claim first, then test: an agent-hold that takes the agent lock
+		// after this test finds this token, not its run's.
+		owner, err := claimSlot(common, n)
+		if err != nil {
+			_ = f.Unlock()
+			return nil, err
+		}
+		free, err := agentLockFree(common, n)
+		if err != nil {
+			_ = f.Unlock()
+			return nil, err
+		}
+		if !free {
+			_ = f.Unlock()
+			continue
+		}
+		return &Slot{N: n, Owner: owner, common: common, f: f}, nil
+	}
+	return nil, nil
+}
+
+// agentLockFree tests slot n's agent lock by taking and freeing it.
+func agentLockFree(common string, n int) (bool, error) {
+	a := flock.New(AgentLock(common, n))
+	ok, err := a.TryLock()
+	if err != nil {
+		return false, fmt.Errorf("locking slot %d's agent lock: %w", n, err)
+	}
+	if ok {
+		_ = a.Unlock()
+	}
+	return ok, nil
+}
+
+// TakeOwnSlot takes the run lock of slot n, the slot whose agent lock a
+// live agent being adopted holds (liveslots.tla, Adopt). It needs no free
+// slot and does not test the agent lock, and keeps the slot's claim (see
+// Slot). An admission testing that slot
+// holds its run lock only for a moment; TakeOwnSlot waits it out, polling.
+// It gives up, returning nil, when live reports the agent gone, or with
+// ctx's error when ctx ends.
+func TakeOwnSlot(ctx context.Context, common string, n int, poll time.Duration, live func() bool) (*Slot, error) {
+	if err := os.MkdirAll(SlotDir(common), 0o755); err != nil {
+		return nil, err
+	}
+	for {
+		f := flock.New(SlotLock(common, n))
 		ok, err := f.TryLock()
 		if err != nil {
 			return nil, fmt.Errorf("locking slot %d: %w", n, err)
 		}
 		if ok {
-			return &Slot{N: n, f: f}, nil
+			// The slot's claim stays the one the agent's run wrote, so an
+			// agent-hold of the adopted terminal that has yet to check it
+			// still finds its own; an admission that claimed the slot in the
+			// meantime found the agent lock held and let go. With no claim
+			// left, a fresh one.
+			owner := SlotOwner(common, n)
+			if owner == "" {
+				if owner, err = claimSlot(common, n); err != nil {
+					_ = f.Unlock()
+					return nil, err
+				}
+			}
+			return &Slot{N: n, Owner: owner, common: common, f: f}, nil
+		}
+		if !live() {
+			return nil, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(poll):
 		}
 	}
-	return nil, nil
+}
+
+// Fence writes a fresh token to the slot's owner file while the run holds
+// the slot. An agent-hold started with the old token, by a terminal whose
+// launch was still on its way when the run gave up on it, then refuses to
+// start its agent: it checks the owner file after it takes the agent lock,
+// and herdr-core runs it only once the terminal exists.
+func (s *Slot) Fence() error {
+	if s == nil || s.f == nil {
+		return errors.New("the slot is not held")
+	}
+	owner, err := claimSlot(s.common, s.N)
+	if err != nil {
+		return err
+	}
+	s.Owner = owner
+	return nil
+}
+
+// RevokeClaim makes sure slot n's owner file no longer holds token, the
+// claim a run whose process died gave its agent's terminal: an agent-hold
+// of a terminal whose launch was still on its way then refuses to start
+// its agent. When the owner file holds token, it takes the slot's run lock
+// and writes a fresh claim. A run holding that lock has claimed the slot
+// or is about to (an admission claims before it tests the agent lock), so
+// while it is held RevokeClaim waits, polling, until the claim changes or
+// the lock is free; it gives up with ctx's error. An agent-hold that took
+// the agent lock and checked the claim before it was revoked runs in a
+// terminal that already exists, so the caller looks for the terminal once
+// more afterwards. An empty token is nothing to revoke.
+func RevokeClaim(ctx context.Context, common string, n int, token string, poll time.Duration) error {
+	if token == "" || n < 0 {
+		return nil
+	}
+	for {
+		if SlotOwner(common, n) != token {
+			return nil
+		}
+		f := flock.New(SlotLock(common, n))
+		ok, err := f.TryLock()
+		if err != nil {
+			return fmt.Errorf("locking slot %d: %w", n, err)
+		}
+		if ok {
+			if SlotOwner(common, n) == token {
+				_, err = claimSlot(common, n)
+			}
+			_ = f.Unlock()
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("revoking slot %d's claim: %w", n, ctx.Err())
+		case <-time.After(poll):
+		}
+	}
 }
 
 // Release frees the slot.
@@ -121,6 +319,47 @@ func (s *Slot) Release() error {
 	}
 	err := s.f.Unlock()
 	s.f = nil
+	return err
+}
+
+// AgentHold is a held agent lock of a slot.
+type AgentHold struct{ f *flock.Flock }
+
+// ErrAgentLockHeld means another agent holds the slot's agent lock.
+var ErrAgentLockHeld = errors.New("the slot's agent lock is held by another agent")
+
+// HoldAgentLock takes slot n's agent lock (tuckerbox agent-hold,
+// liveslots.tla Launch). It retries for wait, so a previous agent of the
+// same run that is just exiting can let go, and then returns
+// ErrAgentLockHeld.
+func HoldAgentLock(common string, n int, wait time.Duration) (*AgentHold, error) {
+	if err := os.MkdirAll(SlotDir(common), 0o755); err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		f := flock.New(AgentLock(common, n))
+		ok, err := f.TryLock()
+		if err != nil {
+			return nil, fmt.Errorf("locking slot %d's agent lock: %w", n, err)
+		}
+		if ok {
+			return &AgentHold{f: f}, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, ErrAgentLockHeld
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// Release frees the agent lock. The OS frees it too when the process ends.
+func (h *AgentHold) Release() error {
+	if h == nil || h.f == nil {
+		return nil
+	}
+	err := h.f.Unlock()
+	h.f = nil
 	return err
 }
 

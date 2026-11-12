@@ -324,6 +324,50 @@ func Unticked(tasks []Task) []string {
 	return out
 }
 
+// AllTicked is how the task of a run whose tasks are all ticked is shown.
+const AllTicked = "all tasks in scope ticked"
+
+// Current returns the task a run is on (agent-activity: The task a run is
+// on): the first unticked task of s, or of the whole change when s is nil,
+// in tasks.md order, skipping ship tasks. ok is false when every such task
+// is ticked (AllTicked).
+func Current(tasks []Task, s *Scope) (t Task, ok bool) {
+	in := map[string]bool{}
+	if s != nil {
+		for _, n := range s.Tasks {
+			in[n] = true
+		}
+	}
+	for _, t := range tasks {
+		if t.Ship || t.Checked || (s != nil && !in[t.Number]) {
+			continue
+		}
+		return t, true
+	}
+	return Task{}, false
+}
+
+// Changed returns the numbers of the tasks whose box differs between
+// before and after, in after's order, with whether each is now ticked. A
+// task only one of them has is not a change of its box.
+func Changed(before, after []Task) (numbers []string, ticked []bool) {
+	was := map[string]bool{}
+	for _, t := range before {
+		was[t.Number] = t.Checked
+	}
+	seen := map[string]bool{}
+	for _, t := range after {
+		c, ok := was[t.Number]
+		if !ok || seen[t.Number] || c == t.Checked {
+			continue
+		}
+		seen[t.Number] = true
+		numbers = append(numbers, t.Number)
+		ticked = append(ticked, t.Checked)
+	}
+	return numbers, ticked
+}
+
 // UntickedBeforeShip returns the unticked tasks that hold a change back
 // from shipping to a forge: those Unticked returns, less CI tasks, which
 // shipping ticks once CI is green.

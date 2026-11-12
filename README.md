@@ -52,6 +52,7 @@ tuckerbox board --json --repo github.com/you/shop  # this machine's checkout of 
 tuckerbox logs fix-login --follow  # watch the running step's agent
 tuckerbox stop fix-login           # stop the agent; the run is marked stopped
 tuckerbox resume fix-login         # continue a stopped or blocked run
+tuckerbox answer fix-login "Keep the rollback."  # answer a blocked run's question (--resume: and resume it)
 tuckerbox rerun fix-login review   # start again from a step
 tuckerbox history fix-login        # every event of the run, oldest first (--json for tools)
 ```
@@ -113,7 +114,7 @@ When a slot frees, the queued run first in admission order takes it: lowest prio
 
 Run state is kept in the worktree's git directory (`$(git rev-parse --git-dir)/tuckerbox/`), never in the tree. Next to the current state (`run.json`), each run appends its events (started, steps, hand-offs, rejections with findings, stopped, resumed, ready) to `history.jsonl` there; the format is documented in [`internal/history`](internal/history/history.go). `status` finds runs through a machine index in `$XDG_STATE_HOME/tuckerbox/`, `~/.local/state/tuckerbox/` on macOS and Linux, or `%LocalAppData%\tuckerbox\` on Windows.
 
-A repository's workflow lives in `.tuckerbox/config.toml`, committed with it. Machine defaults go in `$XDG_CONFIG_HOME/tuckerbox/config.toml` if that variable is set, otherwise `~/.config/tuckerbox/config.toml` on macOS and Linux and `%AppData%\tuckerbox\config.toml` on Windows. Repository values win, except that permission profiles (the flags that let agents run without prompts, and which repository remotes may use them) and the editor can only be set on the machine:
+A repository's workflow lives in `.tuckerbox/config.toml`, committed with it. Machine defaults go in `$XDG_CONFIG_HOME/tuckerbox/config.toml` if that variable is set, otherwise `~/.config/tuckerbox/config.toml` on macOS and Linux and `%AppData%\tuckerbox\config.toml` on Windows. Repository values win, except that permission profiles (the flags that let agents run without prompts, and which repository remotes may use them) the editor and the agent backend can only be set on the machine:
 
 ```toml
 # machine config
@@ -194,7 +195,38 @@ Agents report by ending with a small JSON result as their final message; Tuckerb
 command = ["myagent", "--prompt-file", "{brief_file}", "--last-message", "{lastmessage}"]
 ```
 
-`{brief}` is the brief's text and `{brief_file}` the brief file's path; a custom agent passes one of them. Agents get the brief in their command, so they need no read outside their worktree. When the command would be longer than 24,000 characters as a Windows command line (on every platform), Claude and Codex read the brief on standard input instead, and a custom agent's `{brief}` becomes an instruction to read the brief file. Logs and run state show the brief as `<brief: N chars, <file>>`.
+`{brief}` is the brief's text and `{brief_file}` the brief file's path; a custom agent passes one of them. Headless agents get the brief in their command, so they need no read outside their worktree. An agent in a terminal (see Terminals below) reads the brief file, which is in the run state outside the worktree: Tuckerbox gives a terminal Claude read access to the brief's folder with `--add-dir=<folder>` (unless its permission profile already adds it), and Codex may read any file in every sandbox mode, so it needs nothing. A custom agent in a terminal must be able to read `{brief_file}`'s folder. When the command would be longer than 24,000 characters as a Windows command line (on every platform), Claude and Codex read the brief on standard input instead, and a custom agent's `{brief}` becomes an instruction to read the brief file. Logs and run state show the brief as `<brief: N chars, <file>>`.
+
+Where step agents run is a fact about the machine, so `agent_backend` is set only in machine config (`tuckerbox check` refuses it in a repository):
+
+```toml
+# machine config
+agent_backend = "auto" # the default; or "terminal" or "headless"
+```
+
+`auto` uses herdr-core terminals when `hc` is on the PATH and `hc server status` succeeds, and otherwise runs agents headless, as child processes of Tuckerbox with their output in the step's log. `headless` always does that. `terminal` requires herdr-core: when it isn't installed or its server isn't running, `tuckerbox run` refuses and starts nothing. `tuckerbox doctor` reports the backend in use and why, for example `agent backend: headless, because herdr-core wasn't found (no hc on the PATH)`.
+
+In a terminal, Claude and Codex run in their interactive mode, with "read the brief" as the first prompt, so a person can watch the agent and type to it. Each step's terminal is named for the change (`tb-` and a hash), labelled `herdr.space` (the repository) and `herdr.tab` (`<change> · <step>`), so the Herdr app shows it as a tab. At the end of every turn the CLI's own hook (Claude Code's `Stop` hook, passed with `--settings`; Codex's `notify`, passed with `-c`) hands the turn's final message to Tuckerbox; no user or project config file is changed. A turn that ends without a result leaves the step running, waiting for you. Claude Code asks whether to trust a folder it hasn't seen, and a change's new worktree is one: when a terminal Claude's screen shows that prompt for the step's worktree in its first two minutes, Tuckerbox answers "Yes, I trust this folder" (and says so in the step log). A prompt for any other folder is left to you. A custom agent runs in a terminal only when it has an `interactive` command with `{turnhook}`, the hook to run at the end of each turn (as a whole argument, its program and arguments; inside an argument, one shell command; it takes the message as its last argument or on standard input):
+
+```toml
+[agents.myagent]
+command = ["myagent", "--prompt-file", "{brief_file}"]
+interactive = ["myagent", "--on-turn-end", "{turnhook}", "{brief}"]
+```
+
+The agent outlives Tuckerbox's run process. If that process dies, `tuckerbox status` shows the run `running (not watched)`; `tuckerbox resume` (or autopilot's crash resume) adopts the live agent in the same round, and `tuckerbox stop` ends it. A `run` or `rerun` that starts a new round ends that agent first. A run is recorded `stopped` only once its agent's terminal has ended; if herdr-core can't end it, the run stays `running (not watched)` and `stop` can be tried again. The agent keeps its parallel slot while it lives, so no other change starts in its place. `tuckerbox logs` reads a live agent's terminal, and the step's log keeps its session afterwards. `doctor` checks the turn-hook format Tuckerbox expects and the flag each installed CLI takes it with; whether a CLI version really runs the hook is only seen in a real turn, and doctor says so.
+
+### Answering a run
+
+A step that reports `blocked` asks the person something: its summary and findings are the run's question, shown by `tuckerbox status` (under the table, and as `question` in `--json`) and on the board card with the step and round that asked. Answer it with:
+
+```sh
+tuckerbox answer fix-login "Herdr check done by hand: keep the rollback."
+tuckerbox answer fix-login --file decision.md   # or - to read standard input
+tuckerbox answer fix-login --resume "use plan B" # record, then resume as tuckerbox resume does
+```
+
+`answer` takes the change lock, adds the answer (its text, your git `user.name`, the time, and the step and round it answers) to `answers` in the run's state, writes an `answered` history event, and leaves the run blocked. An answer is at most 16 KiB. It refuses a run that isn't blocked and records nothing, unless the run's step runs in a terminal whose agent waits for you: then the text is typed into that terminal (`hc send` to its address, only while it is still that step and round's terminal), as typing in its tab would, and recorded in history, and the run keeps running. When the run resumes, the step's brief has a section "Answers from a person" with the question and every answer since, oldest first; they stay in that step's briefs (after a crash or a stop too) until it reports a result, and later briefs leave them out. `--resume` keeps every gate and refusal of `resume`: if the resume is refused, the answer stays recorded, the output says so, and a later `resume` uses it. On the board, a blocked card's detail (or a card whose agent waits) shows the question, the answers so far and a text box: Answer runs `tuckerbox answer <change> -` with the text on standard input (piped in by `sh`, or by PowerShell when the card's machine runs Windows), and on a blocked card Answer and resume adds `--resume`.
 
 `doctor` exits non-zero only when a required tool (`git` or `openspec`) is missing. Agent CLIs are optional. It does not yet check whether an agent is signed in, and says `sign-in not checked`.
 

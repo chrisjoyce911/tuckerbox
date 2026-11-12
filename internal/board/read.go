@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -65,7 +66,7 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 		return nil, err
 	}
 	refs := refApprovals(ctx, repo.Root)
-	doc := &Document{Version: Version, Ship: string(cfg.Ship), Repo: key, Path: repo.Root, Machine: history.Machine(), RequireApproval: cfg.RequireApproval, Columns: columns(cfg), Cards: []Card{}}
+	doc := &Document{Version: Version, Ship: string(cfg.Ship), Repo: key, Path: repo.Root, Machine: history.Machine(), OS: runtime.GOOS, RequireApproval: cfg.RequireApproval, Columns: columns(cfg), Cards: []Card{}}
 	if m := autopilot.ReadMarker(repo.Common); m != nil {
 		doc.Autopilot = Autopilot{Running: true, Pid: m.Pid, Started: timestamp(m.Started)}
 	}
@@ -95,7 +96,7 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 			c.Column = "approved"
 		}
 		if r != nil {
-			effective := r.Effective(runs.Active(p.State.RunLock()))
+			effective, _ := runs.Seen(ctx, r, runs.Active(p.State.RunLock()))
 			r = &effective
 			states[id] = r
 			c.State, c.Reason, c.Step, c.Round = string(r.State), r.Reason, r.Step, r.Round
@@ -104,6 +105,20 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 			c.NeedsYou = needsYou(r, c.Approval.State, p.ChangeDir(), cfg.Autopilot.Scope)
 			if step, ok := cfg.Step(r.Step); ok {
 				c.Agent = step.Agent
+			}
+			if hasActivity(r.State) && !r.ShippingStarted {
+				var events []history.Event
+				if p.State != "" {
+					events, _ = history.Read(history.File(p.State))
+				}
+				c.Activity = readActivity(ctx, cfg, r, folder, p.State, events, doc.Machine)
+			}
+			if !r.ShippingStarted {
+				agentState := ""
+				if c.Activity != nil {
+					agentState = c.Activity.AgentState
+				}
+				c.Question = runs.Ask(r, p.State, agentState)
 			}
 			switch r.State {
 			case runs.Queued:

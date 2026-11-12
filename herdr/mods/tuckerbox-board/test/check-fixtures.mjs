@@ -87,6 +87,9 @@ export default class Main extends View {
       "ROUNDS", "Round 1", "rejected", "The form uses GET, so the password ends up in the access log.", "Round 3",
       "HISTORY", "Blocked review: review limit reached", "Handed on build → review", "approved", "by Sam Example",
       "committed", "Resume", "Re-run review", "Follow review log ↗", "Open worktree", "EDIT", "login spec",
+      // blocked-answers: a blocked card's question box (this one blocked on
+      // the review limit, so its step asked nothing) with both answers.
+      "QUESTION", "The run is blocked, but its step left no question.", "Answer and resume", "Answer",
       "SETTINGS", "studio, mini", "gpt-5.5", "agent default", "set-build-agent", "▾"],
     // Started is the oldest event: newest first puts Blocked before it.
     order: ["Blocked review: review limit reached", "Run started"],

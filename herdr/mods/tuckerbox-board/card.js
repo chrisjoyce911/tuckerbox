@@ -3,11 +3,11 @@
 // actions its state offers. Everything
 // comes from `tuckerbox board --json --change <id>`, read when it opens.
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex, TextView } from "gpui-base";
+import { v_flex, h_flex, TextView, Textarea, TextareaState } from "gpui-base";
 import { theme, props, closeOverlay } from "herdr";
 import { loadDetail } from "./data.js";
-import { normaliseCard, cardAt, columnName, newestFirst, eventText, fmtLocal, taskGroups, approvalBadge, isActive, showsApproval } from "./model.js";
-import { detailActions, invocation, actionLabel, defaultStep, rerunSteps, runGroups, canEdit, EDIT_FILES, ACTIONS } from "./actions.js";
+import { normaliseCard, cardAt, columnName, newestFirst, eventText, fmtLocal, fmtBrisbane, taskGroups, approvalBadge, isActive, activityRows, waitingForYou, ago, answerable, showsApproval } from "./model.js";
+import { detailActions, invocation, actionLabel, defaultStep, rerunSteps, runGroups, canEdit, EDIT_FILES, ACTIONS, answerActions } from "./actions.js";
 import { perform, validate, watchEdits, changed } from "./perform.js";
 import { editOf, editNote } from "./edits.js";
 import { settingsRows, choose, canPick } from "./settings.js";
@@ -20,7 +20,10 @@ export class CardView extends View {
     const pr = props() ?? p ?? {};
     this.change = pr.change ?? "";
     this.board = pr.board ?? { columns: [], require_approval: true };
-    this.card = pr.card ? normaliseCard(pr.card, { on: cardAt(pr.card, this.board).on, path: pr.card.path ?? this.board.path ?? "" }) : null;
+    // Keep the card's machine, checkout and operating system: the answer
+    // actions pick their standard-input transport from os (stdinCall) and
+    // may run before, or without, the detail read below.
+    this.card = pr.card ? normaliseCard(pr.card, { on: cardAt(pr.card, this.board).on, path: pr.card.path ?? this.board.path ?? "", os: pr.card.os || this.board.os || "" }) : null;
     this.detail = pr.detail ?? null;   // a test harness may hand it in
     this.error = null;
     this.notice = null;
@@ -32,6 +35,9 @@ export class CardView extends View {
     this.step = this.card ? defaultStep(this.card, this.board) : "";
     this.handle = cx.focus_handle();
     this.handle.focus();
+    // blocked-answers: the text box under a blocked or waiting card's
+    // question (kept on the view: retained state is made in init).
+    this.answerBox = TextareaState.new({ placeholder: "Your answer: the agent continues from it", rows: 4 });
     // Read on open, from a timer: a spawn straight from a dialog's init can stall.
     if (!this.detail) cx.timer.after(30, (cx) => this.load(cx));
     this.seen = changed();
@@ -52,7 +58,7 @@ export class CardView extends View {
       else {
         this.error = null;
         const card = d.cards.find((c) => c.change === this.change);
-        if (card) this.card = { ...card, on: at.on, path: d.path || at.cwd };
+        if (card) this.card = { ...card, on: at.on, path: d.path || at.cwd, os: card.os || d.os || this.card?.os || "" };
         this.board = { ...this.board, ship:d.ship,columns: d.columns, steps: d.steps, require_approval: d.require_approval, path: d.path };
         this.detail = d.detail && d.detail.change === this.change ? d.detail : null;
         if (!this.detail) this.error = `No detail for ${this.change} in what tuckerbox printed.`;
@@ -91,6 +97,8 @@ export class CardView extends View {
       this.notice = r.message ? { text: r.message, kind: r.ok || r.dry ? "info" : "error" } : null;
       // A pane, tab or view opens beside the board: the dialog would cover it.
       if (r.ok && inv.place !== "exec") { this.dismiss(); return; }
+      // An answer went in: empty the box; the read shows the card move on.
+      if (r.ok && inv.stdin != null) this.answerBox?.set_value("");
       if (r.ok) this.load(cx);
       cx.notify();
     });
@@ -107,6 +115,38 @@ export class CardView extends View {
   }
 
   // ---- sections ----
+
+  // blocked-answers: Answering from the board. What the run asks (the
+  // blocked result's summary and findings, or the waiting agent's last
+  // message), the answers so far, a text box, and Answer (and, on a blocked
+  // card, Answer and resume), which run tuckerbox answer with the text on
+  // standard input.
+  question(c) {
+    const tm = theme();
+    const q = c.question;
+    const acts = answerActions(c);
+    const waiting = c.state !== "blocked";
+    const asked = q ? `${waiting ? "the agent waits for you" : "asked by"} ${q.step} · round ${q.round}` : "";
+    const none = waiting ? "The agent waits in its terminal: a question or a permission prompt. Answer types into it, or Watch it."
+      : "The run is blocked, but its step left no question.";
+    return v_flex().gap(6).text_size(12)
+      .when(Boolean(asked), (el) => el.child(div().text_size(11).text_color(tm.dim).child(asked)))
+      .child(div().text_color(q?.summary ? tm.foreground : tm.dim).child(q?.summary || none))
+      .when((q?.findings.length ?? 0) > 0, (el) => el.child(this.findings(q.findings, "question")))
+      .when((q?.answers.length ?? 0) > 0, (el) => el.child(v_flex().gap(4).pt(2)
+        .children(q.answers.map((a, i) => v_flex().id(`answer-${i}`).gap(1).pl(8).border_l(2).border_color(tm.border)
+          .child(div().text_size(10.5).text_color(tm.dim).child(`answered by ${a.by || "someone"}${a.at ? `, ${fmtBrisbane(a.at)}` : ""}`))
+          .child(div().text_color(tm.muted).child(a.text))))))
+      .when(Boolean(this.answerBox), (el) => el.child(div().w_full().p(6).rounded(6).border_1().border_color(tm.input).bg(tm.background)
+        .child(Textarea.new(this.answerBox))))
+      .child(h_flex().flex_wrap().gap(6).items_center().children(acts.map((a) => button(`act-${a}`,
+        this.busy === a ? `${actionLabel(a)}…` : actionLabel(a), (_e, cx) => this.answer(a, cx),
+        { primary: ACTIONS[a].primary, disabled: Boolean(this.busy) }))));
+  }
+
+  answer(action, cx) {
+    this.act(action, { text: this.answerBox?.value() ?? "" }, cx);
+  }
 
   // Each step's effective settings, with their source, and a picker for
   // each key the allow-list permits; none while a run holds the change.
@@ -197,6 +237,24 @@ export class CardView extends View {
           .child(div().flex_none().w(28).text_color(tm.dim).child(t.number))
           .child(div().flex_1().min_w(0).text_color(t.checked ? tm.muted : tm.foreground).when(t.checked, (el) => el.line_through()).child(t.text));
       }))));
+  }
+
+  // agent-activity: Activity on the board. Every activity field, then the
+  // current run's ticks as a timeline, newest first.
+  activity(c) {
+    const tm = theme();
+    const ticks = this.detail?.ticks ?? [];
+    return v_flex().gap(3).text_size(11.5)
+      .when(waitingForYou(c), (el) => el.child(div().pb(2).font_medium().text_color(tm.blocked).child("waiting for you: the agent asks something in its terminal")))
+      .children(activityRows(c).map(([k, v], i) => h_flex().id(`activity-${i}`).items_start().gap(8)
+        .child(div().flex_none().w(92).text_color(tm.dim).child(k))
+        .child(div().flex_1().min_w(0).text_color(tm.foreground).child(v))))
+      .when(ticks.length > 0, (el) => el.child(div().pt(6).pb(2).text_size(11).font_medium().text_color(tm.muted).child("Ticks"))
+        .children(ticks.map((t, i) => h_flex().id(`tick-${i}`).items_start().gap(8)
+          .child(div().flex_none().w(84).text_color(tm.dim).child(fmtBrisbane(t.at)))
+          .child(dot(t.ticked ? tm.working : tm.dim, 7).mt(5))
+          .child(div().flex_1().min_w(0).text_color(tm.muted).child(`${t.ticked ? "ticked" : "unticked"} ${t.number}${t.step ? ` in ${t.step}` : ""}${t.round ? ` · round ${t.round}` : ""}`))
+          .child(div().flex_none().text_size(10.5).text_color(tm.dim).child(ago(t.at))))));
   }
 
   deps(c) {
@@ -302,6 +360,7 @@ export class CardView extends View {
         .when(Boolean(c.ci),(el)=>el.child(div().px(5).rounded(4).bg(tm.raised).text_color(c.ci.state==="red"?tm.blocked:c.ci.state==="green"?tm.working:tm.dim).child(`CI ${c.ci.state}`)))
         .when(c.ship_round>0,(el)=>el.child(div().text_color(tm.dim).child(`ship round ${c.ship_round}`)))))
       .when(Boolean(c.reason), (el) => el.child(div().pt(6).text_size(12).text_color(c.state === "blocked" || c.state === "failed" ? tm.blocked : tm.muted).child(c.reason)))
+      .when(answerable(c), (el) => el.child(section("Question")).child(this.question(c)))
       .when(showsApproval(c), (el) => el.child(div().pt(8).child(this.approvalRow(c))))
       .when(Boolean(this.validationBox(c)), (el) => el.child(div().pt(8).child(this.validationBox(c))))
       .when(Boolean(this.error), (el) => el.child(div().pt(8).child(note("error", this.error, "error"))))
@@ -312,6 +371,7 @@ export class CardView extends View {
         .when(Boolean(d), (el) => el
           .child(section("Proposal"))
           .child(d.proposal ? TextView.markdown("proposal", d.proposal).selectable(true).text_size(12.5) : div().text_size(12).text_color(tm.dim).child("No proposal.md."))
+          .when(Boolean(c.activity), (el) => el.child(section("Activity")).child(this.activity(c)))
           .child(section("Tasks", c.tasks.total ? progressBar(c.tasks, 80) : null))
           .when(isActive(c), (el) => el.child(div().pb(4).text_size(11).text_color(tm.dim).child("Ticking waits until the run stops: it holds the change.")))
           .child(d.tasks.length ? this.tasks(c) : div().text_size(12).text_color(tm.dim).child("No tasks."))

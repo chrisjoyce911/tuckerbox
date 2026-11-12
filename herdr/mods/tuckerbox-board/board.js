@@ -4,7 +4,7 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar } from "gpui-base";
 import { theme, props, openOverlay, closeOverlay, spaces, panes, focused, run, notify } from "herdr";
 import { MOD, loadAll, locate, candidates, fixturesFolder } from "./data.js";
-import { group, counts, columnName, due, isShown, ago, needsYou, needsYouReason, newlyNeeding, toastCall, candidatesKey, openGate, showsApproval, NO_CONFIG, sortedColumn, dropPosition, eventBox, liveDrop, priorityCard } from "./model.js";
+import { group, counts, columnName, due, isShown, ago, needsYou, needsYouReason, newlyNeeding, toastCall, activityLine, candidatesKey, openGate, showsApproval, NO_CONFIG, sortedColumn, dropPosition, eventBox, liveDrop, priorityCard, oneLine } from "./model.js";
 import { cardActions, invocation, actionLabel, defaultStep, ACTIONS, dockCall, undockCalls } from "./actions.js";
 import { perform, watchEdits, changed } from "./perform.js";
 import { editOf, editNote } from "./edits.js";
@@ -197,6 +197,25 @@ export class BoardView extends View {
 
   // ---- drawing ----
 
+  // A running card's agent (agent-activity: Activity on the board): step,
+  // agent and model, "on <n>" with the task's text on hover, the time since
+  // the last tick, the step's running time, the last activity, and waiting
+  // for you.
+  activity(c) {
+    const tm = theme();
+    const a = activityLine(c);
+    return v_flex().gap(2).text_size(10.5).text_color(tm.dim)
+      .child(h_flex().items_center().gap(6).flex_wrap()
+        .when(Boolean(a.step), (el) => el.child(div().text_color(tm.muted).child(a.step)))
+        .when(Boolean(a.agent), (el) => el.child(div().child(a.agent)))
+        .child(div().id(`task-${c.change}`).text_color(tm.foreground).when(Boolean(a.task_text), (el) => el.tooltip(a.task_text)).child(a.task)))
+      .child(h_flex().items_center().gap(6).flex_wrap()
+        .when(Boolean(a.tick), (el) => el.child(div().child(a.tick)))
+        .when(Boolean(a.running), (el) => el.child(div().child(a.running)))
+        .when(Boolean(a.last), (el) => el.child(div().child(a.last)))
+        .when(a.waiting, (el) => el.child(div().text_color(tm.blocked).font_medium().child("waiting for you"))));
+  }
+
   card(c) {
     const tm = theme();
     const b = this.board;
@@ -236,13 +255,18 @@ export class BoardView extends View {
         .when(Boolean(c.agent), (el) => el.child(div().child("·")).child(div().child(c.agent)))
         .child(div().flex_1())
         .when(Boolean(c.machine), (el) => el.child(div().truncate().max_w(90).child(c.machine)))))
+      .when(Boolean(activityLine(c)) && c.state === "running", (el) => el.child(this.activity(c)))
       .when(Boolean(c.mr), (el)=>el.child(h_flex().items_center().gap(6).text_size(11)
         .child(div().id(`mr-link-${c.change}`).cursor_pointer().text_color(tm.accent).hover(s=>s.underline())
           .on_mouse_down("left",(_e,cx)=>cx.stop_propagation())
           .on_click((_e,cx)=>{cx.stop_propagation();this.act("mr", c, {}, cx);}).child(`#${c.mr.number}`))
         .when(Boolean(c.ci),(el)=>el.child(div().px(5).rounded(4).bg(tm.raised).text_color(c.ci.state==="red"?tm.blocked:c.ci.state==="green"?tm.working:tm.dim).child(`CI ${c.ci.state}`)))
         .when(c.ship_round>0,(el)=>el.child(div().text_color(tm.dim).child(`ship round ${c.ship_round}`)))))
-      .when(Boolean(c.reason || c.needs_you), (el) => el.child(div().text_size(11).text_color(flag ? tm.blocked : tm.dim).child(c.needs_you && c.state !== "blocked" && c.state !== "failed" ? needsYouReason(c) : c.reason)))
+      // blocked-answers: the question on the card; its reason only repeats
+      // a blocked result's summary.
+      .when(Boolean(c.question?.summary), (el) => el.child(div().text_size(11).text_color(tm.blocked)
+        .child(`asks (${c.question.step}): ${oneLine(c.question.summary, 160)}`)))
+      .when(Boolean(c.reason || c.needs_you) && !(c.question?.kind === "blocked" && c.question.summary), (el) => el.child(div().text_size(11).text_color(flag ? tm.blocked : tm.dim).child(c.needs_you && c.state !== "blocked" && c.state !== "failed" ? needsYouReason(c) : c.reason)))
       .when(c.depends_on.length > 0 && !c.archived, (el) => el.child(div().text_size(11).text_color(tm.dim)
         .child(`after ${c.depends_on.map((d) => `${d.change} (${columnName(b, d.column)})`).join(", ")}`)))
       .when(Boolean(c.branch), (el) => el.child(div().text_size(10.5).text_color(tm.dim).truncate().child(`⎇ ${c.branch}`)))

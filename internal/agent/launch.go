@@ -48,6 +48,11 @@ type Step struct {
 	Env []string
 	// Scope is the run's task scope, or nil; it goes in the brief.
 	Scope *scope.Scope
+	// Answers are a person's answers to this step's question, for the
+	// brief's "Answers from a person".
+	Answers []Answered
+	// Term is what the terminal backend needs; headless ignores it.
+	Term TermInfo
 }
 
 // Options tune Run. The zero value is ready to use.
@@ -58,14 +63,43 @@ type Options struct {
 	// ResultGrace is how long the agent may keep running after it wrote a
 	// valid result before it is stopped (default 2 minutes).
 	ResultGrace time.Duration
+	// TurnGrace replaces ResultGrace for a terminal agent once the turn
+	// with or after its result has ended: an interactive CLI then waits
+	// for the person and never exits by itself (default 2 seconds, and
+	// never longer than ResultGrace).
+	TurnGrace time.Duration
 	// StopGrace is how long the agent has to exit after it is asked to stop,
 	// before it is killed (default 10 seconds).
 	StopGrace time.Duration
 	// TailBytes is how much output is kept for a step without a result
 	// (default 4 KiB).
 	TailBytes int64
-	// OnStart is called with the agent's pid once it has started.
+	// OnStart is called with the agent's pid once it has started
+	// (headless).
 	OnStart func(pid int)
+	// OnTerminal is called with the terminal's name and address once the
+	// agent's terminal is started or adopted (terminal backend). Before a
+	// new terminal starts it is called with its name and no address, so
+	// the run's state names the terminal before the agent can outlive the
+	// run process.
+	OnTerminal func(name, address string)
+	// OnAgentState is called when the agent's state changes: AgentWorking
+	// or AgentWaiting (terminal backend).
+	OnAgentState func(state string)
+	// TermPoll is how often the terminal backend asks herdr-core whether
+	// the agent's terminal still lives (default 2 seconds).
+	TermPoll time.Duration
+	// EndTimeout is how long the terminal backend waits for an ended
+	// terminal to go before it reports that it would not end (default 30
+	// seconds).
+	EndTimeout time.Duration
+	// Fence, when set, gives the run's slot a fresh claim (runs.Slot), so
+	// that an agent-hold carrying the old one refuses to start its agent
+	// (terminal backend). Run calls it when hc run failed without saying
+	// that herdr-core refused the start and no terminal has appeared: the
+	// start may still be on its way, and the step must not end while a
+	// terminal could launch an agent after it.
+	Fence func() error
 }
 
 // Outcome is what happened when a step's agent ran.
@@ -204,7 +238,7 @@ func Run(ctx context.Context, s Step, opts Options) (Outcome, error) {
 	brief := Brief{
 		Change: s.Change, Step: s.Step, Role: s.Role, Round: s.Round,
 		Root: s.Worktree, ResultPath: o.ResultPath, Base: s.Base, Earlier: s.Earlier,
-		Scope: s.Scope, ShippingFeedback: s.ShippingFeedback, ShipsToForge: s.ShipsToForge,
+		Scope: s.Scope, ShippingFeedback: s.ShippingFeedback, Answers: s.Answers, ShipsToForge: s.ShipsToForge,
 	}
 	text, err := brief.Render()
 	if err == nil {
@@ -344,11 +378,23 @@ func withDefaults(o Options) Options {
 	if o.ResultGrace <= 0 {
 		o.ResultGrace = 2 * time.Minute
 	}
+	if o.TurnGrace <= 0 {
+		o.TurnGrace = 2 * time.Second
+	}
+	if o.TurnGrace > o.ResultGrace {
+		o.TurnGrace = o.ResultGrace
+	}
 	if o.StopGrace <= 0 {
 		o.StopGrace = 10 * time.Second
 	}
 	if o.TailBytes <= 0 {
 		o.TailBytes = 4 << 10
+	}
+	if o.TermPoll <= 0 {
+		o.TermPoll = 2 * time.Second
+	}
+	if o.EndTimeout <= 0 {
+		o.EndTimeout = endTimeout
 	}
 	return o
 }

@@ -59,7 +59,7 @@ agent_backend = "auto"      # machine config: "auto" (default), "terminal" or "h
 3. `hc run --bg --name tb-<hash> --cwd <worktree> --label herdr.space=<repo> --label herdr.tab="<change> · <step>" --label tuckerbox.change=… --label tuckerbox.step=… --label tuckerbox.round=… --label tuckerbox.run=… --no-parent --outlive-parent -- <interactive argv>`.
 4. Record the terminal's address in `run.json`.
 5. Poll: the last-message file (written by the turn hook), the result file, tasks.md, and the terminal's status, as `Run` polls today.
-6. On a valid result: after the result grace, `hc kill` the terminal and append `hc read` output to the step's log. The finished terminal is left for herdr-core to show; the next step's start replaces it (same name, once the old one has ended).
+6. On a valid result: after the result grace, `hc kill` the terminal and append `hc read` output to the step's log. Once the turn with (or after) the result has ended, the grace is a short turn grace (2 seconds): an interactive CLI then waits for the person and never exits by itself. The terminal's text is read just before `hc kill` too, and kept when the read after it holds less: herdr-core has nothing left to read of Claude Code once it ends it. The finished terminal is left for herdr-core to show; the next step's start replaces it (same name, once the old one has ended).
 
 The name is a hash, because herdr-core names are at most 32 characters of `a-z0-9-_`. The hash covers the repository's normalised remote (or its path without one) and the change id, so two repositories' `add-login` don't collide. One name per change, not per step or round, is what makes herdr-core's name check a lock on "one live agent per change" (next section).
 

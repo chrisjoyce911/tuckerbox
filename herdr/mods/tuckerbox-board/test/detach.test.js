@@ -36,12 +36,12 @@ globalThis.__actions = actions;
 const never = (name) => `() => { throw new Error("unexpected ${name}"); }`;
 const stubs = `
 const { exec, hc, run, spaces, panes, focused } = globalThis.__herdr;
-const { shown, herdrCall, outcome, parseValidation, invocation, detachCall, detachedResult } = globalThis.__actions;
+const { shown, herdrCall, outcome, parseValidation, invocation, stdinCall, detachCall, detachedResult } = globalThis.__actions;
 const startEdit = ${never("startEdit")}, tick = ${never("tick")}, markValidating = ${never("markValidating")}, setValidation = ${never("setValidation")}, keyCard = ${never("keyCard")};
 const MOD = "tuckerbox-board";
 `;
 const source = readFileSync(new URL("../perform.js", import.meta.url), "utf8");
-const { perform, changed } = await import(`data:text/javascript;base64,${Buffer.from(stubs + source.replace(/^import .*;\n/gm, "")).toString("base64")}`);
+const { perform, changed } = await import(`data:text/javascript;base64,${Buffer.from(stubs + source.replace(/^import .*;\r?\n/gm, "")).toString("base64")}`);
 
 function begin(expect) {
   herdr.expect = expect;
@@ -61,8 +61,8 @@ const ran = (address, exit_code, output, extra = {}) => ({
     wait: { children: [], ended: true, exit_code, reason: "exit", signal: null, status: null, terminal: address, turn: 0, ...extra } }),
 });
 
-test("which actions run detached: a remote card's start, group, resume and rerun", () => {
-  assert.deepEqual([...DETACHED].sort(), ["group", "rerun", "resume", "start"]);
+test("which actions run detached: a remote card's start, group, resume, rerun and answer and resume", () => {
+  assert.deepEqual([...DETACHED].sort(), ["answer_resume", "group", "rerun", "resume", "start"]);
   const extra = { step: "build", group: 2 };
   for (const a of ["start", "group", "resume", "rerun"]) {
     const r = invocation(a, remote, extra);
@@ -70,6 +70,10 @@ test("which actions run detached: a remote card's start, group, resume and rerun
     assert.equal(r.detach, true, a);
     assert.equal(invocation(a, local, extra).detach, undefined, `${a} on this computer keeps exec`);
   }
+  const answered = invocation("answer_resume", remote, { text: "use the v2 API" });
+  assert.equal(answered.detach, true, "answer and resume restarts the engine");
+  assert.equal(invocation("answer_resume", local, { text: "x" }).detach, undefined);
+  assert.equal(invocation("answer", remote, { text: "x" }).detach, undefined, "a plain answer starts nothing");
   for (const a of ["approve", "unapprove", "stop", "validate"]) {
     assert.equal(invocation(a, remote).detach, undefined, `${a} returns before anything is left running`);
   }
@@ -82,6 +86,25 @@ test("detachCall: hc run on the card's machine and checkout, argv untouched", ()
     [...FLAGS, "--on", "mini", "--", "tuckerbox", "run", "add-login", "--tasks", "3"]);
   assert.throws(() => detachCall(invocation("approve", remote)));
   assert.throws(() => detachCall(invocation("start", local)));
+});
+
+// Answer and resume on another machine: the text still goes in on standard
+// input, through sh (or PowerShell on Windows), inside the hc run terminal.
+test("Answer and resume on another machine: hc run of the stdin call, no exec", async () => {
+  const inv = invocation("answer_resume", remote, { text: "use the v2 API" });
+  const sh = actions.stdinCall(inv.argv, inv.stdin, inv.os);
+  assert.deepEqual(detachCall(inv), runArgs([sh.command, ...sh.args]));
+  assert.deepEqual(sh.args.slice(-5), ["tuckerbox", "answer", "add-login", "--resume", "-"]);
+  const win = invocation("answer_resume", { ...remote, os: "windows" }, { text: "use the v2 API" });
+  const ps = actions.stdinCall(win.argv, win.stdin, "windows");
+  assert.deepEqual(detachCall(win), runArgs([ps.command, ...ps.args]));
+  begin([
+    { fn: "hc", args: [runArgs([sh.command, ...sh.args])], reply: ran("mini/t9", 0, "add-login: answered; resumed") },
+    { fn: "hc", args: [["rm", "--json", "mini/t9"]], reply: { code: 0, stdout: "", stderr: "" } },
+  ]);
+  const r = await perform(inv);
+  assert.deepEqual(r, { ok: true, message: "add-login: answered; resumed" });
+  finish();
 });
 
 test("Start on another machine: hc run, the command's output shown, the terminal removed, no exec", async () => {

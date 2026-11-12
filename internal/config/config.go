@@ -10,7 +10,8 @@
 //
 // A value set in the repository config overrides the machine value for the
 // same key. Some keys are reserved to the machine and are refused in a
-// repository config: permission profiles, raw agent arguments and the editor.
+// repository config: permission profiles, raw agent arguments, the editor
+// and agent_backend.
 // Two keys are reserved to the repository and refused in machine config:
 // require_approval, so every machine applies the same run gate, and the
 // [overrides] allow-list, so every machine allows the same change
@@ -100,6 +101,15 @@ var BuiltinRoles = []string{"planner", "builder", "reviewer", "fixer"}
 //     the agent's standard output
 var Placeholders = []string{"brief", "brief_file", "workdir", "model", "effort", "lastmessage"}
 
+// InteractivePlaceholders are the names an agent's interactive command
+// may use: those of [Placeholders] and {turnhook}, which it must pass.
+// As a whole argument, {turnhook} expands to the hook's program and
+// arguments; inside an argument, to the hook as one shell command. The
+// hook takes the turn's final message as its last argument, as a Codex
+// notify payload, or on standard input, as a Claude Code Stop hook
+// payload or plain text.
+var InteractivePlaceholders = append(slices.Clone(Placeholders), "turnhook")
+
 // ShipMode says what happens when a run finishes its last step.
 type ShipMode string
 
@@ -161,6 +171,9 @@ type Config struct {
 	// Editor is the command used to open files for the user. Machine only;
 	// "" if unset.
 	Editor string
+	// AgentBackend is how step agents run: [BackendAuto], [BackendTerminal]
+	// or [BackendHeadless]. Machine only; BackendAuto unless set.
+	AgentBackend string
 	// RequireApproval makes tuckerbox run refuse a change that is not
 	// approved (see package approval). Repository only; true unless the
 	// repository config sets require_approval = false.
@@ -265,6 +278,12 @@ type Agent struct {
 	// Command is the program and its arguments. Arguments may hold
 	// placeholders (see [Placeholders]); Command[0] is the program.
 	Command []string
+	// Interactive is the agent's command for the terminal backend, or
+	// nil: the agent then runs headless even when the terminal backend is
+	// in use. It takes the same placeholders and must pass {turnhook},
+	// the command the agent CLI runs at the end of each turn with its
+	// final message (see [InteractivePlaceholders]).
+	Interactive []string
 	// Model and Effort are defaults for the {model} and {effort}
 	// placeholders when a step does not set them.
 	Model, Effort string

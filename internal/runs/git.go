@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/chrisjoyce911/tuckerbox/internal/gitremote"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -129,6 +130,17 @@ func (r Repo) remote(ctx context.Context) string {
 		return names[0]
 	}
 	return ""
+}
+
+// Identity is what names the repository across machines and checkouts:
+// its normalised remote URL, or its main worktree's path without one.
+func (r Repo) Identity(ctx context.Context) string {
+	if name := r.remote(ctx); name != "" {
+		if url, err := git(ctx, r.Root, "remote", "get-url", name); err == nil && url != "" {
+			return gitremote.Normalize(url)
+		}
+	}
+	return filepath.ToSlash(r.Main)
 }
 
 func (r Repo) refExists(ctx context.Context, ref string) bool {

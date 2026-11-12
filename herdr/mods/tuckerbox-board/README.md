@@ -10,10 +10,10 @@ stores no task state, writes no files and never moves a card by itself
 | File | What it does |
 |---|---|
 | `main.js` | Picks the view: the board, `view: "card"` for one change's detail dialog, `view: "proposal"` (a pane), `view: "drawer"` (the peek drawer) |
-| `board.js` | The board: header (repository, running and needs-you counts, Dock or Undock and Close), columns, cards |
+| `board.js` | The board: header (repository, running and needs-you counts, Dock or Undock and Close), columns, cards; a running card shows its agent's activity (step, agent and model, `on <n>` with the task's text on hover, time since the last tick, running time, `waiting for you`) |
 | `drawer.js` | The peek drawer: nothing without a Tuckerbox repository, else the repository and its running and needs-you counts; a click toggles the board window |
 | `keys.json` | The toggle key `tuckerbox herdr install --keys` merges into the person's `keys.json` |
-| `card.js` | Card detail: proposal (markdown), tasks with tick boxes, approval, last validation, dependencies, rounds with findings and task scope, history (newest first, local time), step settings with their pickers, actions, and Run group… (where Start is offered, and on Ready cards with unticked tasks) |
+| `card.js` | Card detail: proposal (markdown), tasks with tick boxes, approval, last validation, dependencies, rounds with findings and task scope, activity (every `activity` field and the run's ticks, newest first), history (newest first, local time), step settings with their pickers, actions, and Run group… (where Start is offered, and on Ready cards with unticked tasks) |
 | `model.js` | Data rules with no Herdr imports: reading the document, grouping, counts, times, polling |
 | `actions.js` | Which actions each state offers, and `commandLine()`, the one function that builds every tuckerbox command line |
 | `perform.js` | Runs an action: `exec` of the tuckerbox command on the card's machine (a short-lived `hc run` terminal for a remote card's Start, Run group, Resume and Re-run), or the Herdr tab, pane or view for it. With the fixtures it only says what it would run |
@@ -124,6 +124,7 @@ in the machine’s local zone, with its offset. Fields may be added; renaming or
 | `repo` | string | Normalised remote URL (`github.com/owner/name`), or the checkout path when there is no remote. The key that matches the repository across machines |
 | `path` | string | The repository checkout on this machine. Board actions run here |
 | `machine` | string | This machine's name |
+| `os` | string | The operating system Tuckerbox runs on there (Go's `GOOS`, such as `darwin`, `linux`, `windows`). The answer actions pipe their text in with PowerShell on `windows`, with `sh` elsewhere |
 | `require_approval` | bool | The repository's `require_approval`; `false` means no Approved column and Start on Proposed cards |
 | `steps` | list of strings | Workflow step ids in order, used for Re-run in either layout |
 | `columns` | list | In board order, see below |
@@ -183,9 +184,25 @@ machine default. `board.json` demonstrates steps; `detail.json` demonstrates com
 | `priority` | number or null | The change's `priority` in the repository checkout on this machine (committed or not), or `null` for none and for archived cards |
 | `position` | number | Its place in priority order (priority, then age, then id), from 1. Absent on archived cards. The board shows it as `#n` |
 | `archived` | string | For Done cards: the archive date (`2026-11-08`). Their approval is `none`, with blank metadata and `committed: true`; no approval or commit checks are needed |
+| `activity` | object | On cards with a running, queued or stopped run: what its agent is doing, see below |
 | `settings` | list | Each workflow step's effective settings, in workflow order: `[{ "step", "agent", "model", "effort", "permissions", "started" }]`, each key `{ "value", "source" }` with `source` one of `change`, `repo`, `machine`, `default` and `value` `""` for the agent's own default (or no permission profile). For a step a run is running, the values it started with (from `run.json`), with `started: true`; otherwise what it would run with now. `[]` for archived cards |
 | `machines` | list of strings | The change's `machines` from its `tuckerbox.toml`, in order; `[]` for none |
 | `error` | string | Optional diagnostic when this card could only be read partially (missing worktree/change folder, malformed metadata, unreadable files or obsolete run step). Other cards remain available. Retained fields may be incomplete; a run with an absent or unknown step stays visible in In progress (compact) or Queued (steps), with badge `queued` |
+
+### Activity (agent-activity)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `step`, `agent`, `model`, `effort` | string | The run's step, its agent, and the model and effort it runs with (`""` for the agent's default) |
+| `round` | number | The run's round |
+| `task` | object or null | `{ "number", "text" }`: the first unticked task of the run's scope (or of the change), ship tasks left out, in the worktree's tasks.md. `null` when all are ticked |
+| `task_label` | string | `on <n>`, or `all tasks in scope ticked` |
+| `last_tick` | object or null | `{ "number", "at", "ticked", "step", "round" }`: the last task ticked in the current run |
+| `step_started`, `run_started` | string | When the step and the run started (`""` when unknown, as for a queued run's step) |
+| `last_activity` | string | When the agent last did something: the step log's last write (headless), or herdr-core's last output for its terminal |
+| `agent_state` | string | `working` or `waiting for you` while the step runs, else `""`. A running card that waits for you counts as needing the person |
+| `backend` | string | `terminal` or `headless` |
+| `terminal` | object | While a step runs in a terminal: `{ "address", "name", "machine" }`. Watch focuses `address` on the card's Herdr machine |
 
 ### Detail (`--change <id>`)
 
@@ -197,6 +214,7 @@ machine default. `board.json` demonstrates steps; `detail.json` demonstrates com
 | `tasks` | list | `[{ "number", "group", "text", "checked" }]` in file order: `number` is `2.1`, `group` the `## ` heading above it (`2. Sign in`) |
 | `rounds` | list | `[{ "round", "result", "step", "summary", "findings", "ended" }]`: `result` is the round's last step result (`done`, `rejected`, `blocked`, `failed`, `stopped`) or `""` while it runs; `step` is the step that gave it |
 | `history` | list | The run history, oldest first, see below. The board shows it newest first |
+| `ticks` | list | The current run's `task_ticked` and `task_unticked` events as `{ "number", "at", "ticked", "step", "round" }`, newest first; the Activity timeline |
 | `choices` | object | The settings pickers' allow-list, from `[overrides]` in the repository config where `tuckerbox set` edits the change: `{ "agents", "models", "efforts", "permissions", "voids_approval" }`. `models` maps an agent to its allowed models; `voids_approval` lists the step keys whose change voids an approval (`agent`, `permissions`). Every list is empty when the repository has no `[overrides]` |
 
 A finding is `{ "severity", "file", "detail" }`, as agents write it
@@ -204,9 +222,11 @@ A finding is `{ "severity", "file", "detail" }`, as agents write it
 
 A history event has `at`, `event`, `step`, `round`, `agent` and `machine`,
 and some of: `result` (step_finished), `to` and `summary` (handoff), `summary`
-and `findings` (rejected), `reason` (queued, blocked, failed). `event` is one
-of `started`, `queued`, `step_started`, `step_finished`, `handoff`,
-`rejected`, `blocked`, `stopped`, `resumed`, `rerun`, `failed`, `ready`.
+and `findings` (rejected), `reason` (queued, blocked, failed), `task`
+(task_ticked, task_unticked). `event` is one of `started`, `queued`,
+`step_started`, `step_finished`, `handoff`, `rejected`, `blocked`,
+`stopped`, `resumed`, `rerun`, `failed`, `ready`, `task_ticked`,
+`task_unticked`, or a shipping event.
 A round is created when work starts or a step result is recorded; queue/admission events alone do not create a round. Stopped (including crashed) rounds have result `stopped` and an `ended` time.
 
 ## Actions
@@ -240,7 +260,8 @@ card says it wasn't validated since the edit and the detail offers Validate.
 | Stop | queued, running | `tuckerbox stop <id>` |
 | Resume | stopped, blocked | `tuckerbox resume <id>` |
 | Re-run step | stopped, blocked, failed, ready | `tuckerbox rerun <id> <step>` |
-| Follow log | running, blocked, stopped, failed (a Herdr tab) | `tuckerbox logs <id> <step> --follow` |
+| Follow log | running headless, blocked, stopped, failed (a Herdr tab) | `tuckerbox logs <id> <step> --follow` |
+| Watch | running in a terminal (`activity.backend` `terminal` with its address) | Herdr's `agent.focus {terminal}` with `activity.terminal.address`, as `<machine>/<address>` for a card on another machine; Herdr opens the agent's tab from its labels if it isn't showing |
 | Edit | no queued or running run (a Herdr pane) | `tuckerbox edit <id> proposal\|design\|model\|tasks\|spec:<capability>` |
 | Validate | after an edit, if the pane's close can't be seen | `tuckerbox validate <id> --json` |
 | Tick, Untick | no queued or running run | `tuckerbox tasks <id> tick\|untick <n.m>` |

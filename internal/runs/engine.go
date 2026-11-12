@@ -116,8 +116,10 @@ type Engine struct {
 	// Poll is how often a queued run retries for a slot and a run checks
 	// for a stop request (default 250ms).
 	Poll time.Duration
-	// Agent tunes agent.Run.
+	// Agent tunes the backend's Run.
 	Agent agent.Options
+	// Backend runs each step's agent; nil means agent.Headless.
+	Backend agent.Backend
 	// OnLocked is called once the change lock is held, run.json exists and
 	// the run has joined the slot queue, or has started waiting on its
 	// dependencies (it joins the queue once they are met). tuckerbox run starts changes one
@@ -126,6 +128,10 @@ type Engine struct {
 	OnLocked func(ws Workspace, r *Run)
 	// Now returns the time; nil means time.Now.
 	Now func() time.Time
+	// TickEvery is how often the run process reads the worktree's tasks.md
+	// while a step runs, for task_ticked and task_unticked history events
+	// (default TickEvery, 10 seconds).
+	TickEvery time.Duration
 	// Gate, when set, may refuse a Start request (the approval run gate).
 	// It judges the commit a new worktree will be made at, before it is
 	// made, and the worktree's files again once the change lock is held,
@@ -145,6 +151,14 @@ type Engine struct {
 	mu      sync.Mutex
 	saved   Run
 	machine string
+	// term is the run's terminal name, labels and slot, for the terminal
+	// backend.
+	term agent.TermInfo
+	// adopting is the live agent this run adopted, from when its slot is
+	// taken back until its step's backend runs it.
+	adopting *adoption
+	// afterSlot, when set, is called once the run holds its slot (tests).
+	afterSlot func()
 }
 
 // ActiveError means the change already has an active run.
@@ -186,6 +200,142 @@ func StopFile(d statedir.Dir) string { return filepath.Join(string(d), "stop") }
 
 // EngineLog is the engine's own log in a state directory.
 func EngineLog(d statedir.Dir) string { return filepath.Join(string(d), "run.log") }
+
+// templates are the agents config defines, as templates.
+func (e *Engine) templates() map[string]agent.Template {
+	templates := map[string]agent.Template{}
+	for name, a := range e.Config.Agents {
+		templates[name] = agent.Template{Name: name, Command: a.Command, Interactive: a.Interactive}
+	}
+	return templates
+}
+
+// stepBackend is the backend a step's agent runs in: the engine's, except
+// that an agent without an interactive command, or a step outside a slot,
+// runs headless under the terminal backend (agent-terminals: Agents that
+// run in a terminal).
+func (e *Engine) stepBackend(tmpl agent.Template, term agent.TermInfo) agent.Backend {
+	b := e.backend()
+	if _, ok := b.(agent.Adopter); ok && (!tmpl.HasInteractive() || term.Name == "" || term.Slot < 0) {
+		return agent.Headless{}
+	}
+	return b
+}
+
+// agentOptions are the backend options for a step of rs: the engine's,
+// with callbacks that record the agent's pid, terminal and state.
+func (e *Engine) agentOptions(ws Workspace, rs *Run) agent.Options {
+	opts := e.Agent
+	opts.OnStart = func(pid int) {
+		rs.AgentPid = pid
+		_ = e.save(ws, rs)
+	}
+	opts.OnTerminal = func(name, address string) {
+		ref := &TerminalRef{Name: name, Address: address, Owner: e.term.Owner, Common: e.term.Common}
+		if address != "" && rs.Terminal != nil && rs.Terminal.Name == name && rs.Terminal.Owner != "" {
+			// The claim the terminal's agent-hold was started with: a fence
+			// while starting it may have moved e.term.Owner on since.
+			ref.Owner = rs.Terminal.Owner
+		}
+		rs.Terminal = ref
+		_ = e.save(ws, rs)
+	}
+	opts.OnAgentState = func(state string) {
+		rs.AgentState = state
+		_ = e.save(ws, rs)
+	}
+	if slot := e.workflowSlot; slot != nil {
+		opts.Fence = func() error {
+			if err := slot.Fence(); err != nil {
+				return err
+			}
+			e.term.Owner = slot.Owner
+			return nil
+		}
+	}
+	return opts
+}
+
+// adoption is a live agent a resumed run adopts.
+type adoption struct {
+	Name    string
+	Backend agent.Adopter
+}
+
+// adoptable returns the live agent a Resume request adopts, or nil: the
+// run's process died (we hold the lock) while it was running a step in a
+// terminal, or while an earlier resume was taking that agent's slot back
+// (queued), and a live terminal of that name has the run's change, step
+// and round, and the run recorded its slot.
+func (e *Engine) adoptable(ctx context.Context, req Request, ws Workspace) *adoption {
+	b, ok := e.backend().(agent.Adopter)
+	if !ok || req.Mode != Resume {
+		return nil
+	}
+	rs, err := ReadRun(ws.State.RunFile())
+	if err != nil || (rs.State != Running && rs.State != Queued) || rs.Terminal == nil || rs.Slot == nil {
+		return nil
+	}
+	t, err := b.LiveAgent(ctx, rs.Terminal.Name)
+	if err != nil {
+		e.logf(req.Change, "warning: looking for the agent's terminal %s: %v", rs.Terminal.Name, err)
+		return nil
+	}
+	if !agent.MatchesStep(t, rs.Change, rs.Step, rs.Round) {
+		return nil
+	}
+	return &adoption{Name: rs.Terminal.Name, Backend: b}
+}
+
+// endLeftover ends a live agent terminal of the change that this run does
+// not adopt, and waits until it is gone, before the run is admitted. The
+// caller holds the change lock, so such a terminal's run process died: its
+// agent still holds its slot's agent lock, and with max_parallel = 1 the
+// run would otherwise wait for that slot forever (formal/terminals.tla,
+// Launch: adopt or end the live agent first).
+//
+// recorded is whether run.json still names the terminal: then no one has
+// saved its session yet, so a terminal whose agent already ended (while no
+// run process watched it) has its history appended to the step log too,
+// before the next start replaces it.
+func (e *Engine) endLeftover(ctx context.Context, ws Workspace, change, name string, recorded bool) error {
+	b, ok := e.backend().(agent.Adopter)
+	if !ok {
+		return nil
+	}
+	t, err := b.FindAgent(ctx, name)
+	if err != nil {
+		return fmt.Errorf("change %s: looking for its agent's terminal %s: %w", change, name, err)
+	}
+	if t == nil {
+		return nil
+	}
+	if !t.Live() {
+		if recorded {
+			round, _ := strconv.Atoi(t.Labels[agent.LabelRound])
+			e.logf(change, "saving the session of the ended agent in terminal %s (step %s round %s)",
+				name, t.Labels[agent.LabelStep], t.Labels[agent.LabelRound])
+			e.saveHistory(ws, b, change, t.Labels[agent.LabelStep], round, name)
+		}
+		return nil
+	}
+	e.logf(change, "ending the agent left in terminal %s (step %s round %s) before this run starts",
+		name, t.Labels[agent.LabelStep], t.Labels[agent.LabelRound])
+	if err := b.EndAgent(ctx, name); err != nil {
+		return fmt.Errorf("change %s: %w", change, &agent.EndError{Name: name, Err: err})
+	}
+	round, _ := strconv.Atoi(t.Labels[agent.LabelRound])
+	e.saveHistory(ws, b, change, t.Labels[agent.LabelStep], round, name)
+	return nil
+}
+
+// backend is the backend that runs step agents: e.Backend, or headless.
+func (e *Engine) backend() agent.Backend {
+	if e.Backend != nil {
+		return e.Backend
+	}
+	return agent.Headless{}
+}
 
 func (e *Engine) now() time.Time {
 	if e.Now != nil {
@@ -253,8 +403,10 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 		return nil, err
 	}
 	defer lock.Release()
-	// We hold the lock, so an edit marker is from an edit that died.
+	// We hold the lock, so an edit marker is from an edit that died, and an
+	// answer in the inbox is one a dead run process never recorded.
 	RemoveEditMarker(ws.State)
+	DrainAnswerInbox(ws.State)
 	if req.Expect != nil {
 		cur, err := ReadRun(ws.State.RunFile())
 		switch {
@@ -294,9 +446,36 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	}
 	_ = os.Remove(StopFile(ws.State))
 
-	rs, startIdx, err := e.prepare(req, ws)
+	// Adopt: a resumed run whose process died while its agent works on in
+	// a terminal of this step and round keeps that agent, its round and
+	// its slot (formal/terminals.tla and liveslots.tla, Adopt).
+	adopt := e.adoptable(ctx, req, ws)
+	rs, startIdx, err := e.prepare(req, ws, adopt != nil)
 	if err != nil {
 		return nil, err
+	}
+	termName := agent.TerminalName(e.Repo.Identity(ctx), req.Change)
+	if adopt == nil {
+		// A launch the dead process left on its way (it never saw hc run
+		// answer) must start no agent once this run lets its terminal go:
+		// revoke its slot claim first, then end whatever terminal is there.
+		if ref := e.saved.Terminal; ref != nil && ref.Address == "" && e.saved.Slot != nil {
+			if err := RevokeClaim(ctx, firstNonEmpty(ref.Common, e.Repo.Common), *e.saved.Slot, ref.Owner, e.poll()); err != nil {
+				return nil, fmt.Errorf("change %s: %w", req.Change, err)
+			}
+		}
+		if err := e.endLeftover(ctx, ws, req.Change, termName, e.saved.Terminal != nil); err != nil {
+			return nil, err
+		}
+		// Nothing of an earlier process's agent is left to find.
+		rs.Terminal, rs.Slot, rs.AgentState = nil, nil, ""
+	}
+	e.term = agent.TermInfo{
+		Name:   termName,
+		Space:  filepath.Base(e.Repo.Main),
+		RunID:  strconv.FormatInt(rs.Created.UnixNano(), 10),
+		Common: e.Repo.Common,
+		Slot:   -1,
 	}
 	prev := e.saved
 	pidPath := ws.State.PidFile()
@@ -336,11 +515,55 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 		return e.forgeShip(ctx, ws, rs, true)
 	}
 
+	var slot *Slot
+	e.adopting = nil
+	if adopt != nil {
+		n := *rs.Slot
+		e.logf(req.Change, "adopting the live agent in terminal %s (step %s round %d): taking its slot %d", adopt.Name, rs.Step, rs.Round, n)
+		notify()
+		s, err := TakeOwnSlot(ctx, e.Repo.Common, n, e.poll(), func() bool {
+			t, err := adopt.Backend.LiveAgent(ctx, adopt.Name)
+			return err != nil || (t != nil && agent.MatchesStep(t, rs.Change, rs.Step, rs.Round))
+		})
+		switch {
+		case ctx.Err() != nil:
+			// Stopped before the agent was adopted: it still works in its
+			// terminal. End it, and know it is gone, before recording
+			// stopped; one that would not end leaves the run as found.
+			if s != nil {
+				s.Release()
+			}
+			return e.stopAdopted(ws, rs, adopt, stopReason(stopReq, "while taking its slot back"))
+		case err != nil:
+			// The agent may still work in its terminal: keep its name and
+			// slot so that stop and resume find it.
+			return e.unwatched(ws, rs, &agent.EndError{Name: adopt.Name, Err: fmt.Errorf("taking slot %d back: %w", n, err)})
+		case s == nil:
+			// The agent ended before its slot was free: a new round, admitted
+			// as any other run.
+			e.logf(req.Change, "the agent in terminal %s ended before it could be adopted; starting a new round", adopt.Name)
+			// Its session goes to the step log before run.json lets the
+			// terminal go: the new round starts in a terminal of the same
+			// name. One left live but no longer of this step is ended first.
+			if err := e.endLeftover(ctx, ws, req.Change, adopt.Name, true); err != nil {
+				return e.unwatched(ws, rs, &agent.EndError{Name: adopt.Name, Err: err})
+			}
+			rs.Terminal, rs.Slot, rs.AgentState = nil, nil, ""
+			rs.Round++
+			if err := e.save(ws, rs); err != nil {
+				return rs, err
+			}
+		default:
+			slot = s
+			// Until its step's backend has it, the adopted agent is this
+			// run's to end on a stop (see steps).
+			e.adopting = adopt
+		}
+	}
 	dw, fail := e.newDepWait(ws, rs)
-	if fail != "" {
+	if fail != "" && slot == nil {
 		return e.finish(ws, rs, dw.failureState(), fail)
 	}
-	var slot *Slot
 	for slot == nil {
 		// Wait for dependencies before joining the slot queue, so a
 		// waiting run holds neither a slot nor a place in the queue.
@@ -390,7 +613,16 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	// deferred lock release runs after this one).
 	defer slot.Release()
 	e.workflowSlot = slot
+	e.term.Slot = slot.N
+	e.term.Owner = slot.Owner
+	rs.Slot = &slot.N
+	if err := e.save(ws, rs); err != nil {
+		return rs, err
+	}
 	e.logf(req.Change, "running in slot %d", slot.N)
+	if e.afterSlot != nil {
+		e.afterSlot()
+	}
 
 	return e.steps(ctx, ws, rs, startIdx, stopReq)
 }
@@ -428,7 +660,7 @@ func (e *Engine) ensureWorktree(ctx context.Context, req Request) (Workspace, er
 
 // prepare reads or makes the run state for req and returns the index of
 // the step to start from. The caller holds the change lock.
-func (e *Engine) prepare(req Request, ws Workspace) (*Run, int, error) {
+func (e *Engine) prepare(req Request, ws Workspace, adopt bool) (*Run, int, error) {
 	steps := e.Config.Steps
 	if len(steps) == 0 {
 		return nil, 0, errors.New("the workflow has no steps")
@@ -508,8 +740,11 @@ func (e *Engine) prepare(req Request, ws Workspace) (*Run, int, error) {
 		return nil, 0, err
 	}
 	// A new attempt at a step is a new round, so nothing an earlier
-	// attempt's agent writes can be accepted.
-	rs.Round++
+	// attempt's agent writes can be accepted. An adopted agent is the
+	// same attempt: its round stays.
+	if !adopt {
+		rs.Round++
+	}
 	rs.Worktree, rs.Repo = ws.Path, e.Repo.Root
 	if ws.Branch != "" {
 		rs.Branch = ws.Branch
@@ -531,13 +766,16 @@ func (e *Engine) stepIndex(id string) (int, error) {
 // steps runs the workflow from step index i.
 func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopReq *stopRequest) (*Run, error) {
 	steps := e.Config.Steps
-	templates := map[string]agent.Template{}
-	for name, a := range e.Config.Agents {
-		templates[name] = agent.Template{Name: name, Command: a.Command}
-	}
+	templates := e.templates()
 	for i < len(steps) {
 		st := steps[i]
 		if ctx.Err() != nil {
+			if e.adopting != nil {
+				// Stopped after the adopted agent's slot was taken back but
+				// before its step watches it: it still works in its
+				// terminal.
+				return e.stopAdopted(ws, rs, e.adopting, stopReason(stopReq, "before step "+st.ID))
+			}
 			return e.finish(ws, rs, Stopped, stopReason(stopReq, "before step "+st.ID))
 		}
 		// The change's own settings, read as the step starts, so a stopped
@@ -559,21 +797,28 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 		}
 		// The effective settings hold the agent's defaults already.
 		model, effort := st.Model, st.Effort
-		e.logf(rs.Change, "step %s round %d: starting agent %s", st.ID, rs.Round, st.Agent)
-		opts := e.Agent
-		opts.OnStart = func(pid int) {
-			rs.AgentPid = pid
-			_ = e.save(ws, rs)
-		}
-		out, err := agent.Run(ctx, agent.Step{
+		backend := e.stepBackend(tmpl, e.term)
+		rs.AgentBackend = backend.Name()
+		e.logf(rs.Change, "step %s round %d: starting agent %s (%s)", st.ID, rs.Round, st.Agent, backend.Name())
+		opts := e.agentOptions(ws, rs)
+		stopTicks := e.watchTicks(ws, rs, st.ID, rs.Round)
+		out, err := backend.Run(ctx, agent.Step{
 			Change: rs.Change, Step: st.ID, Role: st.Role, Round: rs.Round,
 			Agent: tmpl, Model: model, Effort: effort,
 			Permissions: e.Config.PermissionArgs(st),
 			Worktree:    ws.Path, State: ws.State, Base: rs.Base,
-			Earlier: rs.Earlier(), Scope: rs.Scope,
+			Earlier: rs.Earlier(), Scope: rs.Scope, Term: e.term,
+			Answers:      rs.PendingAnswers(st.ID),
 			ShipsToForge: shipsToForge(e.Config.Ship),
 		}, opts)
-		rs.AgentPid = 0
+		stopTicks()
+		// The backend has had the adopted agent: it ends it on a stop.
+		e.adopting = nil
+		var endErr *agent.EndError
+		if errors.As(err, &endErr) {
+			return e.unwatched(ws, rs, endErr)
+		}
+		rs.AgentPid, rs.Terminal, rs.AgentState = 0, nil, ""
 		switch {
 		case err != nil:
 			return e.finish(ws, rs, Failed, err.Error())
@@ -584,6 +829,9 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 			return e.finish(ws, rs, Failed, fmt.Sprintf("step %s: %s", st.ID, out.FailureReason()))
 		}
 		res := out.Result
+		// The step has reported a result after a brief that held its
+		// answers: they are used, and later briefs leave them out.
+		rs.useAnswers(st.ID)
 		rs.History = append(rs.History, Entry{
 			Step: st.ID, Round: rs.Round, Status: res.Status, Summary: res.Summary,
 			Findings: res.Findings, ExitCode: out.ExitCode, Ended: e.now(),
@@ -682,11 +930,59 @@ func (e *Engine) ship(ctx context.Context, ws Workspace, rs *Run) (*Run, error) 
 	return e.finish(ws, rs, Ready, "")
 }
 
+// stopAdopted ends the live agent a resumed run adopted but has not yet
+// handed to its step's backend, and knows it is gone, before it records
+// the run stopped. An agent whose terminal will not end leaves the run as
+// found: running, with its terminal and slot, for stop or resume.
+func (e *Engine) stopAdopted(ws Workspace, rs *Run, adopt *adoption, reason string) (*Run, error) {
+	e.adopting = nil
+	ectx, ecancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	err := adopt.Backend.EndAgent(ectx, adopt.Name)
+	ecancel()
+	if err != nil {
+		return e.unwatched(ws, rs, &agent.EndError{Name: adopt.Name, Err: err})
+	}
+	// Its session goes to the step log before run.json lets the terminal
+	// go: the step's next agent starts in a terminal of the same name.
+	e.saveHistory(ws, adopt.Backend, rs.Change, rs.Step, rs.Round, adopt.Name)
+	return e.finish(ws, rs, Stopped, reason)
+}
+
+// saveHistory appends an ended terminal's history to step's log.
+func (e *Engine) saveHistory(ws Workspace, b agent.Adopter, change, step string, round int, name string) {
+	if step == "" {
+		return
+	}
+	if err := b.SaveHistory(ws.State.Log(step), step, round, name); err != nil {
+		e.logf(change, "warning: saving the session of terminal %s to the %s log: %v", name, step, err)
+	}
+}
+
+// unwatched leaves the run as a run process that died would: running,
+// with its terminal and slot recorded, because its agent's terminal would
+// not end and may still be live. Nothing is recorded stopped and the
+// workflow does not move on until the terminal is known to have ended:
+// tuckerbox stop takes the lock and tries again, and resume adopts the
+// agent or ends it (formal/terminals.tla, StoppedMeansNoAgent).
+func (e *Engine) unwatched(ws Workspace, rs *Run, err *agent.EndError) (*Run, error) {
+	rs.State, rs.Reason = Running, err.Error()
+	rs.Pid, rs.AgentPid = 0, 0
+	if rs.Terminal == nil {
+		rs.Terminal = &TerminalRef{Name: err.Name}
+	}
+	e.logf(rs.Change, "%v; leaving the run for tuckerbox stop or resume", err)
+	if serr := e.save(ws, rs); serr != nil {
+		return rs, serr
+	}
+	return rs, err
+}
+
 // finish records the run's final state for this process. The caller's
 // deferred releases then free the slot and the change lock.
 func (e *Engine) finish(ws Workspace, rs *Run, s State, reason string) (*Run, error) {
 	rs.State, rs.Reason = s, reason
 	rs.Pid, rs.AgentPid = 0, 0
+	rs.Slot, rs.Terminal, rs.AgentState = nil, nil, ""
 	if s != Failed {
 		rs.Tail = ""
 	}

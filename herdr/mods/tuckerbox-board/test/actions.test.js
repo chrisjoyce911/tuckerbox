@@ -74,14 +74,18 @@ test("approval not required: a Proposed card offers Start", () => {
   assert.ok(cardActions(c, offOff).includes("start"));
 });
 
+// A step running headless (agent-terminals: Watch from the board keeps
+// Follow log for it).
 test("Follow a running step: a tab on the card's machine running tuckerbox logs --follow", () => {
-  const c = { ...card("add-users"), on: "mini" };
+  const c = { ...card("fix-tax-rounding"), on: "mini" };
   assert.equal(c.state, "running");
+  assert.equal(c.activity.backend, "headless");
   assert.ok(detailActions(c, board).includes("follow"));
+  assert.ok(!detailActions(c, board).includes("watch"));
   const inv = invocation("follow", c, { step: c.step });
   assert.equal(inv.place, "tab");
   assert.equal(inv.on, "mini");
-  assert.deepEqual(inv.argv, ["tuckerbox", "logs", "add-users", "build", "--follow"]);
+  assert.deepEqual(inv.argv, ["tuckerbox", "logs", "fix-tax-rounding", "plan", "--follow"]);
   assert.equal(actionLabel("follow", { step: "build" }), "Follow build log ↗");
 });
 

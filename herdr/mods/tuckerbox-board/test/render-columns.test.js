@@ -76,7 +76,10 @@ for (const [name, props] of [["Narrow docked pane", { folder: "/work/shop", mach
       assert.ok(has(c, "flex_none"), `${idOf(c)} is never squeezed`);
       assert.ok(!has(c, "flex_1"), `${idOf(c)} is never stretched`);
     }
-    assert.ok(!all(row).some((x) => has(x, "flex_wrap")), "columns don't wrap");
+    // Columns don't wrap: the row, each column and its list; a card's own
+    // lines (its activity, say) may wrap inside its 236 px.
+    const lists = cols.flatMap((c) => c.kids.filter((k) => String(idOf(k)).startsWith("col-list-")));
+    assert.ok(![row, ...cols, ...lists].some((x) => has(x, "flex_wrap")), "columns don't wrap");
     assert.ok(!all(find(root, "tuckerbox-board").kids[0]).some((x) => idOf(x) === "columns"), "the header is outside the row");
   });
 }

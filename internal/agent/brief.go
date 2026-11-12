@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/scope"
 )
@@ -85,6 +86,71 @@ type Brief struct {
 	// Scope is the run's task scope, or nil for the whole change. The
 	// brief lists its tasks with their text from tasks.md under Root.
 	Scope *scope.Scope
+	// Answers are the questions this step asked by blocking and a
+	// person's answers to them, oldest first (blocked-answers: Answers in
+	// the next brief).
+	Answers []Answered
+}
+
+// Answered is a question a step asked by reporting blocked, and what a
+// person answered.
+type Answered struct {
+	// Question is the blocked result: its summary and findings.
+	Question Result
+	// Answers are the person's answers, oldest first.
+	Answers []PersonAnswer
+}
+
+// PersonAnswer is one answer from a person.
+type PersonAnswer struct {
+	Text string
+	By   string
+	At   time.Time
+}
+
+// brisbane is Australia/Brisbane: UTC+10 all year (Queensland has no
+// daylight saving), so a fixed zone needs no time zone database.
+var brisbane = time.FixedZone("AEST", 10*60*60)
+
+// renderAnswers writes the "Answers from a person" section.
+func renderAnswers(s *strings.Builder, groups []Answered) {
+	if len(groups) == 0 {
+		return
+	}
+	s.WriteString("## Answers from a person\n\n")
+	s.WriteString("This step reported `blocked` with a question, and a person answered it. ")
+	s.WriteString("Their answers are the person's decisions for this step: continue from them, ")
+	s.WriteString("and don't block again on what they decide.\n\n")
+	for _, g := range groups {
+		q := g.Question
+		fmt.Fprintf(s, "### Question: %s, round %d\n\n", q.Step, q.Round)
+		if q.Summary != "" {
+			s.WriteString(strings.TrimSpace(q.Summary))
+			s.WriteString("\n\n")
+		}
+		for _, f := range q.Findings {
+			where := f.File
+			if where == "" {
+				where = "(whole change)"
+			}
+			fmt.Fprintf(s, "- [%s] `%s`: %s\n", f.Severity, where, strings.TrimSpace(f.Detail))
+		}
+		if len(q.Findings) > 0 {
+			s.WriteString("\n")
+		}
+		for i, a := range g.Answers {
+			by := a.By
+			if by == "" {
+				by = "someone"
+			}
+			fmt.Fprintf(s, "#### Answer %d, from %s at %s\n\n", i+1, by, a.At.In(brisbane).Format("2006-01-02 15:04 MST"))
+			for _, line := range strings.Split(strings.TrimSpace(a.Text), "\n") {
+				s.WriteString(strings.TrimRight("> "+line, " "))
+				s.WriteString("\n")
+			}
+			s.WriteString("\n")
+		}
+	}
 }
 
 // ChangeFiles returns the change's planning files, relative to root with
@@ -218,6 +284,8 @@ func (b Brief) Render() (string, error) {
 			}
 		}
 	}
+
+	renderAnswers(&s, b.Answers)
 
 	s.WriteString("## Result\n\n")
 	s.WriteString("When you finish, make your final message this JSON object, as a fenced `json` block or the bare object, ")

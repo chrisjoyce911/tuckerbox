@@ -4,6 +4,7 @@ package board
 
 import (
 	"github.com/chrisjoyce911/tuckerbox/internal/agent"
+	"github.com/chrisjoyce911/tuckerbox/internal/runs"
 	"github.com/chrisjoyce911/tuckerbox/internal/scope"
 	"github.com/chrisjoyce911/tuckerbox/internal/ship"
 )
@@ -11,11 +12,14 @@ import (
 const Version = 1
 
 type Document struct {
-	Ship            string `json:"ship"`
-	Version         int    `json:"version"`
-	Repo            string `json:"repo"`
-	Path            string `json:"path"`
-	Machine         string `json:"machine"`
+	Ship    string `json:"ship"`
+	Version int    `json:"version"`
+	Repo    string `json:"repo"`
+	Path    string `json:"path"`
+	Machine string `json:"machine"`
+	// OS is the operating system Tuckerbox runs on there (Go's GOOS):
+	// the board picks how to run a command on that machine by it.
+	OS              string `json:"os"`
 	RequireApproval bool   `json:"require_approval"`
 	// Autopilot says whether tuckerbox autopilot runs for the repository
 	// on this machine (add-autopilot).
@@ -80,6 +84,15 @@ type Card struct {
 	Position int    `json:"position,omitempty"`
 	// Scope is the card's run's task scope; absent for the whole change.
 	Scope *scope.Scope `json:"scope,omitempty"`
+	// Activity is what the run's agent is doing, on cards whose run is
+	// running, queued or stopped (agent-activity).
+	Activity *Activity `json:"activity,omitempty"`
+	// Question is what the run asks the person: on a blocked card, its
+	// step's blocked result (summary and findings, step and round) and the
+	// answers given so far; on a card whose terminal agent waits for the
+	// person, kind "waiting" and the agent's last message
+	// (blocked-answers: The question of a blocked run).
+	Question *runs.QuestionView `json:"question,omitempty"`
 	// Settings is what each workflow step runs with, in workflow order,
 	// with the source of each value (settings-board: Effective settings on
 	// cards). A running step shows what it started with. Empty for
@@ -140,6 +153,9 @@ type Detail struct {
 	History  []Event `json:"history"`
 	// Groups are tasks.md's task groups, in order.
 	Groups []Group `json:"groups"`
+	// Ticks are the current run's task_ticked and task_unticked events,
+	// newest first.
+	Ticks []Tick `json:"ticks"`
 	// Choices is the allow-list for the change's settings pickers.
 	Choices Choices `json:"choices"`
 }
@@ -196,4 +212,6 @@ type Event struct {
 	Reason    string          `json:"reason,omitempty"`
 	Scope     string          `json:"scope,omitempty"`
 	OldScope  string          `json:"old_scope,omitempty"`
+	// Task is the task number of task_ticked and task_unticked.
+	Task string `json:"task,omitempty"`
 }

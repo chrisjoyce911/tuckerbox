@@ -3,9 +3,9 @@
 //
 // The board never writes a file or run state itself (herdr-board: Actions go
 // through Tuckerbox). Every action is a `tuckerbox` command on the card's
-// machine; the two Herdr-only ones (Open proposal, Open worktree) open a view
-// and change nothing.
-import { isActive } from "./model.js";
+// machine; the Herdr-only ones (Open proposal, Open worktree, Watch) open or
+// focus a view and change nothing.
+import { isActive, answerable } from "./model.js";
 
 export const ACTIONS = {
   mr: {label:"Open merge request ↗"},
@@ -16,6 +16,9 @@ export const ACTIONS = {
   resume: { label: "Resume", primary: true },
   rerun: { label: "Re-run step" },
   follow: { label: "Follow log ↗" },
+  watch: { label: "Watch ↗", primary: true },
+  answer: { label: "Answer" },
+  answer_resume: { label: "Answer and resume", primary: true },
   proposal: { label: "Open proposal" },
   worktree: { label: "Open worktree" },
   edit: { label: "Edit" },
@@ -76,6 +79,10 @@ export function commandLine(action, change, extra = {}) {
       if (!Number.isInteger(n) || n < 1) throw new Error(`priority needs a position from 1, not ${JSON.stringify(n)}`);
       return ["tuckerbox", "priority", change, String(n)];
     }
+    // blocked-answers: the text goes on standard input ("-"), so quoting and
+    // newlines are safe; see answerText and stdinCall.
+    case "answer": answerText(extra.text); return ["tuckerbox", "answer", change, "-"];
+    case "answer_resume": answerText(extra.text); return ["tuckerbox", "answer", change, "--resume", "-"];
     case "set": {
       // A settings picker (settings-board: Settings pickers); value null
       // is "repository default".
@@ -89,6 +96,7 @@ export function commandLine(action, change, extra = {}) {
     case "mr":
     case "proposal":
     case "worktree":
+    case "watch":
       return null;
     default:
       throw new Error(`unknown action ${JSON.stringify(action)}`);
@@ -101,8 +109,9 @@ export function commandLine(action, change, extra = {}) {
 // command returns, the detached engine too; so there these run in a
 // short-lived herdr-core terminal instead (detachCall). The app's own exec on
 // this computer leaves a detached child alone, so local cards keep exec. The
-// board shows their output or error either way.
-export const DETACHED = new Set(["start", "group", "resume", "rerun"]);
+// board shows their output or error either way. Answer and resume
+// (tuckerbox answer --resume) restarts the engine too, so it goes the same way.
+export const DETACHED = new Set(["start", "group", "resume", "rerun", "answer_resume"]);
 
 // Where an action runs and how it shows (design: Actions):
 //   exec: run and show its output or error (`detach`: a remote card's run,
@@ -117,11 +126,109 @@ export function invocation(action, card, extra = {}) {
   const out = { action, place, argv, change: card?.change ?? "", on: card?.on ?? null, cwd: card?.path || "" };
   if (DETACHED.has(action) && out.on) out.detach = true;
   if(action==="mr"){const link=card?.mr?.link??"";if(!/^https:\/\/[^/?#\s]+(?:[/?#]|$)/.test(link) || link.split("/")[2].includes("@"))throw new Error("merge request needs an HTTPS link");out.url=link;}
+  if (action === "answer" || action === "answer_resume") {
+    out.stdin = answerText(extra.text);
+    out.os = card?.os ?? "";
+  }
   if (action === "follow") out.title = `${card?.change} ${extra.step} log`;
   if (action === "edit") out.title = `edit ${card?.change} ${extra.file}`;
   if (action === "proposal") out.file = card?.edit_folder ? `${card.edit_folder}/openspec/changes/${card.change}/proposal.md` : "";
   if (action === "worktree") out.folder = card?.worktree ?? "";
+  if (action === "watch") {
+    const addr = card?.activity?.terminal?.address ?? "";
+    if (!/^[A-Za-z0-9._-]+$/.test(addr)) throw new Error("Watch needs the agent's terminal address");
+    out.terminal = addr;
+  }
   return out;
+}
+
+// The most an answer may be: tuckerbox answer refuses more (16 KiB).
+export const MAX_ANSWER = 16 * 1024;
+
+// An answer's text, trimmed as tuckerbox answer trims it. Throws on an
+// empty one, or one over MAX_ANSWER bytes of UTF-8.
+export function answerText(text) {
+  const t = String(text ?? "").trim();
+  if (!t) throw new Error("Type an answer first.");
+  const bytes = typeof TextEncoder === "function" ? new TextEncoder().encode(t).length : t.length;
+  if (bytes > MAX_ANSWER) throw new Error(`The answer is ${bytes} bytes; tuckerbox takes up to ${MAX_ANSWER} (16 KiB).`);
+  return t;
+}
+
+// The answer actions a card's detail offers under its question: Answer on
+// blocked and waiting cards, and Answer and resume on blocked ones.
+export function answerActions(card) {
+  if (!answerable(card)) return [];
+  return card.state === "blocked" ? ["answer_resume", "answer"] : ["answer"];
+}
+
+// Herdr's exec gives a program no standard input, so a command that reads
+// its input from "-" runs under a shell of the card's machine, which pipes
+// the text in. `os` is that machine's operating system (the board
+// document's os): Windows has no sh, so there it runs under PowerShell.
+export function stdinCall(argv, text, os = "") {
+  return os === "windows" ? powershellCall(argv, text) : shCall(argv, text);
+}
+
+// sh: the text is sh's $1, an argument it never parses: nothing in it is
+// quoted or run.
+export const STDIN_SCRIPT = 'text=$1; shift; printf \'%s\' "$text" | "$@"';
+function shCall(argv, text) {
+  return { command: "sh", args: ["-c", STDIN_SCRIPT, "sh", String(text), ...argv] };
+}
+
+// PowerShell (powershell.exe, on every Windows): the text goes in the
+// script as base64 of its UTF-8, which has no quote, space or $ for
+// PowerShell or Windows' command line to read, and the script pipes it,
+// as UTF-8, into the command. The script has no double quote, which
+// Windows' command line would take apart. 16 KiB of text is about 22,000
+// characters of base64, inside Windows' 32,767-character command line.
+// Windows PowerShell's .NET opens the command's standard input with
+// [Console]::InputEncoding, which on a UTF-8 console (code page 65001)
+// writes a byte order mark first; so that is set to UTF-8 without one too
+// (where there is no console to set, there is no mark to stop).
+export function powershellCall(argv, text) {
+  const b64 = base64(utf8(String(text)));
+  const lit = (a) => `'${String(a).replace(/'/g, "''")}'`;
+  const script = [
+    "$OutputEncoding = New-Object System.Text.UTF8Encoding $false",
+    "try { [Console]::InputEncoding = $OutputEncoding } catch { }",
+    `$t = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64}'))`,
+    `$t | & ${argv.map(lit).join(" ")}`,
+    "exit $LASTEXITCODE",
+  ].join("; ");
+  return { command: "powershell", args: ["-NoProfile", "-NonInteractive", "-Command", script] };
+}
+
+function utf8(s) {
+  if (typeof TextEncoder === "function") return new TextEncoder().encode(s);
+  const out = [];
+  for (const ch of s) {
+    let c = ch.codePointAt(0);
+    if (c < 0x80) out.push(c);
+    else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+    else if (c < 0x10000) out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    else out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+  }
+  return out;
+}
+
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+function base64(bytes) {
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const n = (bytes[i] << 16) | ((bytes[i + 1] ?? 0) << 8) | (bytes[i + 2] ?? 0);
+    out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63];
+    out += i + 1 < bytes.length ? B64[(n >> 6) & 63] : "=";
+    out += i + 2 < bytes.length ? B64[n & 63] : "=";
+  }
+  return out;
+}
+
+// agent-terminals: Watch from the board. A running card whose agent works in
+// a herdr-core terminal offers Watch; one running headless keeps Follow log.
+export function watchable(card) {
+  return card?.state === "running" && card?.activity?.backend === "terminal" && Boolean(card.activity.terminal?.address);
 }
 
 // The actions a card offers in its detail, in button order. `board` gives
@@ -139,7 +246,8 @@ export function detailActions(card, board) {
   if (card.state === "stopped" || card.state === "blocked" || (card.state==="ready" && board?.ship==="mr" && card.mr?.state==="open")) out.push("resume");
   if (["stopped", "blocked", "failed", "ready"].includes(card.state) && rerunSteps(card, board).length) out.push("rerun");
   if (active) out.push("stop");
-  if (card.step && ["running", "blocked", "stopped", "failed"].includes(card.state)) out.push("follow");
+  if (watchable(card)) out.push("watch");
+  else if (card.step && ["running", "blocked", "stopped", "failed"].includes(card.state)) out.push("follow");
   if (!active && card.approval.state !== "approved") out.push("approve");
   if (!active && card.approval.state === "approved") out.push("unapprove");
   if (card.edit_folder) out.push("proposal");
@@ -164,7 +272,7 @@ export function runGroups(card, board, detail) {
 // The one or two buttons on the card itself: what moves it on.
 export function cardActions(card, board) {
   const all = detailActions(card, board);
-  const pick = ["start", "approve", "resume", "stop"].filter((a) => all.includes(a));
+  const pick = ["start", "approve", "resume", "watch", "stop"].filter((a) => all.includes(a));
   if (!pick.length && all.includes("rerun") && card.state === "failed") pick.push("rerun");
   // Start not offered before approval: Approve is the way on (and only it).
   return pick.slice(0, 2);
@@ -218,6 +326,10 @@ export function herdrCall(inv, ctx = {}) {
     case "pane":
       return here ? { command: "terminal.open", args: { argv: inv.argv, folder: inv.cwd, place: "right", name } } : elsewhere();
     case "view":
+      // Watch: Herdr focuses the agent's terminal and opens its tab (from its
+      // herdr.space and herdr.tab labels) if it isn't showing. A terminal on
+      // another machine is addressed as <machine>/<address>.
+      if (inv.action === "watch") return { command: "agent.focus", args: { terminal: inv.on ? `${inv.on}/${inv.terminal}` : inv.terminal } };
       if (inv.action === "proposal") {
         return { command: "pane.split", args: { direction: "right", mod: ctx.mod, props: { view: "proposal", change: inv.change, card: inv.card, board: inv.board } } };
       }
@@ -261,11 +373,14 @@ export function outcome(r) {
 export const DETACH_WAIT_S = 110;
 export function detachCall(inv) {
   if (!inv?.detach || !Array.isArray(inv.argv) || !inv.argv.length) throw new Error(`${inv?.action} does not run detached`);
+  // An answer's text goes on standard input, through the machine's shell
+  // (stdinCall), as it does under exec.
+  const call = inv.stdin != null ? stdinCall(inv.argv, inv.stdin, inv.os) : null;
   return [
     "run", "--json", "--no-parent", "--no-notify", "--outlive-parent", "--timeout", String(DETACH_WAIT_S),
     ...(inv.on ? ["--on", inv.on] : []),
     ...(inv.cwd ? ["--cwd", inv.cwd] : []),
-    "--", ...inv.argv,
+    "--", ...(call ? [call.command, ...call.args] : inv.argv),
   ];
 }
 

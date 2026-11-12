@@ -36,11 +36,17 @@ const (
 	// flags of the step's profile, or to nothing. Templates without it get the
 	// flags appended at the end.
 	PhPermissions = "{permissions}"
+	// PhTurnHook, only in an interactive command, is the command the agent
+	// CLI runs at the end of each turn to hand its final message to
+	// Tuckerbox (tuckerbox agent-turn). As a whole argument it expands to
+	// the hook's program and arguments (or, for the built-ins, to the
+	// flags that install it); inside an argument, to one shell command.
+	PhTurnHook = "{turnhook}"
 )
 
 var known = map[string]bool{
 	PhBrief: true, PhBriefFile: true, PhResult: true, PhLastMessage: true, PhWorkdir: true,
-	PhModel: true, PhEffort: true, PhPermissions: true,
+	PhModel: true, PhEffort: true, PhPermissions: true, PhTurnHook: true,
 }
 
 var placeholderRE = regexp.MustCompile(`\{[a-z_]+\}`)
@@ -58,7 +64,31 @@ type Template struct {
 	// Only the built-ins read standard input; the zero value, for every
 	// other agent, passes an instruction to read the brief file.
 	Long LongBrief
+	// Interactive is the command for the terminal backend, with a
+	// {turnhook}; nil runs the agent headless in every backend.
+	Interactive []string
+	// Hook says how a whole {turnhook} argument expands.
+	Hook HookStyle
 }
+
+// HookStyle is how a whole {turnhook} argument of an interactive command
+// expands.
+type HookStyle int
+
+const (
+	// HookArgv expands to the hook's program and arguments. The hook
+	// takes the message as its last argument (a Codex notify payload, or
+	// plain text) or, without one, on standard input.
+	HookArgv HookStyle = iota
+	// HookClaude expands to --settings and the JSON of a Claude Code Stop
+	// hook running the hook command.
+	HookClaude
+	// HookCodex expands to -c and a notify setting with the hook's argv.
+	HookCodex
+)
+
+// HasInteractive reports whether the agent can run in a terminal.
+func (t Template) HasInteractive() bool { return len(t.Interactive) > 0 }
 
 // LongBrief is how an agent gets a brief too long to pass inline.
 type LongBrief int
@@ -80,6 +110,12 @@ func (l LongBrief) UsesStdin() bool { return l == LongBriefStdinDrop || l == Lon
 
 // Builtin returns the built-in agent definitions, keyed by name.
 //
+// Each also has an interactive command for the terminal backend: the CLI
+// in its interactive mode with the prompt as its first message, and the
+// turn hook installed from the command line, so no user or project
+// config file is changed: Claude Code's Stop hook through --settings,
+// Codex's notify through -c.
+//
 // Both take the brief's text as their prompt argument. A brief too long for
 // the command line goes on standard input: claude -p with no prompt argument
 // and codex exec - both read their prompt from it.
@@ -99,7 +135,14 @@ func Builtin() map[string]Template {
 			"--model", PhModel,
 			"--effort", PhEffort,
 			PhPermissions,
-		}, Long: LongBriefStdinDrop},
+		}, Long: LongBriefStdinDrop, Hook: HookClaude, Interactive: []string{
+			"claude",
+			"--model", PhModel,
+			"--effort", PhEffort,
+			PhPermissions,
+			PhTurnHook,
+			PhBrief,
+		}},
 		"codex": {Name: "codex", Command: []string{
 			"codex", "--no-daemon", "exec", "--json",
 			"-C", PhWorkdir,
@@ -108,7 +151,15 @@ func Builtin() map[string]Template {
 			"-o", PhLastMessage,
 			PhPermissions,
 			"--", PhBrief,
-		}, Long: LongBriefStdinDash},
+		}, Long: LongBriefStdinDash, Hook: HookCodex, Interactive: []string{
+			"codex",
+			"-C", PhWorkdir,
+			"-m", PhModel,
+			"-c", "model_reasoning_effort=" + PhEffort,
+			PhPermissions,
+			PhTurnHook,
+			"--", PhBrief,
+		}},
 	}
 }
 
@@ -178,17 +229,39 @@ func BypassFlags(args []string) []string {
 // {permissions} only as a whole argument, and no permission flags. Config
 // validation (tuckerbox check) also requires {brief} or {brief_file}.
 func (t Template) Validate() error {
+	return t.validate(t.Command, false)
+}
+
+// ValidateInteractive checks the interactive command like Validate, and
+// that it passes {turnhook}.
+func (t Template) ValidateInteractive() error {
+	if err := t.validate(t.Interactive, true); err != nil {
+		return err
+	}
+	for _, a := range t.Interactive {
+		if strings.Contains(a, PhTurnHook) {
+			return nil
+		}
+	}
+	return fmt.Errorf("agent %s: the interactive command must pass %s", t.Name, PhTurnHook)
+}
+
+func (t Template) validate(argv []string, interactive bool) error {
 	name := t.Name
 	if name == "" {
 		name = "(unnamed)"
 	}
-	if len(t.Command) == 0 || strings.TrimSpace(t.Command[0]) == "" {
-		return fmt.Errorf("agent %s: command is empty", name)
+	what := "command"
+	if interactive {
+		what = "interactive command"
 	}
-	if placeholderRE.MatchString(t.Command[0]) {
-		return fmt.Errorf("agent %s: the program %q cannot be a placeholder", name, t.Command[0])
+	if len(argv) == 0 || strings.TrimSpace(argv[0]) == "" {
+		return fmt.Errorf("agent %s: %s is empty", name, what)
 	}
-	for _, a := range t.Command {
+	if placeholderRE.MatchString(argv[0]) {
+		return fmt.Errorf("agent %s: the program %q cannot be a placeholder", name, argv[0])
+	}
+	for _, a := range argv {
 		for _, ph := range placeholderRE.FindAllString(a, -1) {
 			if !known[ph] {
 				return fmt.Errorf("agent %s: unknown placeholder %s in %q", name, ph, a)
@@ -196,9 +269,12 @@ func (t Template) Validate() error {
 			if ph == PhPermissions && a != PhPermissions {
 				return fmt.Errorf("agent %s: %s must be a whole argument, not part of %q", name, PhPermissions, a)
 			}
+			if ph == PhTurnHook && !interactive {
+				return fmt.Errorf("agent %s: %s belongs in the interactive command only", name, PhTurnHook)
+			}
 		}
 	}
-	if bad := BypassFlags(t.Command); len(bad) > 0 {
+	if bad := BypassFlags(argv); len(bad) > 0 {
 		return fmt.Errorf("agent %s: permission flags %s belong in a machine permission profile, not in the agent command",
 			name, strings.Join(bad, " "))
 	}
@@ -216,6 +292,9 @@ type Values struct {
 	// Permissions are the flags of the step's machine permission profile,
 	// already resolved. Nil runs the agent with its own defaults.
 	Permissions []string
+	// TurnHook is the turn hook's argv, for {turnhook} in an interactive
+	// command.
+	TurnHook []string
 }
 
 // Expand returns the command line for v. It validates the template first.
@@ -223,16 +302,47 @@ func (t Template) Expand(v Values) ([]string, error) {
 	if err := t.Validate(); err != nil {
 		return nil, err
 	}
+	return t.expand(t.Command, v)
+}
+
+// ExpandInteractive returns the interactive command line for v, with
+// v.TurnHook in place of {turnhook}. v.Brief is the first prompt.
+func (t Template) ExpandInteractive(v Values) ([]string, error) {
+	if err := t.ValidateInteractive(); err != nil {
+		return nil, err
+	}
+	if len(v.TurnHook) == 0 {
+		return nil, fmt.Errorf("agent %s: no turn hook to pass", t.Name)
+	}
+	return t.expand(t.Interactive, v)
+}
+
+// hookArgs is what a whole {turnhook} argument expands to.
+func (t Template) hookArgs(hook []string) []string {
+	switch t.Hook {
+	case HookClaude:
+		return []string{"--settings", ClaudeHookSettings(hook)}
+	case HookCodex:
+		return []string{"-c", CodexNotify(hook)}
+	}
+	return hook
+}
+
+func (t Template) expand(argv []string, v Values) ([]string, error) {
 	sub := map[string]string{
 		PhBrief: v.Brief, PhBriefFile: v.BriefFile, PhResult: v.Result, PhLastMessage: v.LastMessage,
-		PhWorkdir: v.Workdir, PhModel: v.Model, PhEffort: v.Effort,
+		PhWorkdir: v.Workdir, PhModel: v.Model, PhEffort: v.Effort, PhTurnHook: ShellJoin(v.TurnHook),
 	}
-	out := make([]string, 0, len(t.Command)+len(v.Permissions))
+	out := make([]string, 0, len(argv)+len(v.Permissions))
 	placed := false
-	for i, a := range t.Command {
+	for i, a := range argv {
 		if a == PhPermissions {
 			out = append(out, v.Permissions...)
 			placed = true
+			continue
+		}
+		if a == PhTurnHook {
+			out = append(out, t.hookArgs(v.TurnHook)...)
 			continue
 		}
 		if a == PhBrief && v.BriefOnStdin && t.Long.UsesStdin() {
@@ -259,7 +369,7 @@ func (t Template) Expand(v Values) ([]string, error) {
 		s := placeholderRE.ReplaceAllStringFunc(a, func(ph string) string { return sub[ph] })
 		if empty {
 			// Drop the argument and the flag that introduces it.
-			if n := len(out); n > 1 && isBareFlag(t.Command[i-1]) && out[n-1] == t.Command[i-1] {
+			if n := len(out); n > 1 && isBareFlag(argv[i-1]) && out[n-1] == argv[i-1] {
 				out = out[:n-1]
 			}
 			continue

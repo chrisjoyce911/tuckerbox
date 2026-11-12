@@ -79,6 +79,13 @@ func resolve(root, remote string, m, r *file) (*Config, Problems) {
 	if mr.Editor != nil {
 		cfg.Editor = *mr.Editor
 	}
+	cfg.AgentBackend = BackendAuto
+	if mr.AgentBackend != nil {
+		cfg.AgentBackend = *mr.AgentBackend
+		if err := CheckBackend(cfg.AgentBackend); err != nil {
+			add(m.path, "agent_backend", "%v", err)
+		}
+	}
 	cfg.RequireApproval = rr.RequireApproval == nil || *rr.RequireApproval
 
 	cfg.BoardColumns = BoardCompact
@@ -325,7 +332,11 @@ func checkAgent(path, name string, raw rawAgent, fromRepo bool, add addFunc) Age
 	if !nameRE.MatchString(name) {
 		add(path, key, "invalid agent name %q", name)
 	}
-	a := Agent{Name: name, Command: slices.Clone(raw.Command), Model: raw.Model, Effort: raw.Effort, FromRepo: fromRepo}
+	a := Agent{Name: name, Command: slices.Clone(raw.Command), Interactive: slices.Clone(raw.Interactive),
+		Model: raw.Model, Effort: raw.Effort, FromRepo: fromRepo}
+	if raw.Interactive != nil {
+		checkInteractive(path, key+".interactive", raw.Interactive, fromRepo, add)
+	}
 	if len(raw.Command) == 0 || raw.Command[0] == "" {
 		add(path, key+".command", "missing; give the program and its arguments, such as command = [%q, \"{brief}\"]", name)
 		return a
@@ -349,6 +360,37 @@ func checkAgent(path, name string, raw rawAgent, fromRepo bool, add addFunc) Age
 		add(path, key+".command", "must pass {brief} (the brief's text) or {brief_file} (the brief file's path)")
 	}
 	return a
+}
+
+// checkInteractive checks an agent's interactive command: a program, known
+// placeholders, {turnhook} and {brief} or {brief_file}, and no permission
+// flags from repository config.
+func checkInteractive(path, key string, argv []string, fromRepo bool, add addFunc) {
+	if len(argv) == 0 || argv[0] == "" {
+		add(path, key, "empty; give the program and its arguments, or leave interactive out to run the agent headless")
+		return
+	}
+	var seen []string
+	for _, arg := range argv {
+		for _, n := range placeholders(arg) {
+			if !slices.Contains(InteractivePlaceholders, n) {
+				add(path, key, "unknown placeholder {%s}; use {%s}", n, strings.Join(InteractivePlaceholders, "}, {"))
+			}
+			seen = append(seen, n)
+		}
+		if fromRepo {
+			flag, _, _ := strings.Cut(arg, "=")
+			if slices.Contains(bypassFlags, flag) {
+				add(path, key, "%s is a permission flag; repository config may not grant permissions, use a permission profile in machine config", flag)
+			}
+		}
+	}
+	if !slices.Contains(seen, "turnhook") {
+		add(path, key, "must pass {turnhook}, the command the agent runs at the end of each turn with its final message")
+	}
+	if !slices.Contains(seen, "brief") && !slices.Contains(seen, "brief_file") {
+		add(path, key, "must pass {brief} (the first prompt) or {brief_file} (the brief file's path)")
+	}
 }
 
 func placeholders(s string) []string {

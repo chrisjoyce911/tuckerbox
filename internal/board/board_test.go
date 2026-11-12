@@ -356,7 +356,12 @@ func assertShape(t *testing.T, d *Document, fixture string) {
 	for _, k := range []string{"mr", "mr.link", "mr.number", "mr.state", "ci", "ci.state", "ci.commit", "ship_round", "max_rounds"} {
 		optional[".cards[]."+k] = true
 	}
-	for _, k := range []string{"result", "to", "summary", "findings", "reason", "scope", "old_scope", "commit", "branch", "link", "number", "method", "ship_round", "ci", "jobs", "threads"} {
+	// activity is only on running, queued and stopped cards; its task and
+	// last tick may be null, and only a terminal agent has a terminal.
+	for _, k := range []string{"", ".task", ".task.number", ".task.text", ".last_tick", ".last_tick.number", ".last_tick.at", ".last_tick.ticked", ".last_tick.step", ".last_tick.round", ".terminal", ".terminal.address", ".terminal.name", ".terminal.machine"} {
+		optional[".cards[].activity"+k] = true
+	}
+	for _, k := range []string{"result", "to", "summary", "findings", "reason", "scope", "old_scope", "commit", "branch", "link", "number", "method", "ship_round", "ci", "jobs", "threads", "task"} {
 		optional[".detail.history[]."+k] = true
 	}
 	// A card may have no machines and a step no recorded settings; the
@@ -370,11 +375,20 @@ func assertShape(t *testing.T, d *Document, fixture string) {
 		if optional[k] || strings.HasPrefix(k, ".detail.history[].findings[]") || strings.HasPrefix(k, ".detail.choices.models.") {
 			continue
 		}
+		// A board with no running, queued or stopped card has no activity,
+		// and a run without ticks none in its detail.
+		if strings.HasPrefix(k, ".cards[].activity.") && got[".cards[].activity"] == "" ||
+			strings.HasPrefix(k, ".detail.ticks[]") && got[".detail.ticks[]"] == "" {
+			continue
+		}
 		if got[k] != v {
 			t.Errorf("fixture %s shape %s: got %q, want %q", fixture, k, got[k], v)
 		}
 	}
 	for k, v := range got {
+		if strings.HasPrefix(k, ".cards[].activity.") && want[".cards[].activity"] == "" {
+			continue
+		}
 		if !optional[k] && !strings.HasPrefix(k, ".detail.choices.models.") && want[k] != v {
 			t.Errorf("unexpected shape %s: %s", k, v)
 		}

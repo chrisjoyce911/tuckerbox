@@ -1,0 +1,851 @@
+package agent
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/chrisjoyce911/tuckerbox/internal/config"
+	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
+)
+
+// Agent states a terminal step reports through Options.OnAgentState.
+const (
+	// AgentWorking: the agent is at work on its turn.
+	AgentWorking = "working"
+	// AgentWaiting: a turn ended without a valid result; the agent waits
+	// for the person to type to it.
+	AgentWaiting = "waiting for you"
+)
+
+// Terminal labels Tuckerbox sets on an agent's terminal.
+const (
+	LabelSpace  = "herdr.space"
+	LabelTab    = "herdr.tab"
+	LabelChange = "tuckerbox.change"
+	LabelStep   = "tuckerbox.step"
+	LabelRound  = "tuckerbox.round"
+	LabelRun    = "tuckerbox.run"
+)
+
+// TermInfo is what the terminal backend needs beyond a headless step.
+type TermInfo struct {
+	// Name is the change's terminal name (TerminalName): every step and
+	// round of a change uses it, so herdr-core's refusal of a second live
+	// terminal of that name keeps one live agent per change.
+	Name string
+	// Space is the herdr.space label: the repository's name.
+	Space string
+	// RunID identifies the run, for the tuckerbox.run label.
+	RunID string
+	// Common is the repository's common Tuckerbox directory, where the
+	// slot locks are; Slot is the run's parallel slot, whose agent lock
+	// tuckerbox agent-hold takes in the terminal.
+	Common string
+	Slot   int
+	// Owner is the run process's claim on its slot (runs.SlotOwner):
+	// agent-hold starts the agent only while the slot's owner file still
+	// names it, so an agent-hold that starts after its run process died
+	// and the slot went to another change does not launch.
+	Owner string
+}
+
+// EndError means an agent's terminal was asked to end and did not, or
+// could not be asked: the agent may still be live. The step's outcome is
+// not final, and the run must keep what it needs to find the terminal
+// again (its name and slot) rather than record stopped or move on.
+type EndError struct {
+	Name string
+	Err  error
+}
+
+func (e *EndError) Error() string {
+	return fmt.Sprintf("the agent's terminal %s did not end: %v", e.Name, e.Err)
+}
+
+func (e *EndError) Unwrap() error { return e.Err }
+
+// TerminalName is the herdr-core name of a change's agent terminal: "tb-"
+// and the first 12 hex digits of a SHA-256 of the repository's identity
+// (its normalised remote, or its path without one) and the change id.
+// herdr-core names are at most 32 characters of a-z, 0-9, - and _.
+func TerminalName(repoID, change string) string {
+	sum := sha256.Sum256([]byte(repoID + "\x00" + change))
+	return "tb-" + hex.EncodeToString(sum[:])[:12]
+}
+
+// MatchesStep reports whether a terminal's labels name this change, step
+// and round: such a live terminal is adopted rather than replaced.
+func MatchesStep(t *HCTerminal, change, step string, round int) bool {
+	return t != nil && t.Labels[LabelChange] == change && t.Labels[LabelStep] == step &&
+		t.Labels[LabelRound] == strconv.Itoa(round)
+}
+
+// Terminal is the terminal backend: each step's agent runs in its
+// interactive mode in a herdr-core terminal, which a person can watch and
+// type into, and which outlives Tuckerbox's run process.
+type Terminal struct {
+	HC HC
+	// Exe is the tuckerbox program the terminal runs agent-hold with, and
+	// the turn hook runs agent-turn with.
+	Exe string
+}
+
+// Name returns "terminal".
+func (Terminal) Name() string { return config.BackendTerminal }
+
+// LiveAgent returns the live terminal called name, or nil.
+func (t Terminal) LiveAgent(ctx context.Context, name string) (*HCTerminal, error) {
+	term, err := t.HC.Get(ctx, name)
+	if err != nil || !term.Live() {
+		return nil, err
+	}
+	return term, nil
+}
+
+// FindAgent returns the terminal called name, live or ended, or nil when
+// herdr-core has none.
+func (t Terminal) FindAgent(ctx context.Context, name string) (*HCTerminal, error) {
+	return t.HC.Get(ctx, name)
+}
+
+// EndAgent ends the terminal called name and waits until it is gone.
+func (t Terminal) EndAgent(ctx context.Context, name string) error {
+	return t.HC.End(ctx, name, endTimeout)
+}
+
+// Adopter is a backend whose agents outlive the run process: their
+// terminals can be found by name, adopted and ended.
+type Adopter interface {
+	Backend
+	LiveAgent(ctx context.Context, name string) (*HCTerminal, error)
+	// FindAgent returns the terminal called name even when its agent has
+	// ended, or nil when there is none.
+	FindAgent(ctx context.Context, name string) (*HCTerminal, error)
+	EndAgent(ctx context.Context, name string) error
+	// SaveHistory appends the history of the terminal called name to the
+	// step log at logPath, once it has ended and before the run lets the
+	// terminal go, so logs keeps the agent's session.
+	SaveHistory(logPath, step string, round int, name string) error
+}
+
+// endTimeout bounds the wait for an ended terminal to go.
+const endTimeout = 30 * time.Second
+
+// terminalPrompt is the interactive agent's first message.
+func terminalPrompt(briefFile string) string {
+	return "Read the Tuckerbox brief at " + briefFile + " and follow it. " +
+		"It ends with the result JSON your final message must contain. " +
+		"If you need a decision from the person watching, ask it and end your turn; they answer here."
+}
+
+// terminalPermissions is a terminal agent's permission flags: the step's
+// profile, and for Claude Code read access to the brief's directory
+// (--add-dir), which is in the repository's git directory, outside the
+// worktree: its first prompt says to read the brief there, and without it
+// Claude Code stops at a permission prompt. A profile that already adds
+// that directory is left as it is. Codex needs nothing: it may read any
+// file in every sandbox mode.
+func terminalPermissions(tmpl Template, perms []string, briefDir string) []string {
+	if tmpl.Hook != HookClaude {
+		return perms
+	}
+	for i, p := range perms {
+		dir, ok := strings.CutPrefix(p, "--add-dir=")
+		if !ok && p == "--add-dir" && i+1 < len(perms) {
+			dir, ok = perms[i+1], true
+		}
+		if ok && filepath.Clean(dir) == filepath.Clean(briefDir) {
+			return perms
+		}
+	}
+	// One argument: --add-dir takes several directories, so a separate
+	// value would also take a prompt that follows it.
+	return append(slices.Clone(perms), "--add-dir="+briefDir)
+}
+
+// HoldArgv is the command a terminal runs: tuckerbox agent-hold, which
+// takes the slot's agent lock and runs the agent with env as its child.
+func HoldArgv(exe string, ti TermInfo, env []string, inner []string) []string {
+	argv := []string{exe, "agent-hold", "--slot", strconv.Itoa(ti.Slot)}
+	if ti.Common != "" {
+		argv = append(argv, "--common", ti.Common)
+	}
+	if ti.Owner != "" {
+		argv = append(argv, "--owner", ti.Owner)
+	}
+	for _, e := range env {
+		argv = append(argv, "--env", e)
+	}
+	return append(append(argv, "--"), inner...)
+}
+
+// stepEnv is the TUCKERBOX_* environment of a step's agent.
+func stepEnv(s Step, briefPath, resultPath string) []string {
+	env := []string{
+		"TUCKERBOX_CHANGE=" + s.Change,
+		"TUCKERBOX_STEP=" + s.Step,
+		"TUCKERBOX_ROUND=" + strconv.Itoa(s.Round),
+		"TUCKERBOX_BRIEF=" + briefPath,
+		"TUCKERBOX_RESULT=" + resultPath,
+	}
+	return append(env, s.Env...)
+}
+
+// Run runs the step's agent in a terminal and waits for its result. The
+// caller holds the change lock (formal/terminals.tla, Launch).
+//
+// A live terminal with the change's name is adopted when its labels name
+// this step and round (the run process that started it died); otherwise
+// it is ended, and waited for, before the new one starts. The new
+// terminal runs tuckerbox agent-hold, which holds the run's slot's agent
+// lock for as long as the agent lives (formal/liveslots.tla).
+//
+// At the end of each turn the CLI's hook writes its final message to the
+// step's last-message file. A valid result there, or in the result file,
+// is accepted; the agent's program is ended after ResultGrace and the
+// terminal's history appended to the step's log. A turn without one
+// leaves the step running with the agent waiting for the person
+// (AgentWaiting). Cancelling ctx (stop) ends the terminal. A terminal
+// that would not end, on stop or after a result, gives an *EndError: the
+// agent may live on, so the step is not over. A terminal
+// that ends without a valid result gives an Outcome without one.
+func (t Terminal) Run(ctx context.Context, s Step, opts Options) (Outcome, error) {
+	opts = withDefaults(opts)
+	var o Outcome
+	if err := statedir.CheckID("step", s.Step); err != nil {
+		return o, err
+	}
+	if s.Round < 1 {
+		return o, fmt.Errorf("step %s: round must be 1 or more, got %d", s.Step, s.Round)
+	}
+	if s.State == "" || s.Worktree == "" || s.Term.Name == "" {
+		return o, errors.New("step needs a worktree, a state directory and a terminal name")
+	}
+	if !s.Agent.HasInteractive() {
+		return o, fmt.Errorf("step %s: agent %s has no interactive command", s.Step, s.Agent.Name)
+	}
+	if t.Exe == "" {
+		return o, errors.New("the terminal backend needs the tuckerbox program")
+	}
+	if err := s.State.Ensure(); err != nil {
+		return o, err
+	}
+	o.BriefPath = s.State.Brief(s.Step, s.Round)
+	o.ResultPath = s.State.Result(s.Step, s.Round)
+	o.LogPath = s.State.Log(s.Step)
+	o.MessagePath = s.State.LastMessage(s.Step, s.Round)
+	want := Expect{Change: s.Change, Step: s.Step, Round: s.Round}
+	name := s.Term.Name
+
+	logf, err := openLog(o.LogPath)
+	if err != nil {
+		// Without a log the step can't run, but a live agent in its
+		// terminal (one the run would adopt, or one left from earlier) is
+		// not over: give an *EndError so the run keeps the terminal for
+		// resume and stop.
+		o.ExitCode = -1
+		cur, lerr := t.lookup(ctx, s, opts, io.Discard)
+		switch {
+		case lerr != nil:
+			return o, fmt.Errorf("step %s: log: %v; %w", s.Step, err, lerr)
+		case cur.Live():
+			return o, fmt.Errorf("step %s: %w", s.Step, &EndError{Name: name, Err: fmt.Errorf("its terminal is live, and the step log can't be opened: %w", err)})
+		}
+		return o, fmt.Errorf("step %s: log: %w", s.Step, err)
+	}
+	defer logf.Close()
+	log := io.Writer(logf)
+
+	cur, err := t.lookup(ctx, s, opts, log)
+	if err != nil {
+		o.ExitCode = -1
+		return o, fmt.Errorf("step %s: %w", s.Step, err)
+	}
+	if ctx.Err() != nil {
+		// Stopped before the step began: end whatever agent the terminal
+		// holds (one this run would adopt, or one left from earlier), and
+		// know it is gone, before the step reports stopped.
+		if cur.Live() {
+			bg, cancel := context.WithTimeout(context.Background(), opts.EndTimeout+10*time.Second)
+			err := t.HC.End(bg, name, opts.EndTimeout)
+			cancel()
+			if err != nil {
+				return o, fmt.Errorf("step %s: %w", s.Step, &EndError{Name: name, Err: err})
+			}
+			// Its session goes to the step log before the run lets the
+			// terminal go: the next start replaces it.
+			logLine(log, "step %s round %d: stopped before the step began; ended terminal %s (step %s round %s)",
+				s.Step, s.Round, name, cur.Labels[LabelStep], cur.Labels[LabelRound])
+			t.appendHistory(log, labelledStep(s, cur), name)
+		}
+		o.Stopped, o.ExitCode = true, -1
+		return o, nil
+	}
+	adopt := cur.Live() && MatchesStep(cur, s.Change, s.Step, s.Round)
+	if cur.Live() && !adopt {
+		logLine(log, "step %s round %d: ending terminal %s left from step %s round %s",
+			s.Step, s.Round, name, cur.Labels[LabelStep], cur.Labels[LabelRound])
+		if err := t.HC.End(ctx, name, opts.EndTimeout); err != nil {
+			return o, fmt.Errorf("step %s: %w", s.Step, &EndError{Name: name, Err: err})
+		}
+		t.appendHistory(log, labelledStep(s, cur), name)
+	}
+
+	var addr string
+	if adopt {
+		addr = cur.Address
+		logLine(log, "step %s round %d: adopted live terminal %s (%s)", s.Step, s.Round, name, addr)
+	} else {
+		if err := t.prepare(s, &o); err != nil {
+			return o, err
+		}
+		hook := TurnHookArgv(t.Exe, s.State, s.Step, s.Round, s.Agent.Hook)
+		inner, err := s.Agent.ExpandInteractive(Values{
+			Brief: terminalPrompt(o.BriefPath), BriefFile: o.BriefPath, Result: o.ResultPath,
+			LastMessage: o.MessagePath, Workdir: s.Worktree, Model: s.Model, Effort: s.Effort,
+			Permissions: terminalPermissions(s.Agent, s.Permissions, filepath.Dir(o.BriefPath)), TurnHook: hook,
+		})
+		if err != nil {
+			return o, err
+		}
+		argv := HoldArgv(t.Exe, s.Term, stepEnv(s, o.BriefPath, o.ResultPath), inner)
+		o.Argv = argv
+		start := HCStart{Name: name, Cwd: s.Worktree, Argv: argv, Labels: [][2]string{
+			{LabelSpace, s.Term.Space},
+			{LabelTab, s.Change + " · " + s.Step},
+			{LabelChange, s.Change},
+			{LabelStep, s.Step},
+			{LabelRound, strconv.Itoa(s.Round)},
+			{LabelRun, s.Term.RunID},
+		}}
+		// Launch intent: the run's state names the terminal before it can
+		// start, so a run process that dies while hc starts it leaves a
+		// terminal that resume can adopt and stop can end.
+		if opts.OnTerminal != nil {
+			opts.OnTerminal(name, "")
+		}
+		logLine(log, "step %s round %d started in terminal %s: %s", s.Step, s.Round, name, strings.Join(quoteArgs(argv), " "))
+		term, err := t.HC.Start(ctx, start)
+		if err != nil {
+			got, rerr := t.reconcileStart(ctx, s, opts, log, err)
+			switch {
+			case rerr != nil:
+				o.ExitCode = -1
+				return o, fmt.Errorf("step %s: %w", s.Step, rerr)
+			case got == nil && ctx.Err() != nil:
+				o.Stopped, o.ExitCode = true, -1
+				logLine(log, "step %s round %d: stopped while its terminal was starting; no agent is left", s.Step, s.Round)
+				return o, nil
+			case got == nil:
+				o.ExitCode = -1
+				return o, fmt.Errorf("step %s: starting agent %s in terminal %s: %w", s.Step, s.Agent.Name, name, err)
+			}
+			term = *got
+		}
+		addr = term.Address
+	}
+	if opts.OnTerminal != nil {
+		opts.OnTerminal(name, addr)
+	}
+	agentState := ""
+	setState := func(st string) {
+		if st != agentState {
+			agentState = st
+			if opts.OnAgentState != nil {
+				opts.OnAgentState(st)
+			}
+		}
+	}
+	setState(AgentWorking)
+
+	w := watcher{path: o.ResultPath, want: want, log: log}
+	mw := turnWatcher{path: o.MessagePath, want: want, log: log}
+	accept := func() bool {
+		if o.Result != nil {
+			return false
+		}
+		if r := w.check(); r != nil {
+			o.Result, o.Source = r, "result file"
+			return true
+		}
+		r, ended := mw.check()
+		switch {
+		case r != nil:
+			o.Result, o.Source = r, messageLabel
+			logLine(log, "accepted result from the final message: %s, %s", r.Status, oneLine(r.Summary))
+			if err := writeResult(o.ResultPath, *r); err != nil {
+				logLine(log, "writing result file %s: %v", o.ResultPath, err)
+			}
+			return true
+		case ended:
+			setState(AgentWaiting)
+		}
+		return false
+	}
+
+	// end ends the terminal and waits until it is gone. A terminal that
+	// would not end makes Run return an *EndError: the agent may be live.
+	var endErr error
+	end := func() {
+		ectx, cancel := context.WithTimeout(context.Background(), opts.EndTimeout+5*time.Second)
+		defer cancel()
+		if err := t.HC.End(ectx, name, opts.EndTimeout); err != nil {
+			logLine(log, "step %s round %d: ending terminal %s: %v", s.Step, s.Round, name, err)
+			endErr = &EndError{Name: name, Err: err}
+		}
+	}
+	tick := time.NewTicker(opts.Poll)
+	defer tick.Stop()
+	var graceC <-chan time.Time
+	// turnOver: the turn with or after the accepted result has ended, so
+	// the agent waits for the person and is ended after TurnGrace.
+	turnOver := false
+	graceFor, graceAfter := opts.ResultGrace, "its result"
+	lastLook := time.Time{}
+	// Claude Code asks whether to trust a folder it hasn't seen before
+	// its first turn: Tuckerbox answers for the worktree it made, while
+	// the agent starts (see acceptTrust).
+	var trustUntil time.Time
+	if s.Agent.Hook == HookClaude {
+		trustUntil = time.Now().Add(trustWindow)
+	}
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+			o.Stopped = true
+			logLine(log, "step %s round %d: stopping agent: ending terminal %s", s.Step, s.Round, name)
+			end()
+			break loop
+		case <-graceC:
+			logLine(log, "step %s round %d: agent still running %s after %s; ending terminal %s",
+				s.Step, s.Round, graceFor, graceAfter, name)
+			end()
+			break loop
+		case <-tick.C:
+			switch {
+			case accept():
+				// A result in the turn's final message means the turn is
+				// over; one in the result file may come mid-turn.
+				if o.Source == messageLabel {
+					graceFor, graceAfter, turnOver = opts.TurnGrace, "its turn ended", true
+				}
+				graceC = time.After(graceFor)
+			case o.Result != nil && !turnOver && mw.turnEndedSince(resultTime(o.ResultPath)):
+				turnOver = true
+				logLine(log, "step %s round %d: the agent's turn ended after its result", s.Step, s.Round)
+				graceFor, graceAfter = opts.TurnGrace, "its turn ended"
+				graceC = time.After(graceFor)
+			}
+			if time.Since(lastLook) < opts.TermPoll {
+				continue
+			}
+			lastLook = time.Now()
+			term, err := t.HC.Get(ctx, name)
+			switch {
+			case err != nil:
+				if ctx.Err() == nil {
+					logLine(log, "step %s round %d: looking at terminal %s: %v", s.Step, s.Round, name, err)
+				}
+			case !term.Live():
+				logLine(log, "step %s round %d: the agent's terminal %s ended", s.Step, s.Round, name)
+				break loop
+			case agentState == AgentWaiting && term.Working():
+				setState(AgentWorking)
+			case !trustUntil.IsZero() && time.Now().Before(trustUntil) && t.acceptTrust(ctx, s, log):
+				trustUntil = time.Time{}
+				setState(AgentWorking)
+			case agentState == AgentWorking && term.Waiting():
+				// A permission prompt or a question: herdr-core sees the
+				// agent waiting for the person.
+				setState(AgentWaiting)
+			}
+		}
+	}
+	// The agent may have reported just before its terminal ended.
+	if !o.Stopped || o.Result == nil {
+		accept()
+	}
+	o.Ignored = append(w.ignored, mw.ignored...)
+	o.ExitCode = -1
+	if term, err := t.HC.Get(context.Background(), name); err == nil && term != nil && term.Exit != nil {
+		o.ExitCode = *term.Exit
+	}
+	if endErr != nil {
+		logLine(log, "step %s round %d: the agent's terminal %s may still be live; the step is not finished", s.Step, s.Round, name)
+		return o, fmt.Errorf("step %s: %w", s.Step, endErr)
+	}
+	t.appendHistory(log, s, name)
+	logLine(log, "step %s round %d finished: exit %d, status %s", s.Step, s.Round, o.ExitCode, o.Status())
+	if o.Result == nil {
+		o.Tail, _ = TailLog(o.LogPath, opts.TailBytes)
+	}
+	return o, nil
+}
+
+// trustWindow is how long after a Claude Code step starts Tuckerbox looks
+// for its folder-trust prompt.
+const trustWindow = 2 * time.Minute
+
+// acceptTrust answers Claude Code's folder-trust prompt when the terminal
+// shows it for the step's worktree, which Tuckerbox made for the change: a
+// fresh worktree is a folder Claude Code hasn't seen, and the prompt would
+// hold the step until a person answered it. A prompt for any other folder
+// is left to the person. It presses one key a look (see trustKeys) and
+// reports whether it has answered: pressed enter on "Yes".
+func (t Terminal) acceptTrust(ctx context.Context, s Step, log io.Writer) bool {
+	screen, err := t.HC.Screen(ctx, s.Term.Name)
+	if err != nil {
+		return false
+	}
+	keys := trustKeys(string(screen), s.Worktree)
+	if keys == nil {
+		return false
+	}
+	if err := t.HC.Keys(ctx, s.Term.Name, keys...); err != nil {
+		logLine(log, "step %s round %d: answering Claude Code's folder-trust prompt: %v", s.Step, s.Round, err)
+		return false
+	}
+	if keys[0] != "enter" {
+		return false
+	}
+	logLine(log, "step %s round %d: trusted the worktree %s at Claude Code's folder-trust prompt", s.Step, s.Round, s.Worktree)
+	return true
+}
+
+// Claude Code's folder-trust prompt (2.1): the folder after "Accessing
+// workspace:", then the choices, "No, exit" first and selected.
+const (
+	trustHeading = "Accessing workspace:"
+	trustYes     = "Yes, I trust this folder"
+	trustNo      = "No, exit"
+	trustCursor  = "❯"
+)
+
+// trustKeys returns the next key towards "Yes, I trust this folder" when
+// screen's last trust prompt is Claude Code's for worktree: down while "No,
+// exit" is selected, enter once "Yes" is, or nil. One key a look: keys sent
+// together as the prompt first draws can be read before the selection
+// moves, and enter on "No, exit" ends Claude Code. The folder is compared
+// without white space, which the screen may wrap.
+func trustKeys(screen, worktree string) []string {
+	i := strings.LastIndex(screen, trustHeading)
+	if i < 0 || worktree == "" {
+		return nil
+	}
+	prompt := screen[i+len(trustHeading):]
+	if !strings.Contains(prompt, trustYes) {
+		return nil
+	}
+	head, _, _ := strings.Cut(prompt, trustNo)
+	if y := strings.Index(head, trustYes); y >= 0 {
+		head = head[:y]
+	}
+	// The folder is what comes before the question; it must be the
+	// worktree (as given or with links resolved), not a folder within it.
+	var parts []string
+	for _, line := range strings.Split(head, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			if len(parts) > 0 {
+				break
+			}
+			continue
+		}
+		parts = append(parts, line)
+	}
+	folder := strings.Join(strings.Fields(strings.Join(parts, "")), "")
+	match := false
+	for _, w := range worktreeNames(worktree) {
+		if folder == strings.Join(strings.Fields(w), "") {
+			match = true
+		}
+	}
+	if !match {
+		return nil
+	}
+	for _, line := range strings.Split(prompt, "\n") {
+		if !strings.Contains(line, trustCursor) {
+			continue
+		}
+		switch {
+		case strings.Contains(line, trustYes):
+			return []string{"enter"}
+		case strings.Contains(line, trustNo):
+			return []string{"down"}
+		}
+	}
+	return nil
+}
+
+// worktreeNames is worktree, cleaned, and with links resolved.
+func worktreeNames(worktree string) []string {
+	names := []string{filepath.Clean(worktree)}
+	if real, err := filepath.EvalSymlinks(worktree); err == nil && real != names[0] {
+		names = append(names, real)
+	}
+	return names
+}
+
+// startSettle is how long reconcileStart keeps looking for a terminal an
+// unanswered hc run may still be starting.
+const startSettle = 1500 * time.Millisecond
+
+// reconcileStart decides what an hc run that gave startErr left behind: an
+// error does not prove that no terminal started (the run was cancelled
+// after herdr-core launched it, or its answer was lost or unreadable). It
+// looks with its own context, since ctx may be cancelled.
+//
+// It returns the terminal to watch when this start's terminal exists and
+// the run goes on (ctx is live); nil when no terminal of this start is
+// live, ending it first when ctx is cancelled; and an *EndError when it
+// cannot tell or the terminal would not end, so the run keeps the name
+// and slot that find the agent again.
+func (t Terminal) reconcileStart(ctx context.Context, s Step, opts Options, log io.Writer, startErr error) (*HCTerminal, error) {
+	name := s.Term.Name
+	logLine(log, "step %s round %d: hc run gave an error: %v; checking whether terminal %s started", s.Step, s.Round, startErr, name)
+	bg, cancel := context.WithTimeout(context.Background(), opts.EndTimeout+startSettle+10*time.Second)
+	defer cancel()
+	// herdr-core answered with an error of its own: it refused the start.
+	// Otherwise the start may still be on its way: look for a while.
+	var he *HCError
+	definite := errors.As(startErr, &he) && he.Kind != "" && ctx.Err() == nil
+	deadline := time.Now().Add(startSettle)
+	for {
+		cur, err := t.HC.Get(bg, name)
+		if err != nil {
+			logLine(log, "step %s round %d: cannot tell whether terminal %s started: %v", s.Step, s.Round, name, err)
+			return nil, &EndError{Name: name, Err: fmt.Errorf("starting it gave %v, and looking for it gave %w", startErr, err)}
+		}
+		mine := cur != nil && MatchesStep(cur, s.Change, s.Step, s.Round) && cur.Labels[LabelRun] == s.Term.RunID
+		if mine && ctx.Err() == nil {
+			logLine(log, "step %s round %d: terminal %s did start (%s); watching it", s.Step, s.Round, name, cur.Address)
+			return cur, nil
+		}
+		if cur.Live() {
+			// Stopped while starting (or some other live terminal, which
+			// under the change lock cannot be another run's): end it and
+			// make sure it is gone before the run records anything.
+			logLine(log, "step %s round %d: ending terminal %s, which started as the run stopped", s.Step, s.Round, name)
+			if err := t.HC.End(bg, name, opts.EndTimeout); err != nil {
+				return nil, &EndError{Name: name, Err: err}
+			}
+			return nil, nil
+		}
+		if mine || definite {
+			logLine(log, "step %s round %d: terminal did not start: %v", s.Step, s.Round, startErr)
+			return nil, nil
+		}
+		if time.Now().After(deadline) {
+			return t.fenceStart(bg, s, opts, log, startErr)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// fenceStart settles a start that hc run did not answer and whose terminal
+// has not appeared: herdr-core may still launch it after the step has
+// ended. It gives the slot a fresh claim (Options.Fence), so the late
+// terminal's agent-hold refuses to start the agent, and then looks once
+// more: a terminal that appeared before the fence may have passed its
+// check, so it is ended. herdr-core creates a terminal before it runs its
+// program, so one that is not there now runs agent-hold after the fence.
+// Without a fence, or when the fence or that look fails, the agent may yet
+// start: the result is an *EndError, and the run keeps the name and slot
+// that find it.
+func (t Terminal) fenceStart(bg context.Context, s Step, opts Options, log io.Writer, startErr error) (*HCTerminal, error) {
+	name := s.Term.Name
+	if opts.Fence == nil {
+		if s.Term.Owner == "" {
+			// Its agent-hold checks no claim, and the run holds no slot a
+			// late agent could take.
+			logLine(log, "step %s round %d: terminal did not start: %v", s.Step, s.Round, startErr)
+			return nil, nil
+		}
+		return nil, &EndError{Name: name, Err: fmt.Errorf("starting it gave %v, and it may still start", startErr)}
+	}
+	if err := opts.Fence(); err != nil {
+		logLine(log, "step %s round %d: giving slot %d a fresh claim: %v", s.Step, s.Round, s.Term.Slot, err)
+		return nil, &EndError{Name: name, Err: fmt.Errorf("starting it gave %v; it may still start, and fencing its slot failed: %w", startErr, err)}
+	}
+	cur, err := t.HC.Get(bg, name)
+	if err != nil {
+		return nil, &EndError{Name: name, Err: fmt.Errorf("starting it gave %v, and looking for it gave %w", startErr, err)}
+	}
+	if cur.Live() {
+		logLine(log, "step %s round %d: terminal %s started late; ending it", s.Step, s.Round, name)
+		if err := t.HC.End(bg, name, opts.EndTimeout); err != nil {
+			return nil, &EndError{Name: name, Err: err}
+		}
+		return nil, nil
+	}
+	logLine(log, "step %s round %d: terminal did not start: %v; slot %d has a fresh claim, so a late start runs no agent",
+		s.Step, s.Round, startErr, s.Term.Slot)
+	return nil, nil
+}
+
+// lookup returns the step's terminal, or nil when there is none. A lookup
+// that fails (a stop cancelling it, or herdr-core not answering) is tried
+// again with a context of its own; when that fails too, whether an agent
+// lives in the terminal is unknown, so the error is an *EndError: the run
+// keeps the terminal's name for stop and resume rather than recording an
+// end while a resumed run's adopted agent may still work.
+func (t Terminal) lookup(ctx context.Context, s Step, opts Options, log io.Writer) (*HCTerminal, error) {
+	name := s.Term.Name
+	cur, err := t.HC.Get(ctx, name)
+	if err == nil {
+		return cur, nil
+	}
+	logLine(log, "step %s round %d: looking for terminal %s: %v; trying again", s.Step, s.Round, name, err)
+	bg, cancel := context.WithTimeout(context.Background(), opts.EndTimeout+10*time.Second)
+	defer cancel()
+	cur, err2 := t.HC.Get(bg, name)
+	if err2 != nil {
+		logLine(log, "step %s round %d: cannot tell whether terminal %s is live: %v", s.Step, s.Round, name, err2)
+		return nil, &EndError{Name: name, Err: fmt.Errorf("looking for it: %w", err2)}
+	}
+	return cur, nil
+}
+
+// prepare writes a new terminal's brief and clears the round's leftover
+// result and final message, as Run does for a headless agent.
+func (t Terminal) prepare(s Step, o *Outcome) error {
+	brief := Brief{
+		Change: s.Change, Step: s.Step, Role: s.Role, Round: s.Round,
+		Root: s.Worktree, ResultPath: o.ResultPath, Base: s.Base, Earlier: s.Earlier,
+		Scope: s.Scope, ShippingFeedback: s.ShippingFeedback, Answers: s.Answers,
+	}
+	text, err := brief.Render()
+	if err == nil {
+		err = writeBrief(o.BriefPath, text)
+	}
+	if err != nil {
+		return fmt.Errorf("step %s: brief: %w", s.Step, err)
+	}
+	if _, err := os.Stat(o.ResultPath); err == nil {
+		old := o.ResultPath + ".old-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+		if err := os.Rename(o.ResultPath, old); err != nil {
+			return fmt.Errorf("step %s: moving old result aside: %w", s.Step, err)
+		}
+	}
+	if err := os.Remove(o.MessagePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("step %s: removing old final message: %w", s.Step, err)
+	}
+	return nil
+}
+
+// appendHistory appends the terminal's history to the step's log, so the
+// step's record does not depend on herdr-core keeping finished terminals.
+func (t Terminal) appendHistory(log io.Writer, s Step, name string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	out, err := t.HC.History(ctx, name)
+	if err != nil {
+		logLine(log, "step %s round %d: reading terminal %s: %v", s.Step, s.Round, name, err)
+		return
+	}
+	logLine(log, "step %s round %d: history of terminal %s:", s.Step, s.Round, name)
+	_, _ = log.Write(out)
+	if len(out) > 0 && out[len(out)-1] != '\n' {
+		_, _ = io.WriteString(log, "\n")
+	}
+}
+
+// labelledStep is s with the step and round a terminal's labels name, for
+// the heading of that terminal's history.
+func labelledStep(s Step, term *HCTerminal) Step {
+	if term == nil {
+		return s
+	}
+	if st := term.Labels[LabelStep]; st != "" {
+		s.Step = st
+	}
+	if r, err := strconv.Atoi(term.Labels[LabelRound]); err == nil {
+		s.Round = r
+	}
+	return s
+}
+
+// turnWatcher reads the last-message file the turn hook writes after each
+// turn.
+type turnWatcher struct {
+	path     string
+	want     Expect
+	log      io.Writer
+	stamp    string
+	text     string
+	ignored  []string
+	accepted *Result
+}
+
+// check reads the file when it changed since the last look. It returns
+// the result when the turn's message holds a valid one, and ended when a
+// turn ended without one.
+func (m *turnWatcher) check() (r *Result, ended bool) {
+	if m.accepted != nil {
+		return m.accepted, false
+	}
+	fi, err := os.Stat(m.path)
+	if err != nil {
+		return nil, false
+	}
+	stamp := fmt.Sprintf("%d/%d", fi.Size(), fi.ModTime().UnixNano())
+	if stamp == m.stamp {
+		return nil, false
+	}
+	msg, ok, err := ReadLastMessage(m.path)
+	if err != nil || !ok {
+		return nil, false
+	}
+	m.stamp, m.text = stamp, msg
+	res, err := MessageResult(msg, m.want)
+	if err != nil {
+		m.ignored = append(m.ignored, err.Error())
+		logLine(m.log, "turn ended without a valid result (%v); waiting for the person", err)
+		return nil, true
+	}
+	m.accepted = &res
+	return &res, false
+}
+
+// turnEndedSince reports whether a turn ended at or after t: the turn
+// hook wrote the last-message file then. Run asks once it has a result
+// from the result file, with that file's time, so the message of an
+// earlier turn (a question before a crash) doesn't count.
+func (m *turnWatcher) turnEndedSince(t time.Time) bool {
+	fi, err := os.Stat(m.path)
+	return err == nil && !fi.ModTime().Before(t)
+}
+
+// resultTime is when the result file was written; the far future when it
+// can't be read.
+func resultTime(p string) time.Time {
+	fi, err := os.Stat(p)
+	if err != nil {
+		return time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
+	}
+	return fi.ModTime()
+}
+
+// SaveHistory appends the history of the terminal called name to the step
+// log at logPath, as Run does when a step ends: for an agent that ended
+// while no run process watched it (tuckerbox stop after a crash).
+func (t Terminal) SaveHistory(logPath, step string, round int, name string) error {
+	f, err := openLog(logPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	t.appendHistory(f, Step{Step: step, Round: round}, name)
+	return nil
+}

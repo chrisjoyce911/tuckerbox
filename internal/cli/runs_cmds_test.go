@@ -381,9 +381,14 @@ func TestStatusMixedRuns(t *testing.T) {
 	if res.code != 0 {
 		t.Fatal(res.stderr)
 	}
-	lines := strings.Split(strings.TrimSpace(res.stdout), "\n")
+	// The table, then the blocked run's question (blocked-answers).
+	table, questions, _ := strings.Cut(res.stdout, "\n\n")
+	lines := strings.Split(strings.TrimSpace(table), "\n")
 	if len(lines) != 3 || !strings.HasPrefix(lines[0], "REPO") {
 		t.Fatalf("table:\n%s", res.stdout)
+	}
+	if !strings.HasPrefix(questions, "b asks (step build, round 1):\n  needs a product decision\n") {
+		t.Errorf("questions:\n%s", questions)
 	}
 	if !strings.Contains(lines[1], "a ") || !strings.Contains(lines[1], "running") || !strings.Contains(lines[1], "review") {
 		t.Errorf("row a: %s", lines[1])

@@ -19,14 +19,20 @@ export function isActive(card) {
   return ACTIVE_STATES.has(card?.state);
 }
 
-export function needsYou(card) {
-  return NEEDS_YOU_STATES.has(card?.state) || Boolean(card?.needs_you);
+// agent-activity: Waiting for a person. A running card whose terminal agent
+// waits for the person (its turn ended without a result, or herdr-core sees
+// it blocked on a permission prompt or a question) needs them too.
+export const WAITING = "waiting for you";
+
+export function waitingForYou(card) {
+  return card?.state === "running" && card?.activity?.agent_state === WAITING;
 }
 
 // Why a card needs the person: the board's needs_you (add-autopilot), else
-// its state and reason.
+// a terminal agent waiting for them, else its state and reason.
 export function needsYouReason(card) {
   if (card?.needs_you) return card.needs_you;
+  if (waitingForYou(card)) return WAITING;
   return [card?.state, card?.reason].filter(Boolean).join(": ");
 }
 
@@ -46,6 +52,51 @@ export function newlyNeeding(seen, board) {
 export function toastCall(t) {
   return { title: `${t.change} needs you`, body: t.reason, level: "warning", timeout: 8000 };
 }
+
+export function needsYou(card) {
+  return NEEDS_YOU_STATES.has(card?.state) || waitingForYou(card) || Boolean(card?.needs_you);
+}
+
+// What a card's run asks the person (blocked-answers), or null: kind
+// "blocked" (its step's blocked result, with the answers given so far) or
+// "waiting" (a terminal agent waits; summary is its last message).
+function normaliseQuestion(q) {
+  if (!q || typeof q !== "object" || !["blocked", "waiting"].includes(q.kind)) return null;
+  return {
+    kind: q.kind, step: str(q.step), round: num(q.round), summary: str(q.summary),
+    findings: list(q.findings).map((f) => ({ severity: str(f?.severity), file: str(f?.file), detail: str(f?.detail) })),
+    answers: list(q.answers).map((a) => ({ text: str(a?.text), by: str(a?.by), at: str(a?.at) })),
+  };
+}
+
+// Text on one line, cut to at most max characters with an ellipsis.
+export function oneLine(text, max = 160) {
+  const t = str(text).replace(/\s+/g, " ").trim();
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+}
+
+// blocked-answers: Answering from the board. A blocked card, or one whose
+// terminal agent waits for the person, takes an answer.
+export function answerable(card) {
+  return card?.state === "blocked" || waitingForYou(card);
+}
+
+// A card's activity (agent-activity: Activity in board data), or null.
+function normaliseActivity(a) {
+  if (!a || typeof a !== "object") return null;
+  const task = a.task && str(a.task.number) ? { number: str(a.task.number), text: str(a.task.text) } : null;
+  const tick = a.last_tick && str(a.last_tick.number) ? normaliseTick(a.last_tick) : null;
+  const term = a.terminal && str(a.terminal.address) ? { address: str(a.terminal.address), name: str(a.terminal.name), machine: str(a.terminal.machine) } : null;
+  return {
+    step: str(a.step), agent: str(a.agent), model: str(a.model), effort: str(a.effort), round: num(a.round),
+    task, task_label: str(a.task_label) || (task ? `on ${task.number}` : "all tasks in scope ticked"),
+    last_tick: tick,
+    step_started: str(a.step_started), run_started: str(a.run_started), last_activity: str(a.last_activity),
+    agent_state: str(a.agent_state), backend: str(a.backend) || "headless", terminal: term,
+  };
+}
+
+const normaliseTick = (t) => ({ number: str(t?.number), at: str(t?.at), ticked: t?.ticked !== false, step: str(t?.step), round: num(t?.round) });
 
 // One card with every field the mod reads, missing ones filled in. Missing,
 // null and "" mean the same. `src` says where the card came from: the Herdr
@@ -87,12 +138,17 @@ export function normaliseCard(c, src = {}) {
     needs_you: str(c?.needs_you),
     // The run's task scope (add-task-scope), or null for the whole change.
     scope: c?.scope && str(c.scope.spec) ? { spec: str(c.scope.spec), tasks: list(c.scope.tasks).map(str) } : null,
+    activity: normaliseActivity(c?.activity),
+    question: normaliseQuestion(c?.question),
     // Each workflow step's effective settings with their sources
     // (settings-board); `started` when a running step started with them.
     settings: list(c?.settings).map(stepSettings),
     machines: list(c?.machines).map(str).filter(Boolean),
     on: src.on ?? null,
     path: src.path ?? "",
+    // The operating system of the card's machine (Go's GOOS), which says
+    // how a command with standard input runs there (stdinCall).
+    os: src.os ?? "",
   };
 }
 
@@ -102,13 +158,14 @@ export function normaliseBoard(doc, src = {}) {
   if (!doc || typeof doc !== "object") return { error: { code: "bad_output", message: "tuckerbox board printed no JSON document" } };
   if (doc.error) return { error: { code: str(doc.error.code) || "error", message: str(doc.error.message) || String(doc.error) } };
   const path = str(doc.path);
-  const s = { on: src.on ?? null, path };
+  const s = { on: src.on ?? null, path, os: str(doc.os) };
   return {
     version: num(doc.version),
     ship:str(doc.ship)||"local",
     repo: str(doc.repo) || path,
     path,
     machine: str(doc.machine),
+    os: s.os,
     require_approval: doc.require_approval !== false,
     // tuckerbox autopilot for the repository on the board's machine.
     autopilot: { running: doc.autopilot?.running === true, pid: num(doc.autopilot?.pid), started: str(doc.autopilot?.started) },
@@ -147,11 +204,13 @@ export function normaliseDetail(d) {
       at: str(h?.at), event: str(h?.event), step: str(h?.step), round: num(h?.round), agent: str(h?.agent),
       machine: str(h?.machine), result: str(h?.result), to: str(h?.to), summary: str(h?.summary),
       reason: str(h?.reason), findings: list(h?.findings).map(finding),
-      scope: str(h?.scope), old_scope: str(h?.old_scope),
+      scope: str(h?.scope), old_scope: str(h?.old_scope), task: str(h?.task),
       commit:str(h?.commit),branch:str(h?.branch),link:str(h?.link),number:num(h?.number),method:str(h?.method),ship_round:num(h?.ship_round),ci:str(h?.ci),jobs:list(h?.jobs).map(str),threads:list(h?.threads).map(str),
     })),
     // Task groups with ticked and total counts, ship tasks left out (add-task-scope).
     groups: list(d?.groups).map((g) => ({ number: num(g?.number), title: str(g?.title), ticked: num(g?.ticked), total: num(g?.total) })),
+    // The current run's ticks, newest first (agent-activity).
+    ticks: list(d?.ticks).map(normaliseTick).filter((t) => t.number),
     choices: normaliseChoices(d?.choices),
   };
 }
@@ -318,12 +377,14 @@ export const EVENT_WORDS = {
   failed: "Failed",
   ready: "Ready",
   scope_started: "Started again",
+  task_ticked: "Ticked",
+  task_unticked: "Unticked",
   archived:"Archived",pushed:"Pushed",mr_opened:"Merge request opened",ci_finished:"CI finished",review_findings:"Review findings",review_replied:"Review replied",merged:"Merged",branch_deleted:"Branch deleted",
 };
 
 // One history line in words: "Handed on build → review: summary".
 export function eventText(h) {
-  const head = EVENT_WORDS[h.event] ?? h.event;
+  const head = (EVENT_WORDS[h.event] ?? h.event) + (h.task ? ` ${h.task}` : "");
   const step = h.step ? (h.event === "handoff" && h.to ? ` ${h.step} → ${h.to}` : ` ${h.step}`) : "";
   const tail = h.event === "ci_finished" && h.ci ? ` (${h.ci})` : h.event === "step_finished" && h.result ? ` (${h.result})`
     : h.event === "rejected" && h.findings.length ? ` with ${h.findings.length} finding${h.findings.length === 1 ? "" : "s"}`
@@ -355,6 +416,21 @@ export function fmtLocal(iso, now = new Date()) {
   return d.getFullYear() === now.getFullYear() ? `${day} ${hm}` : `${day} ${d.getFullYear()} ${hm}`;
 }
 
+// A time in Brisbane time (Australia/Brisbane, UTC+10 all year: Queensland
+// has no daylight saving), whatever this computer's time zone: "09:15" on
+// Brisbane's today, else "12 Nov 09:15", with the year when it isn't
+// Brisbane's this year.
+const BRISBANE_MS = 10 * 3600 * 1000;
+export function fmtBrisbane(iso, now = new Date()) {
+  const t = Date.parse(iso);
+  if (!iso || Number.isNaN(t)) return "";
+  const d = new Date(t + BRISBANE_MS), n = new Date(now.getTime() + BRISBANE_MS);
+  const hm = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  if (d.getUTCFullYear() === n.getUTCFullYear() && d.getUTCMonth() === n.getUTCMonth() && d.getUTCDate() === n.getUTCDate()) return hm;
+  const day = `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+  return d.getUTCFullYear() === n.getUTCFullYear() ? `${day} ${hm}` : `${day} ${d.getUTCFullYear()} ${hm}`;
+}
+
 export function ago(iso, now = Date.now()) {
   const t = Date.parse(iso);
   if (!iso || Number.isNaN(t)) return "";
@@ -363,6 +439,59 @@ export function ago(iso, now = Date.now()) {
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
+}
+
+// How long since iso: "25m", "1h 5m", "2d 3h"; "" without a time.
+export function duration(iso, now = Date.now()) {
+  const t = Date.parse(iso);
+  if (!iso || Number.isNaN(t)) return "";
+  const m = Math.max(0, Math.floor((now - t) / 60000));
+  if (m < 1) return "<1m";
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return m % 60 ? `${h}h ${m % 60}m` : `${h}h`;
+  const d = Math.floor(h / 24);
+  return h % 24 ? `${d}d ${h % 24}h` : `${d}d`;
+}
+
+// What a running card shows of its agent (agent-activity: Activity on the
+// board): the step, agent and model, the task as "on <n>" with its text
+// for hover, the time since the last tick, the step's running time and
+// whether the agent waits for you. null for a card without activity.
+export function activityLine(card, now = Date.now()) {
+  const a = card?.activity;
+  if (!a) return null;
+  const tick = a.last_tick ? `${a.last_tick.number} ticked ${ago(a.last_tick.at, now)}` : "";
+  return {
+    step: a.step,
+    agent: [a.agent, a.model].filter(Boolean).join(" · "),
+    task: a.task_label,
+    task_text: a.task ? a.task.text : "",
+    tick,
+    running: card.state === "running" && a.step_started ? `running ${duration(a.step_started, now)}` : "",
+    last: a.last_activity ? `last activity ${ago(a.last_activity, now)}` : "",
+    waiting: waitingForYou(card),
+  };
+}
+
+// Every activity field for card detail, as [label, value] rows; empty
+// values are left out. Times are Brisbane time.
+export function activityRows(card, now = Date.now()) {
+  const a = card?.activity;
+  if (!a) return [];
+  const at = (iso) => (iso ? `${fmtBrisbane(iso, new Date(now))} (${ago(iso, now)})` : "");
+  const rows = [
+    ["Step", a.step ? `${a.step}${a.round ? ` · round ${a.round}` : ""}` : ""],
+    ["Agent", [a.agent, a.model, a.effort && `effort ${a.effort}`].filter(Boolean).join(" · ")],
+    ["Task", a.task ? `${a.task_label}: ${a.task.text}` : a.task_label],
+    ["Last tick", a.last_tick ? `${a.last_tick.number} ticked ${at(a.last_tick.at)}` : "no ticks yet"],
+    ["Step running", a.step_started ? `${duration(a.step_started, now)}, since ${fmtBrisbane(a.step_started, new Date(now))}` : ""],
+    ["Run running", a.run_started ? `${duration(a.run_started, now)}, since ${fmtBrisbane(a.run_started, new Date(now))}` : ""],
+    ["Last activity", at(a.last_activity)],
+    ["Agent state", a.agent_state],
+    ["Backend", a.backend + (a.terminal ? ` · terminal ${a.terminal.address}${a.terminal.machine ? ` on ${a.terminal.machine}` : ""}` : "")],
+  ];
+  return rows.filter(([, v]) => v);
 }
 
 // Tasks under their tasks.md headings, in order.

@@ -66,6 +66,21 @@
 //     task scope (tuckerbox run --tasks): scope is the new scope, old_scope
 //     the one it had ("" or absent for the whole change). It comes where
 //     started, resumed or rerun would, and is followed by queued.
+//   - task_ticked, task_unticked: while step ran, the box of task (its
+//     number, such as "2.3") in the worktree's tasks.md was ticked or
+//     unticked. The run process reads tasks.md at least every 10 seconds
+//     during a step and writes one event per task whose box changed since
+//     it last looked, so time is when the change was seen, at most that
+//     long after it was made.
+//   - answered: a person answered the run (tuckerbox answer, or the
+//     board's Answer): text is the answer and by who wrote it (git
+//     user.name). step and round are the step that asked and its round.
+//     terminal is set (the agent's terminal name) when the text was typed
+//     into a waiting terminal agent's terminal; otherwise the run was
+//     blocked, and the answer goes into the brief of the step when the run
+//     resumes. While a run process holds the change lock, tuckerbox
+//     answer leaves the event in the state directory's answers inbox and
+//     the lock's holder appends it, so the file keeps one writer.
 //
 // started, resumed and scope_started carry by = "autopilot" when tuckerbox
 // autopilot started the run; it is absent when a person did.
@@ -126,6 +141,9 @@ const (
 	Stopped      Kind = "stopped"
 	Ready        Kind = "ready"
 	ScopeStarted Kind = "scope_started"
+	TaskTicked   Kind = "task_ticked"
+	TaskUnticked Kind = "task_unticked"
+	Answered     Kind = "answered"
 )
 
 // Event is one line of history.jsonl.
@@ -162,7 +180,8 @@ type Event struct {
 	Summary string `json:"summary,omitempty"`
 	// Findings are the step's findings, for step_finished and rejected.
 	Findings []agent.Finding `json:"findings,omitempty"`
-	// ExitCode is the agent's exit status, for step_finished.
+	// ExitCode is the agent's exit status, for step_finished; absent when
+	// it is unknown (a terminal agent ended after it reported).
 	ExitCode *int `json:"exit_code,omitempty"`
 	// Reason says why, for blocked, failed and stopped.
 	Reason string `json:"reason,omitempty"`
@@ -171,11 +190,18 @@ type Event struct {
 	Scope string `json:"scope,omitempty"`
 	// OldScope is the scope before, for scope_started.
 	OldScope string `json:"old_scope,omitempty"`
+	// Task is the task number, for task_ticked and task_unticked.
+	Task string `json:"task,omitempty"`
 	// Settings is what the step started with, for step_started.
 	Settings *Settings `json:"settings,omitempty"`
 	// By is "autopilot" on started, resumed and scope_started events that
-	// tuckerbox autopilot asked for; absent when a person did.
+	// tuckerbox autopilot asked for; absent when a person did. On answered
+	// it is who answered.
 	By string `json:"by,omitempty"`
+	// Text is the answer, for answered.
+	Text string `json:"text,omitempty"`
+	// Terminal is the terminal an answered event's text was typed into.
+	Terminal string `json:"terminal,omitempty"`
 }
 
 // Settings is what a step started with: its effective agent, model,

@@ -55,11 +55,15 @@ An agent SHALL end with its result as its final message: a JSON object, fenced o
 - **THEN** Tuckerbox ignores it and keeps waiting for the round 2 result
 
 ### Requirement: Headless execution and logs
-In this change, agents SHALL run headless as child processes of Tuckerbox. Their output SHALL be saved to a per-step log file that `tuckerbox logs <change> [step]` can show and follow.
+Agents SHALL run in one of two backends: headless, as child processes of Tuckerbox (`claude -p`, `codex exec`), or in herdr-core terminals (see `agent-terminals`). In the headless backend their output SHALL be saved to a per-step log file that `tuckerbox logs <change> [step]` can show and follow.
 
 #### Scenario: Following a running step
 - **WHEN** the user runs `tuckerbox logs fix-login --follow` while the build step runs
 - **THEN** the build agent's output appears as it is written
+
+#### Scenario: Headless fallback
+- **WHEN** the terminal backend isn't in use on the machine
+- **THEN** each step's agent runs as a child process of Tuckerbox, with no terminal, as before
 
 ### Requirement: Permission profiles
 An agent SHALL run with the permission flags of the step's permission profile, as granted by machine config (see repo-config). With no profile, it SHALL run with the agent's own defaults. Tuckerbox SHALL NOT add flags that bypass the agent's permission prompts unless a machine profile grants them.

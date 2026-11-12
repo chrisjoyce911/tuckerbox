@@ -6,7 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chrisjoyce911/tuckerbox/internal/agent"
+	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/history"
+	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 	"github.com/chrisjoyce911/tuckerbox/internal/testenv"
 )
 
@@ -190,5 +193,23 @@ func TestHistoryAfterACrashAndRerun(t *testing.T) {
 		if e.Kind == history.Stopped && e.Reason != Crashed {
 			t.Errorf("stopped reason %q", e.Reason)
 		}
+	}
+}
+
+// A terminal agent that reports through its turn hook is ended by
+// Tuckerbox, so its exit status is unknown (-1): step_finished leaves it
+// out instead of showing "done (exit -1)". A known status is kept.
+func TestResultEventLeavesOutAnUnknownExit(t *testing.T) {
+	ws := Workspace{State: statedir.Dir(t.TempDir())}
+	e := &Engine{Config: &config.Config{}}
+	rs := &Run{Change: "fix-login", Step: "build", Round: 1}
+	e.resultEvent(ws, rs, &agent.Result{Status: "done", Summary: "built it"}, -1)
+	e.resultEvent(ws, rs, &agent.Result{Status: "failed", Summary: "broke"}, 2)
+	evs, err := history.Read(history.File(ws.State))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) != 2 || evs[0].ExitCode != nil || evs[1].ExitCode == nil || *evs[1].ExitCode != 2 {
+		t.Fatalf("events %+v", evs)
 	}
 }
