@@ -334,8 +334,8 @@ func checkAgent(path, name string, raw rawAgent, fromRepo bool, add addFunc) Age
 			}
 		}
 	}
-	if !slices.Contains(seen, "brief") {
-		add(path, key+".command", "must pass {brief}, the brief file the agent reads first")
+	if !slices.Contains(seen, "brief") && !slices.Contains(seen, "brief_file") {
+		add(path, key+".command", "must pass {brief} (the brief's text) or {brief_file} (the brief file's path)")
 	}
 	return a
 }

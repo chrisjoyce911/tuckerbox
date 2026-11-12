@@ -81,16 +81,20 @@ var BuiltinAgents = []string{"claude", "codex"}
 var BuiltinRoles = []string{"planner", "builder", "reviewer", "fixer"}
 
 // Placeholders are the names an agent command template may use, written as
-// {name} inside an argument. {brief} is required.
+// {name} inside an argument. A command must pass {brief} or {brief_file}.
 //
-//   - {brief}: path of the brief file the agent reads first
+//   - {brief}: the brief's text, what the agent is told to do; when the
+//     command would be too long with it inline, an instruction to read the
+//     brief file instead
+//   - {brief_file}: path of the brief file, for an agent that reads its
+//     prompt from a file
 //   - {workdir}: the change's worktree
 //   - {model}: the step's model, or the agent's default model
 //   - {effort}: the step's effort, or the agent's default effort
 //   - {lastmessage}: a file, owned by Tuckerbox, where the agent CLI writes
 //     the agent's final message; without it the final message is read from
 //     the agent's standard output
-var Placeholders = []string{"brief", "workdir", "model", "effort", "lastmessage"}
+var Placeholders = []string{"brief", "brief_file", "workdir", "model", "effort", "lastmessage"}
 
 // ShipMode says what happens when a run finishes its last step.
 type ShipMode string

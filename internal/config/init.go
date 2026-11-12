@@ -81,15 +81,16 @@ max_rounds = 3          # then block the run (default 3; needs on_reject)
 # path = "../{repo}-worktrees/{change}"
 # branch = "{change}"
 
-# A custom agent. The command must pass {brief} and may use {workdir},
-# {model}, {effort} and {lastmessage}. The agent reports by ending with the
+# A custom agent. The command must pass {brief} (the brief's text) or
+# {brief_file} (the brief file's path, for an agent that reads its prompt from
+# a file) and may use {workdir}, {model}, {effort} and {lastmessage}. The agent reports by ending with the
 # result JSON as its final message: Tuckerbox reads it from {lastmessage}, a
 # file the CLI writes the final message to, or else from its standard output. The built-in agents (claude, codex) cannot be
 # redefined here, and permission flags (such as --dangerously-skip-permissions,
 # --permission-mode or --sandbox) may not go in the command: they belong in a
 # permission profile in machine config.
 # [agents.myagent]
-# command = ["myagent", "--prompt-file", "{brief}", "--cwd", "{workdir}"]
+# command = ["myagent", "--prompt-file", "{brief_file}", "--cwd", "{workdir}"]
 `
 
 // ErrRepoConfigExists is returned by [WriteStarter] when the repository
