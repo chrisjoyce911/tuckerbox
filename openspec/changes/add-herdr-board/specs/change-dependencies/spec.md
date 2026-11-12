@@ -1,0 +1,29 @@
+# Spec Delta
+
+## Purpose
+
+Defines how an OpenSpec change declares the other changes it depends on, and how Tuckerbox holds a run until they are ready.
+
+## ADDED Requirements
+
+### Requirement: Declaring dependencies
+A change MAY list the changes it depends on in `tuckerbox.toml` inside its change folder, as `depends_on = ["<change-id>", …]`. The file travels with the change and is archived with it. `tuckerbox check` SHALL report a dependency that names neither an active nor an archived change, and any dependency cycle.
+
+#### Scenario: Unknown dependency
+- **WHEN** a change depends on `add-login` and no active or archived change has that id
+- **THEN** `tuckerbox check` fails and names both changes
+
+#### Scenario: Cycle
+- **WHEN** change A depends on B and B depends on A
+- **THEN** `tuckerbox check` fails and lists the cycle
+
+### Requirement: Waiting for dependencies
+A run SHALL NOT start its first step until every dependency is `ready` on this machine or archived. While waiting, its state SHALL be `queued`, with the unmet dependencies as its reason. It SHALL NOT hold a parallel slot while waiting.
+
+#### Scenario: Dependency still building
+- **WHEN** the user starts change B, which depends on A, and A is in its build step
+- **THEN** B is `queued` with reason `waiting on A (build)`, and starts once A becomes `ready`
+
+#### Scenario: Dependency archived
+- **WHEN** change B depends on A and A has been archived
+- **THEN** B can start without waiting
