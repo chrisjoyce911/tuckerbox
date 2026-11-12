@@ -44,21 +44,21 @@
 
 ## 3. Activity (agent-activity)
 
-- [ ] 3.1 Current task: first unticked non-ship task of the run's scope (or the change) in the worktree's tasks.md; none → `all tasks in scope ticked`
-- [ ] 3.2 Test "Builder in group 2"
-- [ ] 3.3 Test "Everything in scope ticked"
-- [ ] 3.4 Run process polls tasks.md every 10 s during a step and appends `task_ticked` / `task_unticked` events; document them in `internal/history`
-- [ ] 3.5 Test "Two ticks" (fake clock)
-- [ ] 3.6 Step and run start times; last activity from the log's last write (headless) or herdr-core's terminal record (terminal)
-- [ ] 3.7 Test "Quiet agent"
-- [ ] 3.8 Agent state `working` / `waiting for you` from turn ends and herdr-core status; waiting cards count as needing the person
-- [ ] 3.9 Test "Permission prompt" (fake `hc` reporting waiting; board and drawer counts)
-- [ ] 3.10 `board --json`: `activity` on running, queued and stopped cards; update the board JSON snapshot
-- [ ] 3.11 Test "Card with activity"
-- [ ] 3.12 Board mod: step, agent and model, `on <n>`, time since last tick, running time and `waiting for you` on cards; every field and a tick timeline in card detail
-- [ ] 3.13 Node test "Owner opens a running card"
-- [ ] 3.14 Board mod: Watch (`agent.focus {terminal}` on the card's machine) on terminal cards; Follow log kept for headless cards
-- [ ] 3.15 Node test "Watch a builder"
+- [x] 3.1 Current task: first unticked non-ship task of the run's scope (or the change) in the worktree's tasks.md; none → `all tasks in scope ticked`
+- [x] 3.2 Test "Builder in group 2"
+- [x] 3.3 Test "Everything in scope ticked"
+- [x] 3.4 Run process polls tasks.md every 10 s during a step and appends `task_ticked` / `task_unticked` events; document them in `internal/history`
+- [x] 3.5 Test "Two ticks" (fake clock)
+- [x] 3.6 Step and run start times; last activity from the log's last write (headless) or herdr-core's terminal record (terminal)
+- [x] 3.7 Test "Quiet agent"
+- [x] 3.8 Agent state `working` / `waiting for you` from turn ends and herdr-core status; waiting cards count as needing the person
+- [x] 3.9 Test "Permission prompt" (fake `hc` reporting waiting; board and drawer counts)
+- [x] 3.10 `board --json`: `activity` on running, queued and stopped cards; update the board JSON snapshot
+- [x] 3.11 Test "Card with activity"
+- [x] 3.12 Board mod: step, agent and model, `on <n>`, time since last tick, running time and `waiting for you` on cards; every field and a tick timeline in card detail
+- [x] 3.13 Node test "Owner opens a running card"
+- [x] 3.14 Board mod: Watch (`agent.focus {terminal}` on the card's machine) on terminal cards; Follow log kept for headless cards
+- [x] 3.15 Node test "Watch a builder"
 
 ## 4. Answers (blocked-answers)
 
