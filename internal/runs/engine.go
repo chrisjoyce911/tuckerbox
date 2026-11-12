@@ -57,7 +57,8 @@ type Engine struct {
 	// Agent tunes agent.Run.
 	Agent agent.Options
 	// OnLocked is called once the change lock is held, run.json exists and
-	// the run has joined the slot queue. tuckerbox run starts changes one
+	// the run has joined the slot queue, or has started waiting on its
+	// dependencies (it joins the queue once they are met). tuckerbox run starts changes one
 	// by one and waits for this before starting the next, so queued runs
 	// start in the order they were requested.
 	OnLocked func(ws Workspace, r *Run)
@@ -208,15 +209,30 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stopReq := e.watchStop(ctx, cancel, ws)
+	notified := false
+	notify := func() {
+		if !notified && e.OnLocked != nil {
+			e.OnLocked(ws, rs)
+		}
+		notified = true
+	}
+
+	// Wait for dependencies before joining the slot queue, so a waiting
+	// run holds neither a slot nor a place at the head of the queue.
+	if fail, err := e.waitDeps(ctx, ws, rs, notify); ctx.Err() != nil {
+		return e.finish(ws, rs, Stopped, stopReason(stopReq, "while waiting on dependencies"))
+	} else if err != nil {
+		return rs, err
+	} else if fail != "" {
+		return e.finish(ws, rs, Failed, fail)
+	}
 
 	// TakeSlot: wait in queue order for one of max_parallel slots.
 	q, err := JoinQueue(e.Repo.Common, req.Change, ws.State.RunLock(), e.now().UnixNano())
 	if err != nil {
 		return e.finish(ws, rs, Failed, "joining the queue: "+err.Error())
 	}
-	if e.OnLocked != nil {
-		e.OnLocked(ws, rs)
-	}
+	notify()
 	slot, err := WaitSlot(ctx, e.Repo.Common, e.Config.MaxParallel, q, e.poll(), func() {
 		e.logf(req.Change, "queued: all %d slots are taken", e.Config.MaxParallel)
 	})
