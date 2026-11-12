@@ -55,6 +55,13 @@
 - [x] 6.8 `tuckerbox herdr install` and the `doctor` mod-version check
 - [x] 6.9 Tests for each herdr-board scenario that can run without the app (action-to-command mapping, which actions each state offers)
 - [ ] 6.10 `herdr-app check` passes; try it with runs on two connected machines, including edit, tick and approve
+- [x] 6.11 Which repository: `folder` prop, else the focused pane in the board's space, else every pane of the space; only a git top level with `.tuckerbox/config.toml` counts; no `tuckerbox init` offer
+- [x] 6.12 Entry points only with a Tuckerbox config: a window opened without one closes with the toast "No Tuckerbox config in this space"
+- [x] 6.13 Dock (`pane.split` with props `{folder, machine}`), Undock and Close in the board header
+- [x] 6.14 Toggle key: the mod's `keys.json`, merged by `tuckerbox herdr install --keys [--key]`; report a clash and change nothing
+- [x] 6.15 Drawer (`view: "drawer"`): `tuckerbox herdr install --drawer` adds it to the shown layout, cloning a shipped one first; counts every 30 s; nothing without a config
+- [x] 6.16 Install record and `tuckerbox herdr uninstall`; no + menu entry (Herdr documents no personal new-menu)
+- [x] 6.17 Node tests for repository detection, the gate and the dock and toggle mapping; Go tests for install and uninstall against a temporary `HERDR_APP_HOME`
 
 ## 7. Wrap-up
 

@@ -161,6 +161,15 @@ It defaults to `true`, and only the repository config may set it. A machine that
 ### Where the mod lives
 The mod lives at `herdr/mods/tuckerbox-board/` in this repo, and its version matches the binary. `tuckerbox herdr install` copies it into `~/.config/herdr-app/mods/` and runs `herdr-app check`. `tuckerbox doctor` warns when the installed mod is not the one the binary ships (older, or changed by hand), by the digest `tuckerbox herdr install` records in the mod's `version.json` and by comparing each shipped file's bytes.
 
+### Opening, docking and the drawer
+The owner wanted the board easier to open, hide and dock, and visible only where it means something. Everything goes through what Herdr documents:
+- **Toggle:** `mod.open tuckerbox-board` toggles the window `mod.json` describes. The mod ships the binding in its own `keys.json`, the form Herdr's guide gives for mods that expect keys, and `tuckerbox herdr install --keys` merges it, refusing to replace a key that is taken. A key can't run conditionally, so a window opened where there is no Tuckerbox config closes itself at once with a toast.
+- **Dock:** a mod pane, `pane.split {direction, mod, props}`, with `props.folder` and `props.machine` pinning the repository.
+- **Drawer:** a floating block with `edge` and `peek` in the shown layout. It is a view of the board mod (`props.view: "drawer"`), not a second mod, so the repository detection and board reading are shared, not copied. Shipped layouts are read-only, so install clones one with `layout.clone` first.
+- **+ menu:** skipped. Herdr lets a layout choose its terminal right-click menu (`terminal_menu`) and toast mod, but the shipped tab bar opens `new-menu` by name, and the guide gives no way to choose another. Cloning the tab bar to change one name would leave the person on a fork of Herdr's code.
+- **Repository:** a folder counts only when its git top level has `.tuckerbox/config.toml`. The mod asks `git rev-parse --show-toplevel` and reads that file on the space's machine, keeping each answer 10 to 30 s, so it can look every second and follow a space switch at once.
+- **Uninstall:** install records each change with the file as it was. Uninstall puts the old bytes back when the file is still as install left it, and otherwise removes only Tuckerbox's entry, so the person's later edits survive.
+
 ## Risks / Trade-offs
 
 - **Approving on a stale checkout.** The person may approve text in a checkout that is behind the base branch, or approve without committing. The hash protects against both: the run gate judges the files the run will use, so a stale or uncommitted approval refuses to start and says why. The card shows `committed: false` beforehand, so the Approved column doesn't hide this.
