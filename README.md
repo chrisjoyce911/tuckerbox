@@ -78,6 +78,8 @@ allowed_remotes = ["github.com/you/*"]
 args = { claude = ["--permission-mode", "acceptEdits"] }
 ```
 
+A step in the repository then asks for it by name with `permissions = "edit"`.
+
 The board defaults to Proposed, Approved (when approval is required), In progress,
 Ready and Done. In-progress cards carry their step or `queued` as a badge.
 To show Queued and one column per workflow step, set this in repository config
@@ -87,8 +89,6 @@ To show Queued and one column per workflow step, set this in repository config
 [board]
 columns = "steps" # "compact" is the default
 ```
-
-A step in the repository then asks for it by name with `permissions = "edit"`.
 
 Agents report by ending with a small JSON result as their final message; Tuckerbox records it in the step's result file, so an agent needs no write access outside its worktree and a reviewer can run read-only (for Codex, `--sandbox read-only` in a machine profile). Tuckerbox reads Claude's final message from its stream-json output and Codex's from the file it writes with `-o`. A custom agent can pass `{lastmessage}`, a file its CLI writes the final message to; otherwise its standard output is read:
 

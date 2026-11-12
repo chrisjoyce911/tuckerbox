@@ -67,38 +67,51 @@ func card(t *testing.T, d *Document, id string) Card {
 	return Card{}
 }
 func TestNoRunsAndApproval(t *testing.T) {
-	testTools.Setup(t)
-	root := testTools.NewRepo(t, testenv.RepoOptions{Changes: []string{"add-login-page", "add-search", "add-users"}, RequireApproval: true})
-	d := read(t, root, "")
-	if d.Repo != root || len(d.Cards) != 3 {
-		t.Fatalf("document %+v", d)
-	}
-	for _, c := range d.Cards {
-		if c.Column != "proposed" || c.Approval.State != "none" || !c.Approval.Committed || c.EditFolder != root || c.Tasks.Total != 1 {
-			t.Errorf("card %+v", c)
-		}
-	}
-	if c := card(t, d, "add-login-page"); c.Title != "add login page" {
-		t.Fatal(c)
-	}
-	dir := approval.DirOf(root, "add-login-page")
-	testenv.WriteFile(t, dir.SidecarPath(), "title = 'Login page'\n")
-	if _, err := approval.Approve(dir, "Reviewer", time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)); err != nil {
-		t.Fatal(err)
-	}
-	c := card(t, read(t, root, ""), "add-login-page")
-	if c.Column != "approved" || c.Title != "Login page" || c.Approval.Committed || c.Approval.At != timestamp(time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)) {
-		t.Fatalf("approval %+v", c)
-	}
-	testenv.Git(t, root, "add", "-A")
-	testenv.Git(t, root, "commit", "-qm", "approve")
-	if !card(t, read(t, root, ""), "add-login-page").Approval.Committed {
-		t.Fatal("committed approval marked dirty")
-	}
-	testenv.WriteFile(t, filepath.Join(string(dir), "proposal.md"), "edited proposal\n")
-	c = card(t, read(t, root, ""), "add-login-page")
-	if c.Column != "proposed" || c.Approval.State != "stale" || c.Approval.Committed {
-		t.Fatal(c)
+	for _, layout := range []string{"compact", "steps"} {
+		t.Run(layout, func(t *testing.T) {
+			testTools.Setup(t)
+			root := testTools.NewRepo(t, testenv.RepoOptions{Changes: []string{"add-login-page", "add-search", "add-users"}, RequireApproval: true})
+			configPath := filepath.Join(root, config.RepoFile)
+			original, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Exercise the default compact layout and the explicit steps layout.
+			if layout == "steps" {
+				testenv.WriteFile(t, configPath, string(original)+"\n[board]\ncolumns = 'steps'\n")
+			}
+			d := read(t, root, "")
+			if d.Repo != root || len(d.Cards) != 3 {
+				t.Fatalf("document %+v", d)
+			}
+			for _, c := range d.Cards {
+				if c.Column != "proposed" || c.Approval.State != "none" || !c.Approval.Committed || c.EditFolder != root || c.Tasks.Total != 1 {
+					t.Errorf("card %+v", c)
+				}
+			}
+			if c := card(t, d, "add-login-page"); c.Title != "add login page" {
+				t.Fatal(c)
+			}
+			dir := approval.DirOf(root, "add-login-page")
+			testenv.WriteFile(t, dir.SidecarPath(), "title = 'Login page'\n")
+			if _, err := approval.Approve(dir, "Reviewer", time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)); err != nil {
+				t.Fatal(err)
+			}
+			c := card(t, read(t, root, ""), "add-login-page")
+			if c.Column != "approved" || c.Title != "Login page" || c.Approval.Committed || c.Approval.At != timestamp(time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)) {
+				t.Fatalf("approval %+v", c)
+			}
+			testenv.Git(t, root, "add", "-A")
+			testenv.Git(t, root, "commit", "-qm", "approve")
+			if !card(t, read(t, root, ""), "add-login-page").Approval.Committed {
+				t.Fatal("committed approval marked dirty")
+			}
+			testenv.WriteFile(t, filepath.Join(string(dir), "proposal.md"), "edited proposal\n")
+			c = card(t, read(t, root, ""), "add-login-page")
+			if c.Column != "proposed" || c.Approval.State != "stale" || c.Approval.Committed {
+				t.Fatal(c)
+			}
+		})
 	}
 }
 func TestColumns(t *testing.T) {
