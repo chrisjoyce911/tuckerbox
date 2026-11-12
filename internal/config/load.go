@@ -133,14 +133,17 @@ func (f *file) problem(key, format string, args ...any) {
 // decoded from either file so that a repository setting them gets a clear
 // message rather than "unknown key".
 type rawFile struct {
-	MaxParallel *int                  `toml:"max_parallel"`
-	Ship        *string               `toml:"ship"`
-	Editor      *string               `toml:"editor"`
-	Workflow    rawWorkflow           `toml:"workflow"`
-	Steps       map[string]rawStep    `toml:"steps"`
-	Agents      map[string]rawAgent   `toml:"agents"`
-	Permissions map[string]rawProfile `toml:"permissions"`
-	Worktree    rawWorktree           `toml:"worktree"`
+	MaxParallel *int    `toml:"max_parallel"`
+	Ship        *string `toml:"ship"`
+	Editor      *string `toml:"editor"`
+	// RequireApproval is repository-only; it is decoded from machine
+	// config too, so that setting it there gets a clear message.
+	RequireApproval *bool                 `toml:"require_approval"`
+	Workflow        rawWorkflow           `toml:"workflow"`
+	Steps           map[string]rawStep    `toml:"steps"`
+	Agents          map[string]rawAgent   `toml:"agents"`
+	Permissions     map[string]rawProfile `toml:"permissions"`
+	Worktree        rawWorktree           `toml:"worktree"`
 }
 
 type rawWorkflow struct {
@@ -234,6 +237,9 @@ func parse(path, data string, repo bool) *file {
 			f.problem("editor", "editor is machine-only; set it in machine config")
 			f.raw.Editor = nil
 		}
+	} else if md.IsDefined("require_approval") {
+		f.problem("require_approval", "require_approval belongs in repository config (.tuckerbox/config.toml), so every machine applies the same gate")
+		f.raw.RequireApproval = nil
 	}
 	return f
 }

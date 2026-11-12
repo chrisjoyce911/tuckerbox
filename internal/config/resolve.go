@@ -80,6 +80,7 @@ func resolve(root, remote string, m, r *file) (*Config, Problems) {
 	if mr.Editor != nil {
 		cfg.Editor = *mr.Editor
 	}
+	cfg.RequireApproval = rr.RequireApproval == nil || *rr.RequireApproval
 
 	// Worktree settings.
 	cfg.Worktree.Base, _, _ = pick(rr.Worktree.Base, mr.Worktree.Base, r.path, m.path)
