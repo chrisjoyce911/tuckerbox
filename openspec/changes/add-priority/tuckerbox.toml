@@ -1,2 +1,7 @@
 title = "Change priority"
 depends_on = ["add-herdr-board"]
+
+[approval]
+hash = "sha256:6f011b9879075520335bb7732a68dd99be9805f4f6a5f7483664a618530c159b"
+by = "Chris Joyce"
+at = 2026-11-12T19:08:46+10:00

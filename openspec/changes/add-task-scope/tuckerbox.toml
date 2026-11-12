@@ -1,2 +1,7 @@
 title = "Task scope"
 depends_on = ["add-herdr-board"]
+
+[approval]
+hash = "sha256:c78aebccf77a90bb5f2e13c78ce935394fd5f1f2d008e3edbd03454b198c4220"
+by = "Chris Joyce"
+at = 2026-11-12T19:08:57+10:00

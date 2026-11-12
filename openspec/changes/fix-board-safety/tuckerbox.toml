@@ -1,1 +1,6 @@
 title = "Board safety fixes"
+
+[approval]
+hash = "sha256:80ecd8562f6d07d864e4d24741fb6c982a7fd13efc14526fb31e30cb101459cd"
+by = "Chris Joyce"
+at = 2026-11-12T19:09:04+10:00
