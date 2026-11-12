@@ -90,6 +90,52 @@ mode = "danger-full-access"
 	}
 }
 
+// Dotted keys make implicit tables the decoder does not list as undecoded,
+// so each refused key in a step table is reported by its own name, once,
+// however deep the value sits.
+func TestParseRefusesDottedKeys(t *testing.T) {
+	data := `[steps.build]
+agent = "codex"
+args.codex = ["--dangerously-skip-permissions"]
+args.claude = ["--dangerously-skip-permissions"]
+extra.deep.key = "secret-command"
+steps_flags.x = "danger-full-access"
+
+[steps.review.sandbox.inner]
+mode = "danger-full-access"
+`
+	sc, ps, err := Parse([]byte(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sc.Steps["build"].Agent != "codex" {
+		t.Errorf("agent lost: %+v", sc.Steps["build"])
+	}
+	want := map[string]string{
+		"steps.build.args":        "belong in a permission profile in machine config",
+		"steps.build.extra":       "may set only agent, model, effort, permissions",
+		"steps.build.steps_flags": "may set only agent, model, effort, permissions",
+		"steps.review.sandbox":    "belong in a permission profile in machine config",
+	}
+	got := map[string]int{}
+	for _, p := range ps {
+		got[p.Key]++
+		if frag, ok := want[p.Key]; !ok || !strings.Contains(p.Message, frag) {
+			t.Errorf("unexpected problem %v", p)
+		}
+		for _, secret := range []string{"--dangerously-skip-permissions", "secret-command", "danger-full-access"} {
+			if strings.Contains(p.String(), secret) {
+				t.Errorf("problem prints the value %q: %v", secret, p)
+			}
+		}
+	}
+	for k := range want {
+		if got[k] != 1 {
+			t.Errorf("%s reported %d times, want once: %v", k, got[k], ps)
+		}
+	}
+}
+
 func TestParseEmptyValues(t *testing.T) {
 	sc, ps, err := Parse([]byte("machines = [\"\"]\n[steps.build]\nmodel = \" \"\n"))
 	if err != nil {

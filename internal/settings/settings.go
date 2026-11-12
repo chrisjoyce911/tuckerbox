@@ -163,6 +163,11 @@ func Parse(data []byte) (Sidecar, []Problem, error) {
 	}
 
 	// Keys in step tables the struct does not know: refused, by name only.
+	// A deeper key (such as args.codex = [...] in [steps.build]) is
+	// reported by its key in the step table, once: the decoder lists only
+	// the leaf when the table in between is implicit, so a deeper key cannot
+	// be assumed to have its parent reported.
+	reported := map[string]bool{}
 	for _, k := range md.Undecoded() {
 		if len(k) < 2 || k[0] != "steps" {
 			continue // other top-level keys belong to other packages
@@ -170,9 +175,11 @@ func Parse(data []byte) (Sidecar, []Problem, error) {
 		if len(k) == 2 {
 			continue // a step table itself; its keys are reported below
 		}
-		if len(k) > 3 {
-			continue // inside a refused key's table; reported with it
+		k = k[:3]
+		if reported[k.String()] {
+			continue
 		}
+		reported[k.String()] = true
 		name := k[2]
 		if config.IsArgKey(name) {
 			add(k.String(), "agent arguments and permission flags are not allowed in a change; they belong in a permission profile in machine config, which a change may name with permissions = \"<profile>\"")
