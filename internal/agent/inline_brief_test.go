@@ -222,8 +222,10 @@ func TestBriefLogLine(t *testing.T) {
 			start = l
 		}
 	}
-	if !strings.Contains(start, `"`+label+`"`) {
-		t.Errorf("start line %q lacks %q", start, label)
+	// The start line quotes arguments as quoteArgs does: strconv.Quote, which
+	// escapes the backslashes of a Windows brief path.
+	if want := quoteArgs([]string{label})[0]; !strings.Contains(start, want) {
+		t.Errorf("start line %q lacks %q", start, want)
 	}
 	if strings.Contains(log, "You are running headless") {
 		t.Errorf("brief text in the log:\n%s", log)
