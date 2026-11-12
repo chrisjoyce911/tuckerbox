@@ -7,7 +7,7 @@ Defines the machine-readable board for one repository, derived from OpenSpec and
 ## ADDED Requirements
 
 ### Requirement: Board document
-`tuckerbox board --json` run in a repository SHALL print one JSON document with `version`, the repository's remote URL (or its path if it has no remote), the machine name, whether the repository requires approval, the ordered `columns`, and a `cards` array. Format versioning SHALL follow the same rules as `tuckerbox status --json`.
+`tuckerbox board --json` run in a repository SHALL print one JSON document with `version`, the repository's remote URL (or its path if it has no remote), the machine name, whether the repository requires approval, the ordered `columns`, and a `cards` array. Times SHALL use the machine’s local time zone and include its offset. Format versioning SHALL follow the same rules as `tuckerbox status --json`.
 
 #### Scenario: Repository without runs
 - **WHEN** a repository has three active changes, none approved and none ever run
@@ -74,3 +74,31 @@ Each card with a run SHALL include its branch, worktree path and machine. Every 
 #### Scenario: Task numbers
 - **WHEN** a dashboard asks for the detail of a change whose task 2.1 is ticked
 - **THEN** the task list has an entry with number `2.1` and checked `true`
+
+### Requirement: Partial board reads
+An unreadable change SHALL retain its card with an optional string `error` describing the failure and any fields already read. It SHALL NOT prevent other cards from being returned. Repository-wide failures SHALL still return a document error. Worktrees and their run-state directories SHALL be discovered at most once each per board read.
+
+#### Scenario: Broken change metadata
+- **WHEN** one active or archived change has malformed metadata or a missing worktree/change folder
+- **THEN** its card contains an error and the other cards remain available
+
+### Requirement: Archived approvals
+Done cards SHALL show approval state `none`, blank approval metadata and `committed: true`, without approval hashing or git commit-status checks.
+
+#### Scenario: Archived approval
+- **WHEN** an archived change retains an old approval table
+- **THEN** its card is in Done with approval state `none` and no approval or commit-status checks are run
+
+### Requirement: Obsolete run steps
+A run whose step is empty or no longer in the workflow SHALL stay visible in Queued, retaining its run state and reporting a per-card error.
+
+#### Scenario: Removed workflow step
+- **WHEN** a blocked run names a step that the workflow no longer contains
+- **THEN** its card remains blocked, is in Queued and includes an error naming the missing step
+
+### Requirement: Round lifecycle
+Round detail SHALL include stopped and crashed rounds with result `stopped` and an end time. Admission events alone SHALL NOT create rounds before work starts or a step result is recorded.
+
+#### Scenario: Stopped round
+- **WHEN** a run is stopped or its process crashed after a step started
+- **THEN** the round has result `stopped` and an end time, and admission events alone do not create empty rounds

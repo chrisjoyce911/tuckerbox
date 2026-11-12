@@ -54,7 +54,7 @@ space's machine. A window follows the shown space. A `folder` prop pins it.
 its `cards` must include that change's card (the fixture holds only that one). The mod reads exactly these
 fields. Strings may be `""` or missing when they don't apply, numbers `0`,
 lists `[]`: the mod treats missing, `null` and empty alike. Times are RFC 3339
-with their offset. Fields may be added; renaming or removing one needs a new
+in the machine’s local zone, with its offset. Fields may be added; renaming or removing one needs a new
 `version`, as for `tuckerbox status --json`.
 
 ### Document
@@ -106,7 +106,8 @@ The command still exits non-zero with an error document.
 | `machine` | string | The machine the run is on (this one, for a card without a run) |
 | `edit_folder` | string | Where `tuckerbox edit` would edit: the worktree if there is one, else the checkout. Open proposal reads `<edit_folder>/openspec/changes/<change>/proposal.md` |
 | `depends_on` | list | `[{ "change", "column" }]`: each dependency with the column id it is in (`done` when archived, `""` when unknown) |
-| `archived` | string | For Done cards: the archive date (`2026-11-08`) |
+| `archived` | string | For Done cards: the archive date (`2026-11-08`). Their approval is `none`, with blank metadata and `committed: true`; no approval or commit checks are needed |
+| `error` | string | Optional diagnostic when this card could only be read partially (missing worktree/change folder, malformed metadata, unreadable files or obsolete run step). Other cards remain available. Retained fields may be incomplete; a run with an absent or unknown step stays visible in Queued |
 
 ### Detail (`--change <id>`)
 
@@ -116,7 +117,7 @@ The command still exits non-zero with an error document.
 | `proposal` | string | proposal.md's text (markdown) |
 | `specs` | list | `[{ "capability", "text" }]`: each spec delta. Edit offers `spec:<capability>` for each |
 | `tasks` | list | `[{ "number", "group", "text", "checked" }]` in file order: `number` is `2.1`, `group` the `## ` heading above it (`2. Sign in`) |
-| `rounds` | list | `[{ "round", "result", "step", "summary", "findings", "ended" }]`: `result` is the round's last step result (`done`, `rejected`, `blocked`, `failed`) or `""` while it runs; `step` is the step that gave it |
+| `rounds` | list | `[{ "round", "result", "step", "summary", "findings", "ended" }]`: `result` is the round's last step result (`done`, `rejected`, `blocked`, `failed`, `stopped`) or `""` while it runs; `step` is the step that gave it |
 | `history` | list | The run history, oldest first, see below. The board shows it newest first |
 
 A finding is `{ "severity", "file", "detail" }`, as agents write it
@@ -126,7 +127,8 @@ A history event has `at`, `event`, `step`, `round`, `agent` and `machine`,
 and some of: `result` (step_finished), `to` and `summary` (handoff), `summary`
 and `findings` (rejected), `reason` (queued, blocked, failed). `event` is one
 of `started`, `queued`, `step_started`, `step_finished`, `handoff`,
-`rejected`, `blocked`, `stopped`, `resumed`, `failed`, `ready`.
+`rejected`, `blocked`, `stopped`, `resumed`, `rerun`, `failed`, `ready`.
+A round is created when work starts or a step result is recorded; queue/admission events alone do not create a round. Stopped (including crashed) rounds have result `stopped` and an `ended` time.
 
 ## Actions
 

@@ -1,0 +1,459 @@
+package board
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/chrisjoyce911/tuckerbox/internal/agent"
+	"github.com/chrisjoyce911/tuckerbox/internal/approval"
+	"github.com/chrisjoyce911/tuckerbox/internal/config"
+	"github.com/chrisjoyce911/tuckerbox/internal/history"
+	"github.com/chrisjoyce911/tuckerbox/internal/runs"
+	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
+	"github.com/chrisjoyce911/tuckerbox/internal/testenv"
+)
+
+var testTools *testenv.Tools
+
+func TestMain(m *testing.M) {
+	var err error
+	testTools, err = testenv.Build(false)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	sshName := "ssh"
+	if runtime.GOOS == "windows" {
+		sshName += ".exe"
+	}
+	cmd := exec.Command("go", "build", "-o", filepath.Join(testTools.Bin, sshName), "./testdata/fakessh")
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	if data, err := cmd.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "building fake ssh: %v: %s", err, data)
+		testTools.Remove()
+		os.Exit(1)
+	}
+	code := m.Run()
+	testTools.Remove()
+	os.Exit(code)
+}
+func read(t *testing.T, root, change string) *Document {
+	t.Helper()
+	d, err := Read(context.Background(), root, change, config.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+func card(t *testing.T, d *Document, id string) Card {
+	t.Helper()
+	for _, c := range d.Cards {
+		if c.Change == id {
+			return c
+		}
+	}
+	t.Fatalf("missing card %s", id)
+	return Card{}
+}
+func TestNoRunsAndApproval(t *testing.T) {
+	testTools.Setup(t)
+	root := testTools.NewRepo(t, testenv.RepoOptions{Changes: []string{"add-login-page", "add-search", "add-users"}, RequireApproval: true})
+	d := read(t, root, "")
+	if d.Repo != root || len(d.Cards) != 3 {
+		t.Fatalf("document %+v", d)
+	}
+	for _, c := range d.Cards {
+		if c.Column != "proposed" || c.Approval.State != "none" || !c.Approval.Committed || c.EditFolder != root || c.Tasks.Total != 1 {
+			t.Errorf("card %+v", c)
+		}
+	}
+	if c := card(t, d, "add-login-page"); c.Title != "add login page" {
+		t.Fatal(c)
+	}
+	dir := approval.DirOf(root, "add-login-page")
+	testenv.WriteFile(t, dir.SidecarPath(), "title = 'Login page'\n")
+	if _, err := approval.Approve(dir, "Reviewer", time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	c := card(t, read(t, root, ""), "add-login-page")
+	if c.Column != "approved" || c.Title != "Login page" || c.Approval.Committed || c.Approval.At != timestamp(time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("approval %+v", c)
+	}
+	testenv.Git(t, root, "add", "-A")
+	testenv.Git(t, root, "commit", "-qm", "approve")
+	if !card(t, read(t, root, ""), "add-login-page").Approval.Committed {
+		t.Fatal("committed approval marked dirty")
+	}
+	testenv.WriteFile(t, filepath.Join(string(dir), "proposal.md"), "edited proposal\n")
+	c = card(t, read(t, root, ""), "add-login-page")
+	if c.Column != "proposed" || c.Approval.State != "stale" || c.Approval.Committed {
+		t.Fatal(c)
+	}
+}
+func TestColumns(t *testing.T) {
+	for _, required := range []bool{true, false} {
+		cfg := &config.Config{RequireApproval: required, Steps: []config.Step{{ID: "plan"}, {ID: "build"}, {ID: "review"}}}
+		var names []string
+		for _, c := range columns(cfg) {
+			names = append(names, c.Name)
+		}
+		want := "Proposed,Approved,Queued,Plan,Build,Review,Ready,Done"
+		if !required {
+			want = "Proposed,Queued,Plan,Build,Review,Ready,Done"
+		}
+		if strings.Join(names, ",") != want {
+			t.Fatal(names)
+		}
+	}
+}
+func TestApprovalOff(t *testing.T) {
+	testTools.Setup(t)
+	root := testTools.NewRepo(t, testenv.RepoOptions{Changes: []string{"add-login"}})
+	if _, err := approval.Approve(approval.DirOf(root, "add-login"), "Reviewer", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	d := read(t, root, "")
+	if d.RequireApproval || card(t, d, "add-login").Column != "proposed" {
+		t.Fatal(d)
+	}
+	for _, c := range d.Columns {
+		if c.ID == "approved" {
+			t.Fatal(c)
+		}
+	}
+}
+func TestNotRepository(t *testing.T) {
+	testTools.Setup(t)
+	for _, root := range []string{t.TempDir(), testTools.NewRepo(t, testenv.RepoOptions{NoConfig: true})} {
+		_, err := Read(context.Background(), root, "", config.Env{})
+		var be *Error
+		if !errors.As(err, &be) || be.Code != "not_a_repository" {
+			t.Fatalf("error %v", err)
+		}
+	}
+}
+
+func TestRunsDependenciesAndDetail(t *testing.T) {
+	testTools.Setup(t)
+	ids := []string{"add-login", "add-users", "waiting", "ready-change", "failed-change", "stopped-change"}
+	root := testTools.NewRepo(t, testenv.RepoOptions{Changes: ids, RequireApproval: true})
+	wt := filepath.Join(filepath.Dir(root), "repo-worktrees", "add-login")
+	testenv.Git(t, root, "worktree", "add", "-qb", "tuckerbox/add-login", wt)
+	// The board must read the worktree, including its uncommitted edits.
+	dir := string(approval.DirOf(wt, "add-login"))
+	testenv.WriteFile(t, filepath.Join(dir, "tasks.md"), "# Tasks\r\n## 2. Sign in\r\n- [x] 2.1 Check password\r\n- [ ] 2.2 Hide errors\r\n")
+	testenv.WriteFile(t, filepath.Join(dir, "specs", "login", "spec.md"), "login delta\n")
+	testenv.WriteFile(t, filepath.Join(dir, "tuckerbox.toml"), "depends_on = ['add-users', 'old-change', 'unknown']\n")
+	at := time.Date(2026, 11, 12, 1, 0, 0, 0, time.UTC)
+	st, err := statedir.Resolve(context.Background(), wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finding := agent.Finding{Severity: "high", File: "login.go", Detail: "password logged"}
+	run := &runs.Run{Change: "add-login", Repo: root, Worktree: wt, Branch: "tuckerbox/add-login", State: runs.Blocked, Reason: "review limit reached", Step: "review", Round: 2, Since: at, History: []runs.Entry{
+		{Round: 1, Step: "review", Status: agent.Rejected, Summary: "fix it", Findings: []agent.Finding{finding}, Ended: at.Add(-time.Hour)},
+		{Round: 2, Step: "review", Status: agent.Rejected, Summary: "still wrong", Findings: []agent.Finding{finding}, Ended: at},
+	}}
+	if err := runs.WriteRun(st.RunFile(), run); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []history.Event{
+		{Time: at.Add(-time.Hour), Kind: history.Rejected, Round: 1, Step: "review", Summary: "fix it", Findings: []agent.Finding{finding}},
+		{Time: at.Add(-time.Minute), Kind: history.StepStarted, Round: 2, Step: "build"},
+		{Time: at, Kind: history.StepFinished, Round: 2, Step: "review", Status: agent.Rejected, Summary: "still wrong", Findings: []agent.Finding{finding}},
+		{Time: at, Kind: history.Blocked, Round: 2, Step: "review", Reason: "review limit reached"},
+	} {
+		if err := history.Append(history.File(st), e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, item := range []struct {
+		id    string
+		state runs.State
+		step  string
+	}{{"add-users", runs.Running, "build"}, {"waiting", runs.Queued, ""}, {"ready-change", runs.Ready, ""}, {"failed-change", runs.Failed, "build"}, {"stopped-change", runs.Stopped, "review"}} {
+		path := filepath.Join(filepath.Dir(root), "repo-worktrees", item.id)
+		testenv.Git(t, root, "worktree", "add", "-qb", item.id, path)
+		s, err := statedir.Resolve(context.Background(), path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := runs.WriteRun(s.RunFile(), &runs.Run{Change: item.id, Repo: root, Worktree: path, State: item.state, Step: item.step, Round: 1, Since: at}); err != nil {
+			t.Fatal(err)
+		}
+		if item.state == runs.Running || item.state == runs.Queued {
+			lock, err := runs.TryChangeLock(s.RunLock())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { lock.Release() })
+		}
+	}
+	testenv.WriteFile(t, filepath.Join(root, "openspec", "changes", "archive", "2026-01-01-old-change", "proposal.md"), "old\n")
+	d := read(t, root, "add-login")
+	c := card(t, d, "add-login")
+	if c.Column != "step:review" || c.State != "blocked" || c.Reason != "review limit reached" || c.Agent != "fake" || c.EditFolder != wt || c.Tasks.Done != 1 || c.Tasks.Total != 2 {
+		t.Fatalf("card %+v", c)
+	}
+	want := []Dependency{{"add-users", "step:build"}, {"old-change", "done"}, {"unknown", ""}}
+	if !reflect.DeepEqual(c.DependsOn, want) {
+		t.Fatal(c.DependsOn)
+	}
+	for id, want := range map[string]string{"waiting": "queued", "ready-change": "ready", "failed-change": "step:build", "stopped-change": "step:review"} {
+		if card(t, d, id).Column != want {
+			t.Fatal(id, card(t, d, id))
+		}
+	}
+	detail := d.Detail
+	if len(detail.Rounds) != 2 || detail.Rounds[0].Result != "rejected" || detail.Rounds[1].Result != "blocked" || len(detail.Rounds[0].Findings) != 1 || len(detail.History) != 4 || detail.History[2].Result != "rejected" {
+		t.Fatalf("detail %+v", detail)
+	}
+	if len(detail.Tasks) != 2 || detail.Tasks[0].Number != "2.1" || !detail.Tasks[0].Checked || detail.Tasks[0].Group != "2. Sign in" || len(detail.Specs) != 1 || detail.Specs[0].Capability != "login" {
+		t.Fatal(detail)
+	}
+	assertShape(t, d, "detail.json")
+}
+
+func TestArchiveLimitAndDependency(t *testing.T) {
+	testTools.Setup(t)
+	root := testTools.NewRepo(t, testenv.RepoOptions{Changes: []string{"active"}})
+	for i := 1; i <= 22; i++ {
+		p := filepath.Join(root, "openspec", "changes", "archive", fmt.Sprintf("2026-10-%02d-old-%02d", i, i))
+		testenv.WriteFile(t, filepath.Join(p, "tasks.md"), "- [x] 1.1 Done\n")
+	}
+	testenv.WriteFile(t, approval.DirOf(root, "active").SidecarPath(), "depends_on = ['old-01']\n")
+	d := read(t, root, "")
+	if len(d.Cards) != 21 || d.Cards[1].Archived != "2026-10-22" || d.Cards[20].Archived != "2026-10-03" {
+		t.Fatal(d.Cards)
+	}
+	if card(t, d, "active").DependsOn[0].Column != "done" {
+		t.Fatal(d.Cards[0])
+	}
+	assertShape(t, d, "board.json")
+	archived := read(t, root, "old-22")
+	if archived.Detail == nil || len(archived.Detail.Tasks) != 1 || archived.Cards[1].EditFolder != "" {
+		t.Fatal(archived)
+	}
+}
+
+// The fixtures are the published schema snapshots. Require exact field/type
+// unions (including optional fields); also decode/re-encode without loss to
+// catch fixture additions not yet represented by the Go contract.
+func shape(v any, prefix string, out map[string]string) {
+	switch x := v.(type) {
+	case map[string]any:
+		out[prefix] = "object"
+		for k, v := range x {
+			shape(v, prefix+"."+k, out)
+		}
+	case []any:
+		out[prefix] = "array"
+		for _, v := range x {
+			shape(v, prefix+"[]", out)
+		}
+	case string:
+		out[prefix] = "string"
+	case bool:
+		out[prefix] = "bool"
+	case float64:
+		out[prefix] = "number"
+	default:
+		out[prefix] = "null"
+	}
+}
+func assertShape(t *testing.T, d *Document, fixture string) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("..", "..", "herdr", "mods", "tuckerbox-board", "fixtures", fixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot Document
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&snapshot); err != nil {
+		t.Fatal(err)
+	}
+	normalized, _ := json.Marshal(snapshot)
+	var original, roundtrip any
+	json.Unmarshal(data, &original)
+	json.Unmarshal(normalized, &roundtrip)
+	if !reflect.DeepEqual(original, roundtrip) {
+		t.Fatal("fixture round-trip lost fields")
+	}
+	// Include optional event variants from the fixture snapshot; the generated
+	// document must supply all mandatory fields with the same primitive types.
+	generated, _ := json.Marshal(d)
+	var actual any
+	json.Unmarshal(generated, &actual)
+	want, got := map[string]string{}, map[string]string{}
+	shape(original, "", want)
+	shape(actual, "", got)
+	optional := map[string]bool{".cards[].archived": true, ".cards[].error": true, ".columns[].step": true}
+	for _, k := range []string{"result", "to", "summary", "findings", "reason"} {
+		optional[".detail.history[]."+k] = true
+	}
+	for k, v := range want {
+		if optional[k] || strings.HasPrefix(k, ".detail.history[].findings[]") {
+			continue
+		}
+		if got[k] != v {
+			t.Errorf("fixture %s shape %s: got %q, want %q", fixture, k, got[k], v)
+		}
+	}
+	for k, v := range got {
+		if !optional[k] && want[k] != v {
+			t.Errorf("unexpected shape %s: %s", k, v)
+		}
+	}
+}
+func TestFixtureShapes(t *testing.T) {
+	for _, name := range []string{"board.json", "detail.json"} {
+		data, err := os.ReadFile(filepath.Join("..", "..", "herdr", "mods", "tuckerbox-board", "fixtures", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doc Document
+		if err := json.Unmarshal(data, &doc); err != nil {
+			t.Fatal(err)
+		}
+		assertShape(t, &doc, name)
+	}
+}
+
+func TestRepoKey(t *testing.T) {
+	for _, remote := range []string{"git@GH:Owner/repo.git", "ssh://git@GH:2222/Owner/repo.git", "https://github.com/Owner/repo.git/", "git://github.com/Owner/repo"} {
+		key := repoKey(context.Background(), remote, func(_ context.Context, host string) (string, error) {
+			if host != "GH" {
+				t.Fatal(host)
+			}
+			return "hostname github.com\n", nil
+		})
+		if key != "github.com/Owner/repo" {
+			t.Fatal(remote, key)
+		}
+	}
+	if key := repoKey(context.Background(), "git@alias:owner/repo.git", func(context.Context, string) (string, error) { return "", errors.New("ssh missing") }); key != "alias/owner/repo" {
+		t.Fatal(key)
+	}
+	if RepoKey(context.Background(), "") != "" {
+		t.Fatal("empty remote")
+	}
+}
+
+func TestCommittedChanges(t *testing.T) {
+	testTools.Setup(t)
+	root := testTools.NewRepo(t, testenv.RepoOptions{Changes: []string{"add-login"}})
+	dir := approval.DirOf(root, "add-login")
+	if _, err := approval.Approve(dir, "Reviewer", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	testenv.Git(t, root, "add", "-A")
+	testenv.Git(t, root, "commit", "-qm", "approve")
+	check := func(want bool) {
+		t.Helper()
+		got, err := committed(context.Background(), string(dir))
+		if err != nil || got != want {
+			t.Fatalf("committed=%v err=%v, want %v", got, err, want)
+		}
+	}
+	check(true)
+	old, err := os.ReadFile(dir.SidecarPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	testenv.WriteFile(t, dir.SidecarPath(), "title = 'New title'\ndepends_on = ['other']\n"+string(old))
+	check(true)
+	// Tick-only changes keep the approval hash but are still uncommitted.
+	tasks := filepath.Join(string(dir), "tasks.md")
+	testenv.WriteFile(t, tasks, "# Tasks\n\n- [x] 1.1 Do it\n")
+	if st, err := approval.Judge(dir); err != nil || st.State != approval.Approved {
+		t.Fatal(st, err)
+	}
+	check(false)
+	testenv.Git(t, root, "add", tasks)
+	check(false)
+	testenv.Git(t, root, "restore", "--staged", tasks)
+	testenv.Git(t, root, "restore", tasks)
+	check(true)
+	if err := os.Remove(filepath.Join(string(dir), "proposal.md")); err != nil {
+		t.Fatal(err)
+	}
+	check(false)
+	testenv.Git(t, root, "restore", ".")
+	testenv.WriteFile(t, filepath.Join(string(dir), "specs", "new", "spec.md"), "new delta\n")
+	check(false)
+}
+
+func TestRoundsWithoutHistoryAndRunningRound(t *testing.T) {
+	at := time.Date(2026, 11, 12, 1, 0, 0, 0, time.UTC)
+	finding := agent.Finding{Severity: "high", Detail: "fix"}
+	r := &runs.Run{State: runs.Running, Step: "build", Round: 2, History: []runs.Entry{{Step: "review", Round: 1, Status: agent.Rejected, Findings: []agent.Finding{finding}, Ended: at}}}
+	got := rounds(r, nil)
+	if len(got) != 2 || got[0].Result != "rejected" || len(got[0].Findings) != 1 || got[1].Result != "" || got[1].Step != "build" || got[1].Findings == nil {
+		t.Fatal(got)
+	}
+}
+
+func TestCrashedRun(t *testing.T) {
+	testTools.Setup(t)
+	root := testTools.NewRepo(t, testenv.RepoOptions{Changes: []string{"add-login"}})
+	wt := filepath.Join(filepath.Dir(root), "repo-worktrees", "add-login")
+	testenv.Git(t, root, "worktree", "add", "-qb", "add-login", wt)
+	st, err := statedir.Resolve(context.Background(), wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runs.WriteRun(st.RunFile(), &runs.Run{Change: "add-login", State: runs.Running, Step: "build", Round: 1, Worktree: wt}); err != nil {
+		t.Fatal(err)
+	}
+	c := card(t, read(t, root, ""), "add-login")
+	if c.State != "stopped" || c.Reason != runs.Crashed || c.Column != "step:build" {
+		t.Fatal(c)
+	}
+	stored, err := runs.ReadRun(st.RunFile())
+	if err != nil || stored.State != runs.Running {
+		t.Fatal("board rewrote state", stored, err)
+	}
+}
+
+func TestTaskParsing(t *testing.T) {
+	text := "## 1. Group\r\n* [X] 1.1.1 Nested\r\n+ [ ] 1.2\r\n````markdown\n- [x] 9.1 Example\n```\n- [ ] 9.2 Still fenced\n````\n- [x] 2.1 Real\n- [ ] Unnumbered\n"
+	tasks := parseTasks(text)
+	if len(tasks) != 4 || tasks[0].Number != "1.1.1" || !tasks[0].Checked || tasks[1].Text != "" || tasks[2].Number != "2.1" {
+		t.Fatal(tasks)
+	}
+}
+
+func TestStagedApprovalDiffersFromWorkingCopy(t *testing.T) {
+	testTools.Setup(t)
+	root := testTools.NewRepo(t, testenv.RepoOptions{Changes: []string{"add-login"}})
+	dir := approval.DirOf(root, "add-login")
+	if _, err := approval.Approve(dir, "First", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	testenv.Git(t, root, "add", "-A")
+	testenv.Git(t, root, "commit", "-qm", "approve")
+	original, err := os.ReadFile(dir.SidecarPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := approval.Approve(dir, "Second", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	testenv.Git(t, root, "add", dir.SidecarPath())
+	testenv.WriteFile(t, dir.SidecarPath(), string(original))
+	if ok, err := committed(context.Background(), string(dir)); err != nil || ok {
+		t.Fatal(ok, err)
+	}
+}

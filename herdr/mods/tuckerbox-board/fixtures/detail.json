@@ -100,6 +100,7 @@
       { "at": "2026-11-12T07:40:00+10:00", "event": "rejected", "step": "review", "round": 2, "agent": "codex", "machine": "studio", "summary": "One finding left.", "findings": [
         { "severity": "medium", "file": "web/templates/login.html", "detail": "The error message still differs for an unknown email." }
       ] },
+      { "at": "2026-11-12T07:40:01+10:00", "event": "rerun", "step": "build", "round": 3, "agent": "claude", "machine": "studio" },
       { "at": "2026-11-12T07:40:01+10:00", "event": "step_started", "step": "build", "round": 3, "agent": "claude", "machine": "studio" },
       { "at": "2026-11-12T08:00:00+10:00", "event": "handoff", "step": "build", "round": 3, "agent": "claude", "machine": "studio", "to": "review", "summary": "Unknown email gets the same message." },
       { "at": "2026-11-12T08:00:01+10:00", "event": "step_started", "step": "review", "round": 3, "agent": "codex", "machine": "studio" },

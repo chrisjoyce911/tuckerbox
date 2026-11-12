@@ -74,7 +74,8 @@
       "worktree": "",
       "machine": "studio",
       "edit_folder": "/work/shop",
-      "depends_on": []
+      "depends_on": [],
+      "error": "tasks.md is unreadable; task progress may be incomplete"
     },
     {
       "change": "refund-flow",
@@ -329,9 +330,9 @@
         "total": 3
       },
       "approval": {
-        "state": "approved",
-        "by": "Sam Example",
-        "at": "2026-11-05T09:00:00+10:00",
+        "state": "none",
+        "by": "",
+        "at": "",
         "committed": true
       },
       "state": "",

@@ -19,6 +19,7 @@ Commands:
   run <change>... | --all   Run OpenSpec changes through the workflow, one
                             background process per change (--foreground:
                             one change, attached to this terminal)
+  board [--json] [--change <id>]  Show this repository’s change board
   status [--json]           Show every run on this machine
   logs <change> [step]      Show a step's agent output (--follow to watch)
   stop <change>             Stop a run's agent and mark the run stopped
@@ -103,6 +104,8 @@ func (a App) Run(args []string) int {
 		return a.resume(rest)
 	case "rerun":
 		return a.rerun(rest)
+	case "board":
+		return a.board(rest)
 	case "history":
 		return a.history(rest)
 	case "edit":

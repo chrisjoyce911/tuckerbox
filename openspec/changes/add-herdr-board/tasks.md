@@ -35,11 +35,11 @@
 
 ## 5. Board data (board-data)
 
-- [ ] 5.1 Derive columns from OpenSpec, approval, run state, workflow steps and the archive; Approved only when approval is required
-- [ ] 5.2 Cards: title, task progress, approval (state, by, at, committed), state, step, agent, round, branch, worktree, edit folder, machine, dependencies
-- [ ] 5.3 `--change <id>` detail: proposal, spec deltas, numbered tasks with checked state, rounds and findings, history
-- [ ] 5.4 Normalised remote URL as the repository key
-- [ ] 5.5 Tests for each board-data scenario; JSON schema snapshot test
+- [x] 5.1 Derive columns from OpenSpec, approval, run state, workflow steps and the archive; Approved only when approval is required
+- [x] 5.2 Cards: title, task progress, approval (state, by, at, committed), state, step, agent, round, branch, worktree, edit folder, machine, dependencies
+- [x] 5.3 `--change <id>` detail: proposal, spec deltas, numbered tasks with checked state, rounds and findings, history
+- [x] 5.4 Normalised remote URL as the repository key
+- [x] 5.5 Tests for each board-data scenario; JSON schema snapshot test
 
 ## 6. Herdr mod (herdr-board)
 
