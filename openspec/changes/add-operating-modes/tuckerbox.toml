@@ -1,0 +1,2 @@
+title = "Operating modes"
+depends_on = ["add-forge-shipping", "add-change-settings"]

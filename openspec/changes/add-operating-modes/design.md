@@ -1,0 +1,222 @@
+# Design
+
+## Context
+
+See proposal.md for why. What exists or is planned:
+- `add-core-runner` (archived): one machine; the change lock and slots (`formal/runs.tla`); its plan named `add-remote-machines` (`machines = [...]`, SSH or `hc run --on`, `status --all-machines`). This change absorbs it.
+- `add-herdr-board` (active): approval and the run gate, `board --json`, the board mod, which already merges cards from every connected Herdr machine by remote URL.
+- `add-forge-shipping` (active): forge access and tokens, the machine name (`machine` in machine config), and the ship-time claim: a lease push of the change's branch plus "one open merge request per branch", with a marker naming change, machine and run (`formal/ship.tla`). It decided against a draft claim during the steps, and said one could be added later without changing the ship-time rules.
+- `add-change-settings` (proposed): per-change `machines` preference and effective agents per step.
+
+Rules this design keeps: config lives in the repository; grants and tokens stay on the machine; one run per change; cross-platform Go; no daemon.
+
+## Goals / Non-Goals
+
+**Goals:**
+- An owner with several machines runs `tuckerbox dispatch` (or clicks Dispatch) and approved changes start on suitable machines.
+- No two machines ever work on, or ship, the same change because of a race, a crash or a late wake-up.
+- A team sees who holds each change, and only listed people's approval lets a run start.
+- Solo repositories don't change.
+
+**Non-Goals:**
+- **A daemon or watcher.** Dispatch is one pass. People run it, click it, or schedule it with their own tools (cron, launchd, Task Scheduler, a herdr-core schedule).
+- **Moving a run between machines.** A take-over starts again from the remote; the old machine's worktree stays as it was. Checkpointing work to the remote during the steps is a later change.
+- **Automatic take-over.** A person decides (see Open Questions).
+- **Fleets inside a team** (each person with several machines). One mode per repository for now.
+- **Copying credentials between machines.** Each machine signs in its own agents.
+- **Load balancing by CPU or memory.** Capacity is a number the owner sets.
+
+## Decisions
+
+### Configuration
+
+Repository config, committed:
+
+```toml
+mode = "fleet"          # "solo" (default), "fleet" or "team"
+
+[fleet]
+max_runs = 4            # claims across all machines (none: no limit)
+lease = "10m"           # an active claim not renewed for this long expires
+
+[team]
+approvers = ["sam", "alex"]   # forge logins whose approval counts
+```
+
+Machine config, never committed:
+
+```toml
+machine = "studio"      # from add-forge-shipping; default: the host name
+fleet_capacity = 2      # fleet runs this machine takes at once (default 0)
+
+[machines.mini]
+ssh = "mini"            # an SSH destination, e.g. an alias in ~/.ssh/config
+
+[machines.lab]
+hc = "lab"              # a herdr-core machine, started with hc run --on
+```
+
+`add-core-runner` sketched `machines = [...]` in config. It is machine config here: how to reach a machine (host, user, key, alias) is that person's network detail, and a repository must not name hosts. The repository only says the mode and its limits.
+
+`fleet_capacity` defaults to 0, so a machine takes fleet work only when its owner says so. A laptop listed for status doesn't silently become a worker.
+
+### Why a git ref for fleet claims
+
+Options for the shared state between an owner's machines:
+
+| Option | Why not |
+|---|---|
+| The forge (a draft merge request) | Needs a token on every machine and forge API calls for every claim and renewal; doesn't work for `ship = "local"` or a remote without an API. |
+| A file on a shared drive | Not every machine shares one; locks over network file systems are unreliable. |
+| Herdr or herdr-core state | Tuckerbox works without Herdr. |
+| A coordinator service | That's a daemon. |
+| **A ref on the git remote** | Every fleet machine already fetches and pushes it with git's own credentials. `--force-with-lease` is a compare-and-swap, and `--atomic` covers several refs at once. |
+
+So the claims are one ref, `refs/tuckerbox/fleet`, holding a commit whose tree has one small TOML file per claim (`claims/<change>.toml`: machine, run, epoch, state, renewed_at). One ref, not one per change, so the fleet limit is exact: a claim push checks the count in the same compare-and-swap. The cost is contention: every claim and renewal moves the same ref. With a handful of machines and renewals every two minutes that is a few pushes a minute; a refused push fetches and tries again.
+
+The ref is outside `refs/heads/` and `refs/tags/`, so CI does not run on it, it doesn't show as a branch, and a normal `git fetch` doesn't fetch it. Tuckerbox fetches it by name. The commits are tiny and each has the previous as parent, so the history of claims can be read with `git log refs/tuckerbox/fleet` when debugging. Old history can be squashed by a release push later if it grows.
+
+### Claim lifecycle
+
+```
+            run (claim push)          stop / block / fail
+  (none) ────────────────► active ─────────────────────► parked
+     ▲                      │  ▲  ◄──── resume / rerun ────┘
+     │      merged / release │  │ renew (every lease/5)
+     │                      ▼  │
+     └────────────────── ready ◄─ run becomes ready
+                     no renewal for `lease`
+              active ─────────────────────► expired ──run --take-over──► active (epoch+1)
+```
+
+- **Active** claims are renewed by the run's own process, the background `tuckerbox run` that already exists for each run. That is not a daemon: it lives exactly as long as the run.
+- **Parked** claims belong to stopped, blocked and failed runs, which have no process. They don't expire, because "blocked overnight" is normal, and a machine shouldn't lose its change because nobody looked. They still count toward `max_runs`.
+- **Ready** claims keep other machines from starting a finished change. They don't count toward the limit. `merged` removes the claim; any fleet ref write also drops claims of changes now archived on the base.
+- **Expired** is not stored. A reader works it out from `renewed_at` and `lease`, allowing 1 minute of clock skew. Nothing removes an expired claim by itself: a person takes over or releases it.
+
+### Fencing: why clocks don't decide safety
+
+A machine can be slow, asleep or cut off and still believe it holds its claim. Leases can't stop that; fencing does. Every action with an effect on shared state carries a lease on the fleet ref:
+- **Renewal** checks the claim is still its own (same machine and epoch). If not, the run stops its agent and blocks.
+- **The ship stage's first push** (from `add-forge-shipping`) becomes `git push --atomic --force-with-lease=refs/heads/<b>: --force-with-lease=refs/tuckerbox/fleet:<seen> <remote> <b> <renewal>:refs/tuckerbox/fleet`. Both refs move, or neither. A renewal commit is pushed with it because git only checks a lease on a ref the push updates.
+
+The steps themselves only change the machine's own worktree, so a zombie working on is wasted effort, not damage. Its first effect outside the machine is the push, and that is fenced. So expiry timing affects only how soon a person may take over, never whether two machines can both ship. The model checks this by letting `Expire` happen at any moment, with no clock.
+
+### Claiming before the worktree
+
+`tuckerbox run` in fleet mode: run gate (approval, settings), then fetch the fleet ref and claim, then the change lock and worktree as today. Claiming first means a refused run leaves nothing behind. The change lock (`runs.tla`) still guards runs on one machine; the claim guards between machines.
+
+`resume` and `rerun` re-activate a parked claim with a lease push and refuse if the claim isn't theirs, so a run whose claim was taken over can't come back to life.
+
+### Take-over
+
+`tuckerbox run --take-over <change>` claims an expired claim with epoch + 1 (`--force` also for a parked one) and starts the run from the change's remote branch if it exists, else from the base. The old machine's worktree is left alone: Tuckerbox never deletes work. When the old machine wakes, its next renewal finds the claim gone and blocks its run with `claim taken by <machine>`.
+
+### Dispatch
+
+```
+tuckerbox dispatch [change...] [--dry-run] [--json]
+  fetch base and fleet ref
+  changes  = active, valid, run gate passes, dependencies met, no claim  (Approved column order)
+  reports  = tuckerbox machine --json --for <remote> on this machine and each [machines.*], in parallel, 30 s timeout
+  for each change, until max_runs:
+    candidates = answered, free capacity, has checkout, every step's agent installed and not signed out
+    pick       = first in change.machines that is a candidate; else most free capacity; else name
+    start      = ssh <dest> -- tuckerbox run --for <remote> <change>   |  hc run --on <name> -- ...  | local
+  print what happened, exit
+```
+
+- **Placement is advice.** Reports are a snapshot; another dispatcher may act at the same time. The started `tuckerbox run` claims the change itself, so the claim, not the dispatcher, decides. A refused claim is reported, not retried elsewhere in the same pass, which keeps a pass simple and bounded.
+- **`--for <remote>`** finds the machine's checkout of the repository through the machine index the board already uses (normalised remote URL). A machine without a checkout is not a candidate; dispatch never clones.
+- **Agents per change** come from `add-change-settings`' effective settings: a change whose build step uses Codex needs a machine with Codex.
+- **Sign-in `unknown` is a candidate,** with a note. Refusing unknown would rule out every custom agent.
+- **SSH** runs without a terminal (`ssh -T -o BatchMode=yes`), so it never prompts. `hc run --on` is used when the entry says `hc`; herdr-core then shows the run as a terminal on that machine.
+
+Why not let each machine pull work itself (Muster's watcher)? That needs a process on each machine checking on a timer: a daemon. Dispatch from any one machine, on demand, gives the same result, and a person who wants it periodic can schedule `tuckerbox dispatch` with their own tools.
+
+### Sign-in checks
+
+`doctor` and `machine --json` ask each installed built-in agent CLI whether it is signed in, with its own non-interactive status command, a 5-second timeout, and without starting a session or spending tokens. Anything else is `unknown`. The exact commands are settled when implemented (Open Questions); the spec only needs the three states.
+
+### Team mode: the forge claim, taken at the start
+
+Team mode uses `add-forge-shipping`'s claim unchanged in its rules (lease push of the branch, one open merge request per branch, the marker), and takes it when the run starts:
+
+1. Run gate (approval by a listed approver).
+2. Make the branch with one empty commit, `Start <change>` with `[skip ci]` in its message.
+3. Push it with the lease that expects no branch.
+4. Open a **draft** merge request with the marker, now with `by=<forge login>`.
+5. Run the steps on top of that commit.
+6. At the ship stage, find that draft (its marker is ours), update its title and body, and mark it ready.
+
+`add-forge-shipping` gave three reasons against a draft during the steps; each is met here:
+- *GitHub refuses a pull request with no commits beyond the base:* the empty start commit is one.
+- *Every push during the steps starts CI:* there is one push, marked `[skip ci]`, which GitHub Actions and GitLab both honour. Nothing else is pushed until the ship stage.
+- *Step commits may be amended or rebased:* they build on top of the start commit, and the first push after it is at the ship stage, a fast-forward with the lease.
+
+So `ship.tla`'s argument covers team mode as is: the start push is the model's first `Push`, and opening the draft is `Open`. `OneClaim` and `NoLostPush` hold. No new model is needed for team mode.
+
+Why not the fleet ref for teams too? People work from their own machines and see their work on the forge. A draft merge request with an owner is visible to everyone, including people without Tuckerbox, and the forge already knows who can push. A fleet ref is invisible on the forge.
+
+### Approvers
+
+`tuckerbox approve` in team mode asks the forge who the token belongs to and records `login` in `[approval]`. The run gate counts the approval only if `login` is in `[team] approvers`.
+
+Trust: `tuckerbox.toml` is a text file, so anyone can type a login into it. What makes an approval real is that the run gate judges the *base branch*, and the base branch is protected: getting a change onto it goes through a reviewed merge request. So in team mode an approval is as strong as the base branch's protection. The design says so in `tuckerbox check`'s team-mode output, and the owner may want more (Open Questions).
+
+### Board
+
+`board --json` gains `mode`, the fleet count, and `claim` on cards. In fleet mode claims come from the fleet ref, fetched at most once a minute; in team mode from the forge's open merge requests with markers, at most once a minute, kept in the state directory. That is an exception to `add-forge-shipping`'s "the board never calls the forge": in team mode the owner of a change is on the forge, and nowhere else. One cached request a minute is cheap.
+
+A claimed change whose machine isn't connected to Herdr still shows its claim, so an expired claim on a sleeping machine is visible and can be taken over from the board.
+
+### How this fits the other changes
+
+- `ship-claim` and `forge-shipping`: referenced, not restated. The only narrowing is team mode's draft at start and "mark ready" at the ship stage (`team-claims`, `Ready at the ship stage`).
+- `board-data` and `herdr-board`: additions are in `modes-board`, as `ship-board` does.
+- `run-status`: `status --all-machines` adds a `machine` field, an addition within the format version.
+- `change-runs`' `Parallel limit` is unchanged: per machine. Fleet limits are new and separate.
+
+### Model and code
+
+`formal/fleet.tla` models the fleet ref, claims, renewals, expiry, crashes and wake-ups, take-over and the fenced first push (see model.md). Its assumptions, each one git operation:
+
+| Model | Code (under `internal/`) |
+|---|---|
+| `Fetch` | `fleet.fetch`: `git fetch <remote> +refs/tuckerbox/fleet:refs/tuckerbox/fleet` |
+| `Claim`, `Renew`, `Release`: lease push of the fleet ref | `fleet.update`: build the new commit, `git push --force-with-lease=refs/tuckerbox/fleet:<seen>`; on refusal fetch and re-decide |
+| `Ship`: branch and fleet ref in one atomic push | `ship.push` in fleet mode: `git push --atomic` with both leases |
+| `Expire` | no code: a reader compares `renewed_at` with its clock |
+
+`OneHolderPerEpoch`, `FencedPush` and `WithinFleetLimit` are named by `fleet-claims` requirements. `scripts/tla-check.sh` already runs every `formal/*.cfg` with its broken variants.
+
+## Risks / Trade-offs
+
+- **[Contention on one ref]** → Every claim and renewal pushes the same ref. Fine for a handful of machines; renewals are every two minutes. If it ever isn't, claims can move to one ref per change and the limit to a separate counter ref, at the cost of a second model.
+- **[Remote forbids custom refs]** → Some hosts or push rules refuse refs outside `refs/heads/`. The first claim then fails with the remote's message, and `tuckerbox doctor` in a fleet repository reports whether the fleet ref can be fetched. Fallback, if this turns up in practice: a branch named `tuckerbox/fleet`, which CI may then run on.
+- **[Clock skew]** → Affects only when a claim reads as expired; safety comes from fencing. A 1-minute allowance avoids most false expiries.
+- **[Laptop sleeps during a step]** → Its claim expires; if nobody takes over, it renews on wake and carries on. If someone did, it blocks at its next renewal and its work stays in its worktree.
+- **[Take-over loses work]** → Steps' work on the old machine isn't on the remote. The confirmation says so. Checkpointing is a later change.
+- **[A dispatcher overfills a machine]** → Capacity reports are a snapshot. The target machine's own slots (`max_parallel`, `runs.tla`) still hold; extra runs queue there.
+- **[Agent signed in but out of quota]** → Sign-in says nothing about limits. The step fails as it does today; dispatch doesn't predict quota.
+- **[Team approvals typed by hand]** → As strong as base-branch protection (see Approvers).
+- **[Forged markers]** → Anyone with push access can open a merge request with a marker naming someone else. In team mode the marker's `by` is checked against the merge request's author from the forge; a mismatch is treated as someone else's claim.
+
+## Migration Plan
+
+- Solo is the default; nothing changes until a repository sets `mode`.
+- Fleet: set `mode = "fleet"`, set `fleet_capacity` and `[machines.*]` on each machine, check with `tuckerbox doctor` and `tuckerbox dispatch --dry-run`. Runs already in progress keep running unclaimed; `tuckerbox check` lists them.
+- Team: set `mode = "team"`, `ship = "mr"`, `[team] approvers`; each person needs a forge token.
+- Rollback: set `mode = "solo"`. Leftover claims are listed by `check` and removed by `tuckerbox claim release --force`; draft merge requests stay for people to close.
+
+## Open Questions
+
+The specs take the stated default for each. A different answer from the owner is a small follow-up, not a change to this design's approach.
+
+- **Headless sign-in:** how should a machine reached only over SSH sign in its agents? Options: an API key in that machine's environment, the CLI's own long-lived token command, or a person signing in once at the machine. Tuckerbox only reports the state either way.
+- **The exact sign-in check per CLI** (Claude Code, Codex): which status command, and whether it works without a network.
+- **Automatic take-over:** should `dispatch` take over expired claims by itself (`[fleet] takeover = "auto"`)? Off for now because work on the old machine is left behind.
+- **Lease length:** 10 minutes, renewed every 2. Shorter frees a crashed machine's change sooner; longer tolerates sleep and bad networks.
+- **Team approvals:** is base-branch protection enough, or should approvals need a signed commit, or an approving review on the forge from a listed approver?
+- **Self-approval in teams:** may the person who approved a change also start it?
+- **Fleet inside a team:** should a team member be able to run their own fleet? Not in this change.
