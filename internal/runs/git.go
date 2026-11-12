@@ -313,7 +313,7 @@ func (r Repo) EnsureWorktreeFrom(ctx context.Context, cfg config.Worktree, chang
 		}
 		// The change must be on the base, or its agents can't read it.
 		if out, err := git(ctx, r.Root, "ls-tree", "--name-only", base, "openspec/changes/"+change+"/"); err != nil || out == "" {
-			return ws, fmt.Errorf("change %s is not on the base branch %s; commit it there first", change, base)
+			return ws, fmt.Errorf("change %s is not on the base branch %s; commit it there first", change, ws.Base)
 		}
 		if _, err := git(ctx, r.Root, "worktree", "add", "--no-track", "-b", ws.Branch, ws.Path, base); err != nil {
 			return ws, err

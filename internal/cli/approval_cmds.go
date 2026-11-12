@@ -194,6 +194,17 @@ func (g *runGate) check(ctx context.Context, change string) (string, error) {
 	return sp.Rev, judgeStart(ctx, g.repo, change, sp, true)
 }
 
+// overrides refuses change when its step overrides, where its run would
+// start from, are not allowed by the repository config. The engine checks
+// again under the change lock.
+func (g *runGate) overrides(ctx context.Context, change string) error {
+	sp, err := g.start(ctx, change)
+	if err != nil {
+		return err
+	}
+	return runs.CheckOverrides(ctx, g.cfg, g.repo.Root, change, sp)
+}
+
 // start says where change's run would start from: its worktree, or the
 // commit a new one would be made at. The base is fetched once.
 func (g *runGate) start(ctx context.Context, change string) (runs.StartPoint, error) {
