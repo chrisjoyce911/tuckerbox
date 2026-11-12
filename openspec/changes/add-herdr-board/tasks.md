@@ -46,7 +46,7 @@
 ## 6. Herdr mod (herdr-board)
 
 - [x] 6.1 `herdr/mods/tuckerbox-board/`: board view with header counts, columns and cards (look based on Kelpie's board), approval badge on each card
-- [ ] 6.2 Gather from every connected machine with `exec({on})`; merge by change id; show unreachable machines
+- [x] 6.2 Gather from every connected machine with `exec({on})`; merge by change id; show unreachable machines
 - [x] 6.3 Card detail dialog: markdown proposal, tasks with tick boxes, approval, last validation result, dependencies, rounds, history
 - [x] 6.4 Run actions: Start (Approved cards only, or Proposed when approval is off), Stop, Resume, Re-run step, Follow log (tab), Open proposal (pane), Open worktree (space); show command errors
 - [x] 6.5 Edit: pane on the card's machine running `tuckerbox edit`; `tuckerbox validate --json` when it closes, kept in memory; Validate button if pane close can't be detected; hidden while queued or running
@@ -66,5 +66,5 @@
 ## 7. Wrap-up
 
 - [ ] 7.1 Screenshots in README
-- [ ] 7.2 Document approval in README: approve, commit and push before `tuckerbox run`; `require_approval = false` to turn it off
+- [x] 7.2 Document approval in README: approve, commit and push before `tuckerbox run`; `require_approval = false` to turn it off
 - [ ] 7.3 Archive this change after the implementation is accepted (after `add-core-runner`); then fold the run gate and the new config keys into `change-runs` and `repo-config`

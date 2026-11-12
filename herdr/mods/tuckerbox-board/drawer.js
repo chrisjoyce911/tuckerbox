@@ -7,7 +7,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, placement, run } from "herdr";
-import { MOD, loadBoard, locate, candidates } from "./data.js";
+import { MOD, loadAll, locate, candidates } from "./data.js";
 import { counts, candidatesKey, drawerRows, DRAWER_POLL_MS } from "./model.js";
 import { toggleCall } from "./actions.js";
 import { dot, SPINNER } from "./ui.js";
@@ -36,7 +36,7 @@ export class DrawerView extends View {
         const at = await locate(null);
         let n = null;
         if (at.found) {
-          const b = await loadBoard(at);
+          const b = await loadAll(at);
           n = b.error ? { error: b.error.message } : counts(b);
         }
         this.at = at;

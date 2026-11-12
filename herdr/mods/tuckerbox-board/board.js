@@ -3,7 +3,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, props, openOverlay, closeOverlay, spaces, panes, focused, run, notify } from "herdr";
-import { MOD, loadBoard, locate, candidates, fixturesFolder } from "./data.js";
+import { MOD, loadAll, locate, candidates, fixturesFolder } from "./data.js";
 import { group, counts, columnName, due, isShown, ago, needsYou, candidatesKey, openGate, NO_CONFIG } from "./model.js";
 import { cardActions, invocation, actionLabel, defaultStep, ACTIONS, dockCall, undockCalls } from "./actions.js";
 import { perform, watchEdits, changed } from "./perform.js";
@@ -60,7 +60,7 @@ export class BoardView extends View {
       try {
         // The fixtures need no repository; otherwise find this space's (herdr-board: Which repository).
         at = (await fixturesFolder()) ? { found: true, root: "", cwd: "", on: null, space: null } : await locate(self);
-        b = at.found ? await loadBoard(at) : { error: { code: "no_config", message: "" } };
+        b = at.found ? await loadAll(at) : { error: { code: "no_config", message: "" } };
       } catch (e) { b = { error: { code: "failed", message: String(e?.message ?? e) } }; }
       this.loading = false;
       this.last = Date.now();
@@ -211,6 +211,9 @@ export class BoardView extends View {
       .when(Boolean(b && !b.require_approval), (el) => el.child(div().text_size(11).text_color(tm.dim).child("approval off")))
       .when(Boolean(this.readError), (el) => el.child(div().text_size(11).text_color(tm.blocked).truncate().max_w(260).tooltip(this.readError).child("last read failed")))
       .child(div().flex_1())
+      // Machines that couldn't be asked: named, their cards missing, the others shown.
+      .children((b?.unreachable ?? []).map((u, i) => div().id(`unreachable-${i}`).text_size(11).text_color(tm.blocked)
+        .tooltip(u.message).child(`${u.machine ?? "this computer"} unreachable`)))
       .when(Boolean(b?.machine), (el) => el.child(div().text_size(11).text_color(tm.dim).child(b.machine)))
       // Dock only with a board to show: no Tuckerbox config, no Dock.
       .when(Boolean(overlay && b && !b.fixtures), (el) => el.child(tiny("dock", "Dock ⇥", (_e, cx) => this.dock(cx), { tooltip: "Show the board as a pane beside the terminals" })))

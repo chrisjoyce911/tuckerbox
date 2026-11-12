@@ -19,7 +19,7 @@ stores no task state, writes no files and never moves a card by itself
 | `perform.js` | Runs an action: `exec` of the tuckerbox command on the card's machine, or the Herdr tab, pane or view for it. With the fixtures it only says what it would run |
 | `edits.js` | Edit tracking: notes the editor's pane, validates when it closes, keeps the result in memory |
 | `proposal.js` | `view: "proposal"`: a change's proposal in a pane (Open proposal) |
-| `data.js` | Finds the space's Tuckerbox repository, runs `tuckerbox board --json` there on the space's machine, or reads the fixtures |
+| `data.js` | Finds the space's Tuckerbox repository, runs `tuckerbox board --json` there on the space's machine and `--repo` on the other machines, or reads the fixtures |
 | `ui.js` | Buttons, chips and badges, in theme colors |
 | `fixtures/` | `board.json` and `detail.json`: the board-data contract, by example |
 | `test/` | `node --test test/` (no dependencies), and `check-fixtures.mjs` |
@@ -84,6 +84,20 @@ closes with the toast "No Tuckerbox config in this space", the drawer draws
 nothing and there is no Dock; a board that already showed one says so.
 `git rev-parse --show-toplevel` and the config read are kept 30 s (10 s for
 no), so the copies look every second and follow a space switch at once.
+
+**Every machine:** after reading its own repository, the board asks each
+other machine `machines()` lists for the same repository with
+`tuckerbox board --json --repo <repo>` (8 s each, in parallel). There
+`tuckerbox` finds its checkout of that remote through its machine index, so
+a machine sees a repository once it has run one of its changes there.
+Cards merge by change id: a queued or running copy wins, then any copy with
+a run, else the board's own. Each card keeps its machine and checkout, and
+its actions and detail run there. A card from a machine with the other
+column layout goes in the matching column. A machine with no checkout adds
+nothing; one that is offline or fails is named "unreachable" in the header,
+with the error as a tooltip, and the other cards still show. A repository
+with no remote (its key is its path) is read on its own machine only. The
+drawer counts the same merged board.
 
 **Opening, hiding, docking:** `mod.open tuckerbox-board` (the toggle key,
 the drawer's click) opens the window or closes it. Dock (window header) runs

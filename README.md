@@ -48,6 +48,7 @@ tuckerbox run --foreground fix-login   # one change, attached to this terminal
 tuckerbox status                   # every run on this machine (--json for dashboards)
 tuckerbox board                    # this repository’s changes, approval and workflow columns
 tuckerbox board --change fix-login --json  # board plus proposal, tasks, rounds and history
+tuckerbox board --json --repo github.com/you/shop  # this machine's checkout of that repository, from anywhere
 tuckerbox logs fix-login --follow  # watch the running step's agent
 tuckerbox stop fix-login           # stop the agent; the run is marked stopped
 tuckerbox resume fix-login         # continue a stopped or blocked run
@@ -64,6 +65,22 @@ tuckerbox validate fix-login         # openspec validate --strict (--json for to
 ```
 
 They work in the change's worktree if it has one on this machine, else in the checkout, and refuse while its run is queued or running. They never commit. The editor is `editor` in machine config, else `$VISUAL`, else `$EDITOR`; a GUI editor must wait for the file to close (`code --wait`). `edit` validates strictly when the editor exits.
+
+A change must be approved before `tuckerbox run` starts it:
+
+```sh
+tuckerbox approve fix-login     # validates strictly, then records the approval
+git add openspec/changes/fix-login/tuckerbox.toml
+git commit -m "Approve fix-login" && git push
+tuckerbox run fix-login
+tuckerbox unapprove fix-login   # withdraw it (also uncommitted)
+```
+
+`approve` writes an `[approval]` table (a hash of the proposal, design, model, tasks and spec deltas, your git `user.name` and the time) to `openspec/changes/<change>/tuckerbox.toml`. It never commits, and the run judges the files it will start from: the change's worktree if it has one, else its branch or the base branch after a fetch. So approve, commit and push before `tuckerbox run`, or it refuses and says the approval isn't committed. Ticking tasks keeps the approval; any other edit to those files makes it stale on every machine, and the change needs approving again. `tuckerbox run --all` skips changes that aren't approved and lists them. Resume and re-run don't check approval again. To turn the gate off for a repository, set it in the repository config (machine config may not):
+
+```toml
+require_approval = false
+```
 
 Each change gets its own worktree (by default `../<repo>-worktrees/<change>`) and branch, made from the remote's default branch after a fetch. Existing worktrees are reused as they are: Tuckerbox never resets, cleans or stashes them. At most `max_parallel` changes run at once; the rest are `queued` and start in the order given. With `ship = "local"`, a run that finishes commits what is left on its branch and becomes `ready`; nothing is pushed. A change must pass `openspec validate` and be committed on the base branch.
 
