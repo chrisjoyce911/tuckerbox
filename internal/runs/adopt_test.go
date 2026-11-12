@@ -22,6 +22,21 @@ type fakeAdopter struct {
 	runs     int
 	ends     int
 	endFails bool
+	// saved are the "step round name" of each SaveHistory, which happens
+	// only after an end.
+	saved []string
+}
+
+var _ agent.Adopter = (*fakeAdopter)(nil)
+
+func (b *fakeAdopter) SaveHistory(logPath, step string, round int, name string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.live {
+		return errors.New("saving the history of a live terminal")
+	}
+	b.saved = append(b.saved, step+" "+strconv.Itoa(round)+" "+name)
+	return nil
 }
 
 func (b *fakeAdopter) Name() string { return "terminal" }
@@ -103,6 +118,9 @@ func TestStopAfterAdoptionTakesTheSlot(t *testing.T) {
 				if cur.State != Running || cur.Terminal == nil || cur.Terminal.Name != name || cur.Slot == nil {
 					t.Errorf("run after the failed end: %s terminal %+v slot %v", cur.State, cur.Terminal, cur.Slot)
 				}
+				if len(b.saved) != 0 {
+					t.Errorf("history saved while the agent lives: %v", b.saved)
+				}
 				return
 			}
 			if err != nil || r.State != Stopped {
@@ -113,6 +131,9 @@ func TestStopAfterAdoptionTakesTheSlot(t *testing.T) {
 			}
 			if cur.State != Stopped || cur.Terminal != nil || cur.Round != 1 {
 				t.Errorf("run %s round %d terminal %+v", cur.State, cur.Round, cur.Terminal)
+			}
+			if want := "build 1 " + name; len(b.saved) != 1 || b.saved[0] != want {
+				t.Errorf("histories saved %v, want [%s]", b.saved, want)
 			}
 		})
 	}

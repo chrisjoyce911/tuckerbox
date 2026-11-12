@@ -826,3 +826,84 @@ func TestStartWithAnUnreadableAnswer(t *testing.T) {
 		t.Errorf("hc run calls: %d, want 1", len(f.runCalls()))
 	}
 }
+
+// Stopped while hc run waits on a server that launches the terminal only
+// after startSettle: Run finds no terminal, so before it reports stopped it
+// gives the slot a fresh claim. When the terminal does launch, its
+// agent-hold finds another claim and starts no agent. Without a way to
+// fence the slot, a start that may still come keeps the step unfinished
+// (an *EndError).
+func TestStopBeforeALateLaunch(t *testing.T) {
+	for _, fence := range []bool{true, false} {
+		t.Run("fence="+strconv.FormatBool(fence), func(t *testing.T) {
+			f := newTermFixture(t)
+			f.env.SetPlan(t, map[string]testenv.Action{"build": {ExitAfter: true}})
+			late := startSettle + time.Second
+			f.setFault("launch-later", late.String())
+			s := f.step("build", "builder", 1, interactiveFake())
+			ownerFile := filepath.Join(s.Term.Common, "slots", "0.owner")
+			testenv.WriteFile(t, ownerFile, "run-1-claim\n")
+			s.Term.Owner = "run-1-claim"
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			opts := termOpts
+			opts.EndTimeout = 2 * time.Second
+			fences := 0
+			if fence {
+				opts.Fence = func() error {
+					fences++
+					testenv.WriteFile(t, ownerFile, "fresh-claim\n")
+					return nil
+				}
+			}
+			opts.OnTerminal = func(_, addr string) {
+				if addr == "" {
+					go func() {
+						for len(f.runCalls()) == 0 {
+							time.Sleep(20 * time.Millisecond)
+						}
+						time.Sleep(200 * time.Millisecond)
+						cancel()
+					}()
+				}
+			}
+			began := time.Now()
+			o, err := f.be.Run(ctx, s, opts)
+			defer func() { _ = f.hc.End(context.Background(), s.Term.Name, 10*time.Second) }()
+			if !fence {
+				var ee *EndError
+				if !errors.As(err, &ee) || ee.Name != s.Term.Name {
+					t.Fatalf("Run without a fence returned %v, want an *EndError for %s", err, s.Term.Name)
+				}
+				return
+			}
+			if err != nil || !o.Stopped || fences != 1 {
+				t.Fatalf("Run returned stopped=%v, %v after %d fences; want stopped after one", o.Stopped, err, fences)
+			}
+			if f.get(s.Term.Name) != nil && time.Since(began) < late {
+				t.Fatal("the terminal launched before Run gave up on it; the test does not cover a late launch")
+			}
+			var term *HCTerminal
+			waitUntil(t, "the late terminal to launch and end", 15*time.Second, func() bool {
+				term = f.get(s.Term.Name)
+				return term != nil && !term.Live()
+			})
+			out, _ := os.ReadFile(filepath.Join(f.env.HCDir, s.Term.Name+".out"))
+			if strings.Contains(string(out), "fakeagent: ") || !strings.Contains(string(out), "given to another run") {
+				t.Errorf("the late terminal's output: %q; want agent-hold to refuse to start the agent", out)
+			}
+		})
+	}
+}
+
+// waitUntil polls cond until it holds, failing the test after limit.
+func waitUntil(t *testing.T, what string, limit time.Duration, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(limit)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}

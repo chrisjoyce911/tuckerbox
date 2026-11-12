@@ -121,6 +121,10 @@ type Adopter interface {
 	Backend
 	LiveAgent(ctx context.Context, name string) (*HCTerminal, error)
 	EndAgent(ctx context.Context, name string) error
+	// SaveHistory appends the history of the terminal called name to the
+	// step log at logPath, once it has ended and before the run lets the
+	// terminal go, so logs keeps the agent's session.
+	SaveHistory(logPath, step string, round int, name string) error
 }
 
 // endTimeout bounds the wait for an ended terminal to go.
@@ -463,12 +467,56 @@ func (t Terminal) reconcileStart(ctx context.Context, s Step, opts Options, log 
 			}
 			return nil, nil
 		}
-		if mine || definite || time.Now().After(deadline) {
+		if mine || definite {
 			logLine(log, "step %s round %d: terminal did not start: %v", s.Step, s.Round, startErr)
 			return nil, nil
 		}
+		if time.Now().After(deadline) {
+			return t.fenceStart(bg, s, opts, log, startErr)
+		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// fenceStart settles a start that hc run did not answer and whose terminal
+// has not appeared: herdr-core may still launch it after the step has
+// ended. It gives the slot a fresh claim (Options.Fence), so the late
+// terminal's agent-hold refuses to start the agent, and then looks once
+// more: a terminal that appeared before the fence may have passed its
+// check, so it is ended. herdr-core creates a terminal before it runs its
+// program, so one that is not there now runs agent-hold after the fence.
+// Without a fence, or when the fence or that look fails, the agent may yet
+// start: the result is an *EndError, and the run keeps the name and slot
+// that find it.
+func (t Terminal) fenceStart(bg context.Context, s Step, opts Options, log io.Writer, startErr error) (*HCTerminal, error) {
+	name := s.Term.Name
+	if opts.Fence == nil {
+		if s.Term.Owner == "" {
+			// Its agent-hold checks no claim, and the run holds no slot a
+			// late agent could take.
+			logLine(log, "step %s round %d: terminal did not start: %v", s.Step, s.Round, startErr)
+			return nil, nil
+		}
+		return nil, &EndError{Name: name, Err: fmt.Errorf("starting it gave %v, and it may still start", startErr)}
+	}
+	if err := opts.Fence(); err != nil {
+		logLine(log, "step %s round %d: giving slot %d a fresh claim: %v", s.Step, s.Round, s.Term.Slot, err)
+		return nil, &EndError{Name: name, Err: fmt.Errorf("starting it gave %v; it may still start, and fencing its slot failed: %w", startErr, err)}
+	}
+	cur, err := t.HC.Get(bg, name)
+	if err != nil {
+		return nil, &EndError{Name: name, Err: fmt.Errorf("starting it gave %v, and looking for it gave %w", startErr, err)}
+	}
+	if cur.Live() {
+		logLine(log, "step %s round %d: terminal %s started late; ending it", s.Step, s.Round, name)
+		if err := t.HC.End(bg, name, opts.EndTimeout); err != nil {
+			return nil, &EndError{Name: name, Err: err}
+		}
+		return nil, nil
+	}
+	logLine(log, "step %s round %d: terminal did not start: %v; slot %d has a fresh claim, so a late start runs no agent",
+		s.Step, s.Round, startErr, s.Term.Slot)
+	return nil, nil
 }
 
 // lookup returns the step's terminal, or nil when there is none. A lookup

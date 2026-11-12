@@ -34,6 +34,27 @@ func startHost(name string) (int, error) {
 	return pid, cmd.Process.Release()
 }
 
+// launchLater starts this program, detached, to run "run args" after d.
+func launchLater(d time.Duration, args []string) error {
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(self, append([]string{"run"}, args...)...)
+	cmd.Env = append(os.Environ(), "FAKEHC_LATER="+d.String())
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	defer null.Close()
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = null, null, null
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
+}
+
 // host runs the terminal's program: its input is what send appends to
 // <name>.in, its output goes to <name>.out. It waits for it and records
 // how it ended.

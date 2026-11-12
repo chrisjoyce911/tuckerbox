@@ -186,3 +186,24 @@ func TestEffective(t *testing.T) {
 		t.Error("Effective changed the run")
 	}
 }
+
+// Fence gives a held slot a fresh claim, so an agent-hold carrying the old
+// token refuses; a released slot cannot be fenced.
+func TestSlotFence(t *testing.T) {
+	common := t.TempDir()
+	s, err := TrySlot(common, 1)
+	if err != nil || s == nil {
+		t.Fatalf("TrySlot: %v %v", s, err)
+	}
+	old := s.Owner
+	if err := s.Fence(); err != nil {
+		t.Fatal(err)
+	}
+	if s.Owner == old || SlotOwner(common, 0) != s.Owner {
+		t.Errorf("after Fence: owner %q, file %q, old %q", s.Owner, SlotOwner(common, 0), old)
+	}
+	s.Release()
+	if err := s.Fence(); err == nil {
+		t.Error("Fence of a released slot succeeded")
+	}
+}

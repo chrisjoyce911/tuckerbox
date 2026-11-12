@@ -82,6 +82,13 @@ type Options struct {
 	// terminal to go before it reports that it would not end (default 30
 	// seconds).
 	EndTimeout time.Duration
+	// Fence, when set, gives the run's slot a fresh claim (runs.Slot), so
+	// that an agent-hold carrying the old one refuses to start its agent
+	// (terminal backend). Run calls it when hc run failed without saying
+	// that herdr-core refused the start and no terminal has appeared: the
+	// start may still be on its way, and the step must not end while a
+	// terminal could launch an agent after it.
+	Fence func() error
 }
 
 // Outcome is what happened when a step's agent ran.

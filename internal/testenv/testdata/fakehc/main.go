@@ -32,6 +32,10 @@
 //	             with a server error ("0" fails every get)
 //	run-reply    "garbage": run starts its terminal, then answers with
 //	             text that is not JSON
+//	launch-later a Go duration: run hands its start to a detached process
+//	             that launches the terminal that long later, as a server
+//	             still working on a request whose client went away would,
+//	             and never answers itself (it waits to be killed)
 package main
 
 import (
@@ -135,7 +139,8 @@ func logCall(args []string) {
 
 func main() {
 	args := os.Args[1:]
-	if len(args) > 0 && args[0] != "host" {
+	// A launch-later start was logged when its call came.
+	if len(args) > 0 && args[0] != "host" && os.Getenv("FAKEHC_LATER") == "" {
 		logCall(args)
 	}
 	if strings.Join(args, " ") == "server status" {
@@ -268,6 +273,14 @@ func run(args []string) {
 	}
 	if !bg || r.Name == "" || r.Cwd == "" || len(r.Argv) == 0 {
 		fail(2, "fakehc run: want --bg --name --cwd and a program")
+	}
+	if d, err := time.ParseDuration(fault("launch-later")); err == nil && os.Getenv("FAKEHC_LATER") == "" {
+		must(launchLater(d, args))
+		time.Sleep(time.Hour)
+		return
+	}
+	if d, err := time.ParseDuration(os.Getenv("FAKEHC_LATER")); err == nil {
+		time.Sleep(d)
 	}
 	unlock := lock()
 	defer unlock()

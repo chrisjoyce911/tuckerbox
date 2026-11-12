@@ -106,8 +106,9 @@ func Active(path string) bool {
 type Slot struct {
 	N int
 	// Owner is the token this run wrote to the slot's owner file.
-	Owner string
-	f     *flock.Flock
+	Owner  string
+	common string
+	f      *flock.Flock
 }
 
 // SlotOwnerFile is slot n's owner file.
@@ -194,7 +195,7 @@ func TrySlot(common string, max int) (*Slot, error) {
 			_ = f.Unlock()
 			continue
 		}
-		return &Slot{N: n, Owner: owner, f: f}, nil
+		return &Slot{N: n, Owner: owner, common: common, f: f}, nil
 	}
 	return nil, nil
 }
@@ -242,7 +243,7 @@ func TakeOwnSlot(ctx context.Context, common string, n int, poll time.Duration, 
 					return nil, err
 				}
 			}
-			return &Slot{N: n, Owner: owner, f: f}, nil
+			return &Slot{N: n, Owner: owner, common: common, f: f}, nil
 		}
 		if !live() {
 			return nil, nil
@@ -253,6 +254,23 @@ func TakeOwnSlot(ctx context.Context, common string, n int, poll time.Duration, 
 		case <-time.After(poll):
 		}
 	}
+}
+
+// Fence writes a fresh token to the slot's owner file while the run holds
+// the slot. An agent-hold started with the old token, by a terminal whose
+// launch was still on its way when the run gave up on it, then refuses to
+// start its agent: it checks the owner file after it takes the agent lock,
+// and herdr-core runs it only once the terminal exists.
+func (s *Slot) Fence() error {
+	if s == nil || s.f == nil {
+		return errors.New("the slot is not held")
+	}
+	owner, err := claimSlot(s.common, s.N)
+	if err != nil {
+		return err
+	}
+	s.Owner = owner
+	return nil
 }
 
 // Release frees the slot.

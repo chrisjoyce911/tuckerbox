@@ -226,6 +226,15 @@ func (e *Engine) agentOptions(ws Workspace, rs *Run) agent.Options {
 		rs.AgentState = state
 		_ = e.save(ws, rs)
 	}
+	if slot := e.workflowSlot; slot != nil {
+		opts.Fence = func() error {
+			if err := slot.Fence(); err != nil {
+				return err
+			}
+			e.term.Owner = slot.Owner
+			return nil
+		}
+	}
 	return opts
 }
 
@@ -266,7 +275,7 @@ func (e *Engine) adoptable(ctx context.Context, req Request, ws Workspace) *adop
 // agent still holds its slot's agent lock, and with max_parallel = 1 the
 // run would otherwise wait for that slot forever (formal/terminals.tla,
 // Launch: adopt or end the live agent first).
-func (e *Engine) endLeftover(ctx context.Context, change, name string) error {
+func (e *Engine) endLeftover(ctx context.Context, ws Workspace, change, name string) error {
 	b, ok := e.backend().(agent.Adopter)
 	if !ok {
 		return nil
@@ -283,6 +292,8 @@ func (e *Engine) endLeftover(ctx context.Context, change, name string) error {
 	if err := b.EndAgent(ctx, name); err != nil {
 		return fmt.Errorf("change %s: %w", change, &agent.EndError{Name: name, Err: err})
 	}
+	round, _ := strconv.Atoi(t.Labels[agent.LabelRound])
+	e.saveHistory(ws, b, change, t.Labels[agent.LabelStep], round, name)
 	return nil
 }
 
@@ -401,7 +412,7 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	}
 	termName := agent.TerminalName(e.Repo.Identity(ctx), req.Change)
 	if adopt == nil {
-		if err := e.endLeftover(ctx, req.Change, termName); err != nil {
+		if err := e.endLeftover(ctx, ws, req.Change, termName); err != nil {
 			return nil, err
 		}
 		// Nothing of an earlier process's agent is left to find.
@@ -842,7 +853,20 @@ func (e *Engine) stopAdopted(ws Workspace, rs *Run, adopt *adoption, reason stri
 	if err != nil {
 		return e.unwatched(ws, rs, &agent.EndError{Name: adopt.Name, Err: err})
 	}
+	// Its session goes to the step log before run.json lets the terminal
+	// go: the step's next agent starts in a terminal of the same name.
+	e.saveHistory(ws, adopt.Backend, rs.Change, rs.Step, rs.Round, adopt.Name)
 	return e.finish(ws, rs, Stopped, reason)
+}
+
+// saveHistory appends an ended terminal's history to step's log.
+func (e *Engine) saveHistory(ws Workspace, b agent.Adopter, change, step string, round int, name string) {
+	if step == "" {
+		return
+	}
+	if err := b.SaveHistory(ws.State.Log(step), step, round, name); err != nil {
+		e.logf(change, "warning: saving the session of terminal %s to the %s log: %v", name, step, err)
+	}
 }
 
 // unwatched leaves the run as a run process that died would: running,
