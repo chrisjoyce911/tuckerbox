@@ -34,8 +34,19 @@
 - [ ] 4.1 `.github/workflows/ci.yml`: concurrency group `ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}`, so pull requests cancel superseded runs and every push to `main` gets its own run that is never cancelled
 - [ ] 4.2 (ci) Two quick merges to `main` both get completed CI runs
 
-## 5. Integration
+## 5. Owner tasks (owner-tasks)
 
-- [ ] 5.1 README: priority publishes at once; `tuckerbox close`; merged and closed runs; conflict rounds
-- [ ] 5.2 (ci) `go vet ./...`, `go test -race ./...`, `node --test herdr/mods/tuckerbox-board/test/*.test.js`, `CGO_ENABLED=0 go build ./...` and `scripts/tla-check.sh` pass on Linux, macOS and Windows CI
-- [ ] 5.3 (ship) Archive the change
+- [ ] 5.1 Parse the `(owner)` marker next to `(ci)` and `(ship)`; builders' brief says not to tick owner tasks
+- [ ] 5.2 Status, status --json and the card show `needs you: <numbers>` for open owner tasks
+- [ ] 5.3 Test "Owner task listed"
+- [ ] 5.4 Autopilot and `run --tasks next` block with `owner tasks: <numbers>` instead of starting a step
+- [ ] 5.5 Test "Only hand checks left"
+- [ ] 5.6 Test "Owner ticks the checks"
+- [ ] 5.7 Autopilot keeps a run blocked or failed when nothing changed since it ended (branch, default branch, tasks, answers, approval)
+- [ ] 5.8 Test "Same block twice"
+
+## 6. Integration
+
+- [ ] 6.1 README: priority publishes at once; `tuckerbox close`; merged and closed runs; conflict rounds
+- [ ] 6.2 (ci) `go vet ./...`, `go test -race ./...`, `node --test herdr/mods/tuckerbox-board/test/*.test.js`, `CGO_ENABLED=0 go build ./...` and `scripts/tla-check.sh` pass on Linux, macOS and Windows CI
+- [ ] 6.3 (ship) Archive the change
