@@ -375,3 +375,82 @@ export function drawerRows(n, repo) {
   if (n?.needs) rows.push({ kind: "needs", count: n.needs, text: n.needs === 1 ? "needs you" : "need you", tone: "blocked" });
   return rows;
 }
+
+// Runs from every machine (herdr-board). The board reads its own repository on
+// the space's machine (`own`, null for this computer), then asks each other
+// connected Herdr machine for the same repository by its key. These are the
+// machines to ask: every one `machines()` lists but `own`. A machine whose
+// layout is `unavailable` (an offline core) is not asked; it is unreachable.
+export function otherMachines(list, own = null) {
+  return (Array.isArray(list) ? list : [])
+    .filter((m) => m && (m.name ?? null) !== (own ?? null))
+    .map((m) => ({ name: m.name ?? null, reachable: m.layout !== "unavailable" }));
+}
+
+// A repository with no remote has its checkout path as its key, and lives on
+// one machine only (design: Matching a repository across machines).
+export function sharedRepo(board) {
+  return Boolean(board && !board.error && board.repo && board.repo !== board.path);
+}
+
+// A card from a machine whose board layout differs (board.columns is also a
+// machine setting) goes in the matching column of the board shown: a step or
+// Queued column becomes In progress, In progress becomes the step's column or Queued.
+export function fitColumn(card, columns) {
+  const ids = new Set((columns ?? []).map((c) => c.id));
+  if (ids.has(card.column)) return card.column;
+  if ((card.column.startsWith("step:") || card.column === "queued") && ids.has("in_progress")) return "in_progress";
+  if (card.column === "in_progress") {
+    // A queued run keeps the step it will run, so queued wins over the step.
+    const queued = card.state === "queued" || card.badge === "queued";
+    if (!queued && card.step && ids.has(`step:${card.step}`)) return `step:${card.step}`;
+    if (ids.has("queued")) return "queued";
+  }
+  return card.column;
+}
+
+// Where a card's commands run: its own machine and checkout. A card's `on` of
+// null means this computer, so the board's machine stands in only when the
+// card names no machine at all (a card handed in without its source).
+export function cardAt(card, board) {
+  const known = card != null && card.on !== undefined;
+  return {
+    cwd: card?.path || board?.path || "",
+    on: known ? card.on : (board?.on ?? null),
+  };
+}
+
+// How much a machine's copy of a card says: a queued or running run beats any
+// other run, which beats no run. Equal copies keep the board's own.
+function weight(card) {
+  if (isActive(card)) return 2;
+  return card.state ? 1 : 0;
+}
+
+// The board shown: the own board's columns and cards, with each other
+// machine's cards merged in by change id. `others` holds { machine, board }
+// with a normalised board or { error }. A machine without a checkout of the
+// repository (repo_not_found) adds nothing; any other failure names the
+// machine in `unreachable` and hides no card.
+export function mergeBoards(own, others = []) {
+  if (!own || own.error) return own;
+  const cards = own.cards.slice();
+  const at = new Map(cards.map((c, i) => [c.change, i]));
+  const unreachable = [];
+  for (const o of others) {
+    const b = o?.board;
+    if (!b || b.error) {
+      if (b?.error?.code === "repo_not_found") continue;
+      unreachable.push({ machine: o?.machine ?? null, message: b?.error?.message || "unreachable" });
+      continue;
+    }
+    if (b.repo !== own.repo) continue;
+    for (const c of b.cards) {
+      const card = { ...c, column: fitColumn(c, own.columns) };
+      const i = at.get(card.change);
+      if (i === undefined) { at.set(card.change, cards.length); cards.push(card); }
+      else if (weight(card) > weight(cards[i])) cards[i] = card;
+    }
+  }
+  return { ...own, cards, unreachable };
+}

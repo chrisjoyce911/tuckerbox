@@ -161,3 +161,39 @@ func TestBoardLayoutsAndCheck(t *testing.T) {
 		t.Fatal(res)
 	}
 }
+
+// herdr-board: Runs from every machine. Another machine's board names the
+// repository by its key; this machine finds its checkout through its index.
+func TestBoardCLIFindsRepoByKey(t *testing.T) {
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}})
+	testenv.Git(t, f.repo, "remote", "add", "origin", "https://Example.com/owner/shop.git")
+	outside := t.TempDir()
+	missing := tbIn(t, outside, "board", "--json", "--repo", "example.com/owner/shop")
+	if missing.code != 1 || !strings.Contains(missing.stdout, `"code": "repo_not_found"`) {
+		t.Fatal(missing)
+	}
+	if err := runs.Remember(filepath.Join(f.env.StateHome, "tuckerbox"), runs.IndexEntry{Repo: f.repo, Change: "add-login", Worktree: f.repo, State: f.repo}); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{outside, f.repo} {
+		res := tbIn(t, dir, "board", "--json", "--repo", "example.com/owner/shop")
+		if res.code != 0 {
+			t.Fatalf("%s: %+v", dir, res)
+		}
+		var doc board.Document
+		if err := json.Unmarshal([]byte(res.stdout), &doc); err != nil {
+			t.Fatal(err)
+		}
+		if doc.Repo != "example.com/owner/shop" || len(doc.Cards) != 1 || doc.Cards[0].Change != "add-login" {
+			t.Fatal(res.stdout)
+		}
+	}
+	detail := tbIn(t, outside, "board", "--json", "--repo", "example.com/owner/shop", "--change", "add-login")
+	if detail.code != 0 || !strings.Contains(detail.stdout, `"detail"`) {
+		t.Fatal(detail)
+	}
+	other := tbIn(t, outside, "board", "--json", "--repo", "example.com/owner/other")
+	if other.code != 1 || !strings.Contains(other.stdout, `"code": "repo_not_found"`) {
+		t.Fatal(other)
+	}
+}

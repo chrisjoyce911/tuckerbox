@@ -5,14 +5,14 @@ import { View, div } from "gpui-kit";
 import { v_flex, h_flex, TextView } from "gpui-base";
 import { theme, props, spaces, panes } from "herdr";
 import { loadDetail, MOD } from "./data.js";
-import { due, isShown } from "./model.js";
+import { due, isShown, cardAt } from "./model.js";
 import { tiny } from "./ui.js";
 
 export class ProposalView extends View {
   init(p, cx) {
     const pr = props() ?? p ?? {};
     this.change = pr.change ?? "";
-    this.at = { cwd: pr.card?.path || pr.board?.path || "", on: pr.card?.on ?? pr.board?.on ?? null };
+    this.at = cardAt(pr.card, pr.board);
     this.text = pr.text ?? null;
     this.error = null;
     this.last = this.text == null ? 0 : Date.now();

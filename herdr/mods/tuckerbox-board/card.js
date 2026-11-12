@@ -5,7 +5,7 @@ import { View, div } from "gpui-kit";
 import { v_flex, h_flex, TextView } from "gpui-base";
 import { theme, props, closeOverlay } from "herdr";
 import { loadDetail } from "./data.js";
-import { normaliseCard, columnName, newestFirst, eventText, fmtLocal, taskGroups, approvalBadge, isActive } from "./model.js";
+import { normaliseCard, cardAt, columnName, newestFirst, eventText, fmtLocal, taskGroups, approvalBadge, isActive } from "./model.js";
 import { detailActions, invocation, actionLabel, defaultStep, rerunSteps, canEdit, EDIT_FILES, ACTIONS } from "./actions.js";
 import { perform, validate, watchEdits, changed } from "./perform.js";
 import { editOf, editNote } from "./edits.js";
@@ -18,7 +18,7 @@ export class CardView extends View {
     const pr = props() ?? p ?? {};
     this.change = pr.change ?? "";
     this.board = pr.board ?? { columns: [], require_approval: true };
-    this.card = pr.card ? normaliseCard(pr.card, { on: pr.card.on ?? this.board.on ?? null, path: pr.card.path ?? this.board.path ?? "" }) : null;
+    this.card = pr.card ? normaliseCard(pr.card, { on: cardAt(pr.card, this.board).on, path: pr.card.path ?? this.board.path ?? "" }) : null;
     this.detail = pr.detail ?? null;   // a test harness may hand it in
     this.error = null;
     this.notice = null;
@@ -40,7 +40,7 @@ export class CardView extends View {
   }
 
   load(cx) {
-    const at = { cwd: this.card?.path || this.board.path || "", on: this.card?.on ?? this.board.on ?? null };
+    const at = cardAt(this.card, this.board);
     cx.spawn(async (cx) => {
       let d;
       try { d = await loadDetail(this.change, at); } catch (e) { d = { error: { message: String(e?.message ?? e) } }; }
