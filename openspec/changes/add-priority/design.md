@@ -101,42 +101,84 @@ A priority change also doesn't take the change's run lock, unlike
 `approve`: it must work while the change is queued, which is when
 reordering matters.
 
-### One lock for sidecar writes
+### One lock for sidecar writes and admission
 `approve` on a change without a worktree writes the checkout's sidecar with
 no lock, because no run can use the checkout. With `priority` (and
 `add-change-settings`' `set`), two commands can now rewrite the same file
 at once, and one would lose the other's edit. Every sidecar writer takes
 `<common-dir>/tuckerbox/sidecar.lock`, an OS file lock, around read, change
-and write. It writes a temporary file and renames it. The lock is held for
-milliseconds, and it is always taken last (after a change's run lock, if
-any), so lock order can't deadlock.
+and write, and writes each file by a temporary file and a rename. A
+`priority` move holds the lock until every file it changes is written, so
+a renumber is one step for anyone else who takes the lock.
 
-### Admission order
-One sort key, used by `run --all`, the queue and `add-autopilot`:
+Admission takes the same lock (see "The queue reads priority live"). Lock
+order is always change lock, then sidecar lock, then a slot lock taken
+with a non-blocking try. The sidecar lock is held for milliseconds and
+never while waiting, so the order can't deadlock.
 
-1. **effective priority:** the first, in priority order, of the change and
-   every active change that depends on it, directly or not
-2. a dependency before its dependent
-3. **first in, first out:** the queue ticket's time (for `--all`, age)
-4. change id
+### Two orders: display and admission
+The **priority order** (priority, then age, then id) is total, so every
+card has a position. It orders `tuckerbox priority`, the board and the
+positions drags use.
 
-Inheriting the rank is what "dependencies first" means in practice. A
-dependent can't run before its dependency anyway (it waits without a
-ticket). Without inheritance, a top-priority change could wait behind
-everything ranked above its low-priority dependency.
+The **admission order** decides who runs next. It must not use age:
+among changes of equal rank, the one requested first must start first, as
+`change-runs` requires today. So admission compares priority *values*,
+not positions:
 
-Effective priority is never above the dependent's, so the order is always
-a valid dependency order.
+- **Rank:** the lowest `priority` value of the change and every active
+  change that depends on it, directly or not. No value counts as after
+  every value. Inheriting the rank is what "dependencies first" means in
+  practice: without it, a top change could wait behind everything ranked
+  above its low-priority dependency.
+- **Procedure:** a sort with "a dependency before its dependent" as a
+  tie-breaker is not a total order (A before C by request, C before B by
+  request, B before A as A's dependency). So the order is built one change
+  at a time instead (Kahn's algorithm with a priority queue):
 
-### The queue reads priority live
-Tickets keep their names (`<time>-<change>`), so first in, first out comes
-from the file name as now. On each check, a waiting run lists the live
-tickets, reads their changes' priorities and `depends_on` from the
-checkout, and sorts by the key above. Only the first may try for a slot.
+  ```
+  eligible = changes whose dependencies in the set are placed (or none)
+  while eligible is not empty:
+    take the one with the lowest (rank, request, id)
+    place it; add changes whose dependencies are now all placed
+  ```
 
-Reading live means a reorder applies to runs already queued. Writing the
-rank into the ticket name was rejected: a drag would then not affect
-queued runs, which is when the owner most wants it.
+  Every pick is deterministic, and the result is a valid dependency order
+  because a change only becomes eligible after its dependencies.
+- **Request:** in the queue, the ticket's time. For `run --all`, the
+  changes are all requested at once, so their age (`created`, then id) is
+  their request order, and `--all` requests them in admission order, so
+  ticket times agree.
+
+In the queue, the dependency step rarely matters: a run holds a ticket
+only once its dependencies are met, so a dependency and its dependent are
+not queued together. Rank inheritance still matters, because a queued
+dependency inherits the rank of a dependent waiting outside the queue.
+
+### The queue reads priority live, under the lock
+Tickets keep their names (`<time>-<change>`), so the request order comes
+from the file name as now. Writing the rank into the ticket name was
+rejected: a drag would then not affect queued runs, which is when the
+owner most wants it.
+
+Choosing the first run and taking a slot must be one step. Otherwise:
+- a run decides it is first, a move (or a better-ranked new ticket) lands,
+  a slot frees, and the run takes it on its stale decision
+- a run reads the priorities halfway through a renumber and picks the
+  wrong first run
+
+So a waiting run, on each check, takes the sidecar lock, lists the live
+tickets, reads their changes' `priority` and `depends_on` from the
+checkout, builds the admission order, and, if it is first, tries for a
+slot. Then it lets the lock go. It never waits while holding the lock.
+`formal/priority.tla` checks this. Its broken variants (deciding outside
+the lock, and taking a slot without the lock) are rejected.
+
+The consistency boundary: a run is admitted only if it is first by the
+ranks of the last finished `priority` move. Edits outside Tuckerbox (an
+editor, a `git pull` or checkout) take no lock. A `git pull` that changes
+several files can be read half applied. Such edits count from the next
+admission after they land, and the spec says so.
 
 ### Board
 - Cards gain `priority` (value or null) and `position`.
@@ -171,5 +213,10 @@ defines the order. It adds nothing autopilot-specific.
 - **A checkout behind the base branch** may lack a new change's folder.
   `priority` then refuses for that change and says to pull. The order puts
   it with the unranked changes.
-- **Live reads cost.** Each queue check reads a few small files per queued
-  run, once per poll. That is small next to `board --json`.
+- **Live reads cost.** Each queue check takes the sidecar lock and reads a
+  few small files per queued run, once per poll. That is small next to
+  `board --json`. The lock serialises queue checks, which are milliseconds
+  each.
+- **Edits outside Tuckerbox aren't atomic.** A `git pull` that changes
+  several priorities can be seen half applied by one admission. That is
+  allowed: it counts from the next admission.

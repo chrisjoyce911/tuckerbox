@@ -14,7 +14,7 @@ A change MAY have `priority = <n>`, a positive integer, in its `tuckerbox.toml`.
 - **THEN** `tuckerbox check` fails and names that file and `priority`
 
 ### Requirement: Priority order
-The priority order SHALL list the active changes by priority, then age (`created` in the change's `.openspec.yaml`, oldest first), then change id. Tuckerbox SHALL read it from the repository checkout on this machine, committed or not. Its position SHALL be counted from 1.
+The priority order SHALL list the active changes by priority, then age (`created` in the change's `.openspec.yaml`, oldest first), then change id. It orders the list and the board, not admission. Tuckerbox SHALL read it from the repository checkout on this machine, committed or not. Its position SHALL be counted from 1.
 
 #### Scenario: Ranked and unranked
 - **WHEN** A has priority 2000, B has priority 1000, and C and D have none, with D older than C
@@ -68,29 +68,48 @@ A priority change SHALL NOT change a change's approval state on any machine. `tu
 - **THEN** both machines report its approval as `approved`
 
 ### Requirement: One writer for the sidecar
-Every Tuckerbox command that rewrites a change's `tuckerbox.toml` SHALL hold one repository-wide sidecar lock while it reads and writes it, and SHALL replace the file in one step. A second writer SHALL wait for the lock.
+Every Tuckerbox command that rewrites a change's `tuckerbox.toml` SHALL hold one repository-wide sidecar lock while it reads and writes it, and SHALL replace each file in one step. A `priority` move SHALL hold it until all its files are written. A second holder SHALL wait for the lock.
 
 #### Scenario: Priority and approve at once
 - **WHEN** `tuckerbox approve add-login` and `tuckerbox priority add-login top` run at the same time on a change without a worktree
 - **THEN** the checkout's file ends with both the `[approval]` table and the new `priority`
 
 ### Requirement: Admission order
-The admission order SHALL rank each change by its effective priority: the first, in priority order, of the change and every active change that depends on it, directly or not. Ties SHALL go to a dependency over its dependent, then to the earlier request. `run --all` SHALL request changes in this order.
+A change's admission rank SHALL be the lowest `priority` value of it and every active change that depends on it, directly or not, with no value after every value. Age SHALL NOT count. Changes SHALL be ordered one at a time: next is the change with the lowest rank, then the earliest request, then the lowest id, among those whose dependencies in the set are already placed.
 
 #### Scenario: Dependency moves up
-- **WHEN** B is at the top and depends on A, A is last in priority order, and C is between them
+- **WHEN** B has priority 1000 and depends on A, A has none, and C has 2000
 - **THEN** in admission order A comes before C
+
+#### Scenario: Unranked changes keep request order
+- **WHEN** A runs with `max_parallel = 1`, no change has a priority, and the user starts B and then C, where C is older than B
+- **THEN** B starts before C
+
+#### Scenario: Branching dependencies
+- **WHEN** D has priority 1000 and depends on A and C, A depends on B, none of A, B and C has a priority, and they are requested in the order A, C, B, D
+- **THEN** the admission order is C, B, A, D
+
+### Requirement: Run all order
+`tuckerbox run --all` SHALL treat its changes as requested oldest first (`created`, then id), and SHALL request them in admission order.
 
 #### Scenario: Run all in order
 - **WHEN** C has priority 1000, A 2000 and B none, and the user runs `tuckerbox run --all` with `max_parallel = 1`
 - **THEN** C starts first, then A, then B
 
 ### Requirement: Queue follows the order
-When a slot frees, the queued run first in admission order SHALL take it. Runs still waiting on dependencies SHALL NOT be in the queue. A priority change SHALL apply to runs already queued, from the next free slot.
+When a slot frees, the queued run first in admission order SHALL take it. Runs waiting on dependencies SHALL NOT be queued. A run SHALL choose the first run and take a slot in one step under the sidecar lock, which a `priority` move holds for all its writes. Edits made outside Tuckerbox SHALL count from the next admission. Model: `formal/priority.tla`, `OrderedAdmission`.
 
 #### Scenario: Reorder while queued
 - **WHEN** `max_parallel = 1`, A runs, B and then C are queued, and the user moves C to the top
 - **THEN** C starts when A ends, before B
+
+#### Scenario: Reorder as a slot frees
+- **WHEN** B is first in the queue, A ends, and `tuckerbox priority C top` finishes before B takes the free slot
+- **THEN** C takes the slot and B stays queued
+
+#### Scenario: Slot frees during a renumber
+- **WHEN** a move renumbers five changes and a slot frees while it writes them
+- **THEN** no run takes the slot until the move ends, and then the first run in the new order takes it
 
 ### Requirement: Priority on the board
 Each active card SHALL include its `priority` value, or none, and its `position` in priority order. The Proposed, Approved and In progress columns, and in the steps layout Queued and each step column, SHALL list cards in priority order. Ready and Done SHALL keep their order. Positions SHALL come from the board's own machine.

@@ -29,15 +29,22 @@
 
 ## 4. Admission order (change-priority, change-runs)
 
-- [ ] 4.1 Effective priority over the transitive dependents among active changes; sort key: effective priority, dependency first, ticket time (age for `--all`), id
-- [ ] 4.2 `Queue.Head`: sort live tickets by the key, reading priorities and `depends_on` from the checkout on each check
-- [ ] 4.3 `run --all` requests changes in admission order
-- [ ] 4.4 Test: Dependency moves up
-- [ ] 4.5 Test: Run all in order
-- [ ] 4.6 Test: Reorder while queued
-- [ ] 4.7 Test: More changes than slots
-- [ ] 4.8 Test: Change already running
-- [ ] 4.9 Test: Unranked changes keep request order
+- [ ] 4.1 Admission rank: lowest `priority` value over the change and its transitive active dependents, none after every value; never age
+- [ ] 4.2 Build the order one change at a time: among changes whose dependencies in the set are placed, take the lowest (rank, request, id); request = ticket time in the queue, age then id for `--all`
+- [ ] 4.3 `Queue.Head` and the slot try in one step under `sidecar.lock`: list live tickets, read `priority` and `depends_on` from the checkout, build the order, try a slot only if first; never wait holding the lock
+- [ ] 4.4 `priority` holds `sidecar.lock` for all the files of one move
+- [ ] 4.5 `run --all` requests changes in admission order
+- [ ] 4.6 `formal/priority.tla` passes and `priority_broken_decide` and `priority_broken_halfmove` are rejected by `scripts/tla-check.sh`
+- [ ] 4.7 Test: Dependency moves up
+- [ ] 4.8 Test: Unranked changes keep request order (creation order opposite to request order)
+- [ ] 4.9 Test: Branching dependencies
+- [ ] 4.10 Test: Run all in order
+- [ ] 4.11 Test: Reorder while queued
+- [ ] 4.12 Test: Reorder as a slot frees (concurrent processes: a `priority` move against queued runs taking a freed slot)
+- [ ] 4.13 Test: Slot frees during a renumber (a renumber held open across a slot release; no run admitted until it ends)
+- [ ] 4.14 Test: More changes than slots
+- [ ] 4.15 Test: Change already running
+- [ ] 4.16 Test: Unranked changes keep request order (change-runs scenario, run with `-race` and several processes)
 
 ## 5. Board (change-priority)
 

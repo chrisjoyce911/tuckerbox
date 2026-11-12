@@ -21,9 +21,16 @@ on the board.
   gaps, so a move usually rewrites one file. It works in the repository
   checkout, while runs are queued or running, and never commits.
 - **Admission order:** `run --all`, the slot queue and `add-autopilot`
-  use one order: dependencies first, then priority, then first in, first
-  out. A dependency moves up to the rank of the most urgent change waiting
-  on it. Reordering a queued change takes effect for the next free slot.
+  use one order: dependencies first, then priority value, then first in,
+  first out (request order, never age). A dependency moves up to the rank
+  of the most urgent change waiting on it. The order is built one change
+  at a time, so it is always a valid dependency order. Reordering a queued
+  change takes effect for the next free slot.
+- **Consistent admission:** a run chooses the first queued run and takes a
+  slot in one step under the sidecar lock, and a `priority` move holds that
+  lock for all its writes. So no run is admitted on a stale or half-written
+  order. TLA+ model `formal/priority.tla`, with two broken variants TLC
+  rejects.
 - **Board:** Proposed, Approved, In progress (and in the steps layout,
   Queued and each step column) sort by priority, then age. The owner drags
   a card within its column to reorder it. The board runs
@@ -57,7 +64,8 @@ isn't archived yet. See design.md.
 - The slot queue's ordering in the run engine changes. The slot and change
   locks don't. No new state file, apart from a lock file in the shared
   `tuckerbox` folder of the repository's git dir.
-- No TLA+ change: `formal/runs.tla` already allows any queued run to take
-  a free slot, so it covers every order. See model.md.
-- Existing changes have no `priority` and keep today's order among
-  themselves (oldest first).
+- New TLA+ model `formal/priority.tla` for the order. `formal/runs.tla` is
+  unchanged: it allows any order, so it can't check this one. See
+  model.md.
+- Existing changes have no `priority`, so the queue keeps today's order
+  among them: first requested, first started.

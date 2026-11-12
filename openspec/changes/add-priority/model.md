@@ -1,39 +1,62 @@
 # Model
 
-## Skipped
+## Model
 
-No change to `formal/runs.tla` and no new model. We checked whether the new
-queue order needs one.
+Priority adds a writer to the queue's order: `tuckerbox priority` changes
+ranks while runs wait for a slot. A run that chooses the first run and a
+run that takes a slot are no longer the same moment unless the design
+makes them one. `formal/runs.tla` doesn't help here. Its `TakeSlot` lets
+any queued run take a free slot, so it accepts every order, the wrong ones
+included. So the ordering is modelled on its own.
 
-### `runs.tla` never modelled first in, first out
-In `runs.tla`, `TakeSlot(p)` lets any process that holds its change lock
-take a free slot, in any order. The order is left free on purpose, because
-the queue only orders and the slot locks alone bound how many run. So the
-model already covers every admission order, priority order included.
+### Files
 
-The new queue only narrows which waiting run may try for a slot. Every
-behaviour it allows is one the model already allows, so `OneRunPerChange`,
-`WithinLimit` and `StaleNeverAccepted` still hold. Adding priority to the
-model would add states and no property that can fail.
+| File | Role |
+|---|---|
+| `formal/priority.tla`, `formal/priority.cfg` | Model; TLC must pass |
+| `formal/priority_broken_decide.tla`, `.cfg` | Broken variant: a run decides it is first, then takes a slot in a later step, on that decision; TLC must reject (`OrderedAdmission`) |
+| `formal/priority_broken_halfmove.tla`, `.cfg` | Broken variant: choosing and taking are one step, but without the sidecar lock, so a move can be half written; TLC must reject (`OrderedAdmission`) |
 
-### Ordering is not a safety property here
-- **No stall.** The sort key is a total order over the live tickets, so one
-  of them is always first. A first ticket can take any free slot. A run
-  waiting on dependencies holds no ticket, so it can't be first and stuck.
-- **Readers can disagree for a moment.** A waiting run may read priorities
-  while `tuckerbox priority` renumbers several files. Two runs may then
-  both think they are first, and both take free slots. The slot locks still
-  bound the number. Or neither thinks so for one poll, and the next poll
-  agrees. Either way the cost is order, not safety.
-- **Starvation is intended.** A low rank may wait for ever while higher
-  ones arrive. So there is no liveness property to check. FIFO fairness
-  wasn't modelled before either.
+### Actors and shared state
 
-### Sidecar writes
-`priority`, `approve`, `unapprove` and `set` rewrite `tuckerbox.toml` while
-holding one OS file lock. That is the atomic-lock pattern `runs.tla` models
-as `lock[c]` in `Pick`. Each writer is a process that takes the lock and
-never takes a slot. The broken form, reading and writing without the lock,
-is the lost update that `formal/runs_broken_lock.tla` already shows TLC
-rejecting. The sidecar lock is always taken last and held only for the
-write, so it adds no lock-order cycle.
+- **Runs (`Runs = 1..NRuns`, numbered in request order):** `Join` the
+  queue, `Admit` (choose the first run and take a slot), `Finish`.
+- **`tuckerbox priority`:** `BeginMove` takes the sidecar lock and picks
+  new ranks. `WriteOne` writes one change's file. `EndMove` lets the lock
+  go once every file is written.
+- **Shared state:** `prio` (the ranks the files hold now), `committed` (the
+  ranks after the last finished move), `slots`, `lock`.
+- **Atomic:** `Admit`, under the sidecar lock, and each single file write.
+- **Not atomic:** a move (several writes), and in the broken variants,
+  choosing and taking.
+- Ranks are admission ranks, with dependencies already folded in.
+  Dependency waits happen before a run joins the queue, as `runs.tla`
+  and `add-herdr-board` say, so they are not part of this model.
+
+### Invariants
+
+| Invariant | Meaning | Named by requirement |
+|---|---|---|
+| `OrderedAdmission` | A run takes a slot only when it is first among the queued runs by the ranks of the last finished move (lower rank, then earlier request) | change-priority: Queue follows the order |
+| `WithinLimit` | At most `MaxParallel` runs hold slots | change-runs: Parallel limit |
+| `TypeOK` | Variables keep their types | (type check) |
+
+### Bounds
+
+`NRuns = 3`, `MaxParallel = 1`, `Ranks = {1, 2}`.
+- Three runs give a run that is first, one that overtakes it by rank, and
+  one that ties on rank and must lose on request order.
+- One slot makes every admission a choice.
+- Two ranks allow ties (request order decides) and overtaking (rank
+  decides), and a move that changes two files.
+- `Finished` lets TLC stop once every run is done, so the bound is not
+  reported as a deadlock.
+
+TLC (tla2tools 1.7.4, `scripts/tla-check.sh`) explores 11 664 distinct
+states in about a second.
+- `priority_broken_decide` is rejected after 5 states: run 1 decides it is
+  first while alone, run 2 (a better rank) joins, and run 1 takes the slot.
+  A finished move between the decision and the take fails the same way.
+- `priority_broken_halfmove` is rejected after 6 states: a move has written
+  its first file, and run 3 is admitted ahead of run 1, which ties
+  with it on the finished ranks and was requested first.
