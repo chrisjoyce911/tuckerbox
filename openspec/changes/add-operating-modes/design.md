@@ -108,6 +108,20 @@ The steps themselves only change the machine's own worktree, so a zombie working
 
 `tuckerbox claim release <change>` (this machine's claim, no run active) and `--force` (another machine's) remove a claim by hand. Removing it from the fleet ref alone isn't enough: a holder that renewed just before its pinned merge, then paused, would wake and merge, because the branch tip is unchanged and the forge accepts the pin. So a release is built like a take-over. When the change's remote branch exists, one atomic push leases the fleet ref and removes the claim, and leases the branch at the fetched tip and moves it to an empty `Release <change> from <machine>` commit. The old holder's pinned merge and its next push then name an old tip and are refused; its next renewal finds no claim and blocks with `claim released`. Without a branch, only the fleet ref changes, and the old holder's first push is refused by its fleet ref lease. The same rule covers releasing this machine's own claim, so there is one release path to test. `formal/fleet_broken_releasekeep.tla` shows the forced release without the tip move letting the old holder merge.
 
+### The next task scope
+
+`add-task-scope` lets a ready (or stopped, blocked, failed) run start its next group with `tuckerbox run <change> --tasks <scope>`, in the same run, worktree and branch; `add-autopilot` relies on it. That run already holds a claim, so the next scope reuses it rather than claiming again.
+
+**Fleet.** A ready claim doesn't count toward `max_runs`, which is the point: a change waiting between groups shouldn't block other changes. So other changes may take that room meanwhile, and starting the next scope is an admission, not a renewal:
+- On the holder's machine, one lease push turns the claim from `ready` to `active`, same holder and epoch, and counts it against `max_runs` in the same compare-and-swap. If the limit is full, the push isn't made: `fleet limit reached`, naming the claims that fill it, and the run and claim stay ready. Nothing is lost; `run` again later, or autopilot's next pass, tries again.
+- From another machine it is refused (`claimed by`): the worktree, with the earlier scopes' work, is on the holder's machine. Moving it needs `claim release` and a fresh start there.
+- A parked claim (stopped, blocked or failed run) already counts, so it becomes active as on `resume`, with no new limit check.
+- A dispatched run records `dispatched` in `run.json`. It freed its machine-wide fleet slot when it became ready, so its next scope takes one again first, before touching the claim; a full machine refuses with `<machine> is full` and the claim stays ready. Slot first, then claim, as at the start.
+
+`formal/fleet.tla` models this: `BecomeReady` (the claim stops counting) and `NextScope` (back to active only if `ScopeAdmit`, the limit check, holds). `fleet_broken_scopecount` drops the check, and TLC finds the 7-state behaviour where `m1`'s change is ready, `m2` claims another into the freed room, and `m1`'s next scope goes over the limit.
+
+**Team.** The claim is the branch and its draft merge request, which partial scopes don't touch (`add-task-scope`: partial runs don't push). The next scope checks the claim is still this run's (open draft with its marker and login, remote tip equal to the run's last push, so the start commit) and starts the scope with no new start commit and no push. A closed draft, a moved tip or another person's marker refuse with `ship-claim`'s reasons. The run gate applies as at any start: approval from the protected base, with the listed login. No new model: nothing on the forge changes.
+
 ### Claiming before the worktree
 
 `tuckerbox run` in fleet mode: run gate (approval, settings), then fetch the fleet ref and claim, then the change lock and worktree as today. Claiming first means a refused run leaves nothing behind. The change lock (`runs.tla`) still guards runs on one machine; the claim guards between machines.
@@ -220,6 +234,7 @@ A claimed change whose machine isn't connected to Herdr still shows its claim, s
 - `change-approval`: in team mode the run gate reads only the protected base (`team-claims`, `Approvals only from the protected base`).
 - `change-settings` (`add-change-settings`): in team mode `resume` and `rerun` take `settings_hash` from the protected base (`team-claims`, `Resumed settings from the protected base`).
 - `change-runs`' slot locks: dispatched runs also take a machine-wide fleet slot (`machine-inventory`, `Machine-wide admission`).
+- `task-scope` (`add-task-scope`): the next scope reuses the run's claim (`fleet-claims`, `Starting the next scope` and `Next scope of other runs`; `team-claims`, `Next scope keeps the team claim`).
 - `board-data` and `herdr-board`: additions are in `modes-board`, as `ship-board` does.
 - `run-status`: `status --all-machines` adds a `machine` field, an addition within the format version.
 - `change-runs`' `Parallel limit` is unchanged: per machine. Fleet limits are new and separate.
@@ -232,6 +247,7 @@ A claimed change whose machine isn't connected to Herdr still shows its claim, s
 |---|---|
 | `Fetch` | `fleet.fetch`: `git fetch <remote> +refs/tuckerbox/fleet:refs/tuckerbox/fleet` |
 | `ForceRelease`: fleet ref, branch lease and release commit in one atomic push | `fleet.release`: `git push --atomic` with both leases |
+| `BecomeReady`, `NextScope`: lease push of the fleet ref, with the limit checked in `NextScope` | `fleet.update` on ready, and on `run --tasks` for a ready run |
 | `Claim`, `Renew`, `Release`: lease push of the fleet ref | `fleet.update`: build the new commit, `git push --force-with-lease=refs/tuckerbox/fleet:<seen>`; on refusal fetch and re-decide |
 | `Claim` with a branch: fleet ref, branch lease and take-over commit in one atomic push | `fleet.takeOver`: `git push --atomic` with both leases |
 | `Push`: every branch push, with the fleet ref, atomic | `ship.push` in fleet mode: `git push --atomic` with both leases |

@@ -20,11 +20,11 @@ EXTENDS Naturals, FiniteSets
 CONSTANTS Machines, Changes, MaxRuns, MaxEpoch, MaxVersion, MaxCommits
 
 None == "none"
-NoClaim == [holder |-> None, epoch |-> 0]
+NoClaim == [holder |-> None, epoch |-> 0, ready |-> FALSE]
 
 VARIABLES
   version,    \* the fleet ref's commit, as a counter
-  claim,      \* claim[c]: holder and epoch the fleet ref records for change c
+  claim,      \* claim[c]: holder, epoch and whether the run is ready (a finished scope)
   expired,    \* expired[c]: the claim on c was not renewed in time
   tip,        \* tip[c]: the change branch's tip commit (0: no branch)
   next,       \* the next unused commit id
@@ -63,7 +63,8 @@ Init ==
   /\ staleMerge = FALSE
 
 Held(cl, c) == cl[c].holder # None
-Count(cl) == Cardinality({c \in Changes : Held(cl, c)})
+\* Ready claims don't count toward the fleet limit; active and parked ones do.
+Count(cl) == Cardinality({c \in Changes : Held(cl, c) /\ ~cl[c].ready})
 Holds(m) == job[m] # None /\ claim[job[m]].holder = m /\ claim[job[m]].epoch = epoch[m]
 
 \* `git fetch` of the fleet ref and the change branches.
@@ -94,7 +95,7 @@ Claim(m, c) ==
   /\ IF TRUE \* BROKEN: plain pushes, no --force-with-lease on the claim
        THEN LET e == snap[m][c].epoch + 1
                 t == IF tip[c] = 0 THEN 0 ELSE TakeoverTip(c) IN
-            /\ claim' = [snap[m] EXCEPT ![c] = [holder |-> m, epoch |-> e]]
+            /\ claim' = [snap[m] EXCEPT ![c] = [holder |-> m, epoch |-> e, ready |-> FALSE]]
             /\ expired' = [expired EXCEPT ![c] = FALSE]
             /\ version' = version + 1
             /\ grants' = grants \cup {<<c, e, m>>}
@@ -133,6 +134,7 @@ Renew(m) ==
 \* Time passes without a renewal. Expiry is read from the renewal time.
 Expire(c) ==
   /\ Held(claim, c)
+  /\ ~claim[c].ready
   /\ ~expired[c]
   /\ expired' = [expired EXCEPT ![c] = TRUE]
   /\ UNCHANGED <<version, claim, tip, next, merged, pc, seen, snap, snapTip, job,
@@ -189,11 +191,48 @@ Release(m) ==
   /\ pc[m] = "merged"
   /\ version < MaxVersion
   /\ IF Holds(m)
-       THEN /\ claim' = [claim EXCEPT ![job[m]] = [holder |-> None, epoch |-> epoch[m]]]
+       THEN /\ claim' = [claim EXCEPT ![job[m]] = [holder |-> None, epoch |-> epoch[m], ready |-> FALSE]]
             /\ version' = version + 1
        ELSE UNCHANGED <<claim, version>>
   /\ pc' = [pc EXCEPT ![m] = "done"]
   /\ UNCHANGED <<expired, tip, next, merged, seen, snap, snapTip, job, epoch, lease,
+                 checked, grants, stalePush, staleMerge>>
+
+\* A scoped run finishes a scope that doesn't complete the change: it is
+\* ready and pushes nothing (add-task-scope). Its claim becomes ready, which
+\* no longer counts toward the fleet limit, so other changes may use that room.
+BecomeReady(m) ==
+  /\ pc[m] = "running"
+  /\ version < MaxVersion
+  /\ IF Holds(m)
+       THEN /\ claim' = [claim EXCEPT ![job[m]].ready = TRUE]
+            /\ version' = version + 1
+            /\ expired' = [expired EXCEPT ![job[m]] = FALSE]
+            /\ pc' = [pc EXCEPT ![m] = "ready"]
+       ELSE /\ pc' = [pc EXCEPT ![m] = "lost"]
+            /\ UNCHANGED <<claim, version, expired>>
+  /\ UNCHANGED <<tip, next, merged, seen, snap, snapTip, job, epoch, lease,
+                 checked, grants, stalePush, staleMerge>>
+
+\* `tuckerbox run <change> --tasks <next>` on the holder's machine: the ready
+\* claim becomes active again, same holder and epoch. Like a renewal it acts
+\* on the current ref (fetch, check, lease push, retry), and the fleet limit
+\* is checked in the same compare-and-swap. Refused while the limit is full:
+\* the run and its claim stay ready, so the action is not enabled then.
+ScopeAdmit == Count(claim) < MaxRuns
+
+NextScope(m) ==
+  /\ pc[m] = "ready"
+  /\ version < MaxVersion
+  /\ ~Holds(m) \/ ScopeAdmit
+  /\ IF Holds(m)
+       THEN /\ claim' = [claim EXCEPT ![job[m]].ready = FALSE]
+            /\ version' = version + 1
+            /\ expired' = [expired EXCEPT ![job[m]] = FALSE]
+            /\ pc' = [pc EXCEPT ![m] = "running"]
+       ELSE /\ pc' = [pc EXCEPT ![m] = "lost"]
+            /\ UNCHANGED <<claim, version, expired>>
+  /\ UNCHANGED <<tip, next, merged, seen, snap, snapTip, job, epoch, lease,
                  checked, grants, stalePush, staleMerge>>
 
 \* A person runs `tuckerbox claim release --force` on machine r for change c,
@@ -210,7 +249,7 @@ ForceRelease(r, c) ==
   /\ version < MaxVersion
   /\ snapTip[r][c] # 0 => next <= MaxCommits
   /\ IF version = seen[r] /\ tip[c] = snapTip[r][c]
-       THEN /\ claim' = [snap[r] EXCEPT ![c] = [holder |-> None, epoch |-> snap[r][c].epoch]]
+       THEN /\ claim' = [snap[r] EXCEPT ![c] = [holder |-> None, epoch |-> snap[r][c].epoch, ready |-> FALSE]]
             /\ version' = version + 1
             /\ tip' = [tip EXCEPT ![c] = IF tip[c] = 0 THEN 0 ELSE ReleaseTip(c)]
             /\ next' = IF tip[c] = 0 THEN next ELSE next + 1
@@ -229,13 +268,14 @@ Finished ==
 Next ==
   \/ \E m \in Machines :
        \/ Fetch(m) \/ Pass(m) \/ Renew(m) \/ Push(m) \/ SeeGreen(m) \/ Merge(m) \/ Release(m)
+       \/ BecomeReady(m) \/ NextScope(m)
        \/ \E c \in Changes : Claim(m, c) \/ ForceRelease(m, c)
   \/ \E c \in Changes : Expire(c)
   \/ Finished
 
 Spec == Init /\ [][Next]_vars
 
-ClaimType == [holder : Machines \cup {None}, epoch : 0..MaxEpoch]
+ClaimType == [holder : Machines \cup {None}, epoch : 0..MaxEpoch, ready : BOOLEAN]
 
 TypeOK ==
   /\ version \in 0..MaxVersion
@@ -244,7 +284,7 @@ TypeOK ==
   /\ tip \in [Changes -> 0..MaxCommits]
   /\ next \in 1..(MaxCommits + 1)
   /\ merged \in [Changes -> BOOLEAN]
-  /\ pc \in [Machines -> {"idle", "fetched", "running", "shipping", "merging", "merged", "done", "lost"}]
+  /\ pc \in [Machines -> {"idle", "fetched", "running", "ready", "shipping", "merging", "merged", "done", "lost"}]
   /\ job \in [Machines -> Changes \cup {None}]
   /\ epoch \in [Machines -> 0..MaxEpoch]
   /\ lease \in [Machines -> 0..MaxCommits]
@@ -262,6 +302,7 @@ FencedPush == ~stalePush
 \* fleet-claims: only the machine holding the claim ever has a merge accepted.
 FencedMerge == ~staleMerge
 
-\* fleet-claims: the fleet ref never records more claims than the limit.
+\* fleet-claims: the fleet ref never records more active or parked claims than
+\* the limit, also when a ready run starts its next scope.
 WithinFleetLimit == Count(claim) <= MaxRuns
 =============================================================================

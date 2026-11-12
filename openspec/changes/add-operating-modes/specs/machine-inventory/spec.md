@@ -25,7 +25,7 @@ Machine config `fleet_capacity` SHALL limit how many dispatched runs this machin
 - **THEN** it reports capacity 0 and `tuckerbox dispatch` places nothing on it
 
 ### Requirement: Machine-wide admission
-A run started by dispatch (`tuckerbox run --for <remote> --dispatched`) SHALL take one of `fleet_capacity` machine-wide fleet slots, OS file locks in the machine's state directory, before it claims the change, and hold it until the run ends, stops or blocks. With none free it SHALL refuse with `<machine> is full`, claim nothing and make no worktree. Model: `formal/runs.tla`, `WithinLimit`.
+A run started by dispatch (`tuckerbox run --for <remote> --dispatched`) SHALL take one of `fleet_capacity` machine-wide fleet slots, OS file locks in the machine's state directory, before it claims the change, and hold it until the run ends, stops, blocks or becomes ready. With none free it SHALL refuse with `<machine> is full`, claim nothing and make no worktree. Model: `formal/runs.tla`, `WithinLimit`.
 
 #### Scenario: Two repositories, one place
 - **WHEN** `mini` has `fleet_capacity = 1`, and dispatchers for two different repositories place a change each on `mini` at the same moment

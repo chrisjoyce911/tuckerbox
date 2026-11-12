@@ -15,16 +15,18 @@ Machine-wide fleet slots need no new model: they are the slot locks `formal/runs
 | `formal/fleet_broken_unfenced.tla`, `.cfg` | Broken variant: branch pushes lease only the branch, not the fleet ref; TLC must reject (`FencedPush`) |
 | `formal/fleet_broken_nomove.tla`, `.cfg` | Broken variant: a take-over of a pushed branch adopts its tip instead of moving it; TLC must reject (`FencedMerge`) |
 | `formal/fleet_broken_releasekeep.tla`, `.cfg` | Broken variant: `claim release --force` removes the claim but leaves the branch tip; TLC must reject (`FencedMerge`) |
+| `formal/fleet_broken_scopecount.tla`, `.cfg` | Broken variant: a ready run's next scope reactivates its claim without checking the fleet limit; TLC must reject (`WithinFleetLimit`) |
 
 ### Actors and shared state
 
 - **Machines (`Machines`):** each fetches, claims or takes over a change, renews, pushes the branch any number of times (the first push and fix rounds), sees its head green, merges pinned to that commit, and releases.
+- **Scoped runs (`BecomeReady`, `NextScope`):** a machine finishes a scope that doesn't complete the change; its claim becomes ready and stops counting. Later its next scope makes the claim active again, only while the limit has room.
 - **A person (`ForceRelease`):** from any machine, at any moment (also while the holder is shipping or about to merge), releases a change's claim with `claim release --force`.
 - **Time (`Expire`):** marks a claim expired at any moment, whatever its holder is doing. No clock is modelled, so safety can't depend on one.
 - **Pauses:** a machine that is slow, asleep or cut off is one whose actions aren't scheduled for a while. Interleaving already lets any machine stop between any two of its actions, before or after shipping starts, and resume later unaware; a machine that never comes back never acts again. So there is no separate crash action.
 - **Shared state on the remote and forge:**
   - `version`: the fleet ref's commit, as a counter
-  - `claim[c]`: holder and epoch per change
+  - `claim[c]`: holder, epoch and whether its run is ready, per change
   - `tip[c]`: the change branch's tip (0: no branch)
   - `merged[c]`: the forge merged the change
 - **Per machine:** `seen`, `snap`, `snapTip` (what it last fetched), `job` and `epoch` (the claim it believes it holds), `lease` (the tip it last pushed), `checked` (the commit it saw green), `pc`.
@@ -47,21 +49,22 @@ Machine-wide fleet slots need no new model: they are the slot locks `formal/runs
 | `OneHolderPerEpoch` | Each claim on a change, first or take-over, is handed to exactly one machine | fleet-claims: Claiming at run start |
 | `FencedPush` | Only the machine holding the claim ever moves the change's branch | fleet-claims: Fenced branch pushes |
 | `FencedMerge` | Only the machine holding the claim ever has a merge accepted | fleet-claims: Fenced merges, Take-over moves the branch, Releasing moves the branch |
-| `WithinFleetLimit` | The fleet ref never holds more claims than `max_runs` | fleet-claims: Fleet limit |
+| `WithinFleetLimit` | The fleet ref never holds more active or parked claims than `max_runs`, also after a next scope | fleet-claims: Fleet limit, Starting the next scope |
 | `TypeOK` | Variables keep their types | (type check) |
 
 ### Bounds
 
 `Machines = {m1, m2}`, `Changes = {c1, c2}`, `MaxRuns = 1`, `MaxEpoch = 2`, `MaxVersion = 6`, `MaxCommits = 3`.
 - Two machines cover every race here: two claims from one fetch, and an old holder against the machine that took over.
-- Two changes with `MaxRuns = 1` exercise the limit.
+- Two changes with `MaxRuns = 1` exercise the limit: one change ready, the other claimed into the freed room, then the first's next scope.
 - `MaxEpoch = 2` allows a first claim and one take-over per change.
 - `MaxCommits = 3` allows the old holder's push, the take-over commit, and one more push by either machine.
 - `MaxVersion = 6` allows a claim, a push, a take-over, a renewal, a push and a release in one behaviour.
 - `Finished` lets TLC stop once every machine is done or the version bound is used up, so the bound is not reported as a deadlock.
 
-TLC (tla2tools 1.7.4, `scripts/tla-check.sh`) explores 15 140 distinct states in a few seconds. The passing model is not vacuous: with a temporary invariant "no change merges after a take-over of its pushed branch", TLC finds the 9-state behaviour where `m1` pushes, its claim expires, `m2` takes over with a take-over commit, sees it green and merges.
+TLC (tla2tools 1.7.4, `scripts/tla-check.sh`) explores 17 304 distinct states in a few seconds. The passing model is not vacuous: with a temporary invariant "no change merges after a take-over of its pushed branch", TLC finds the 9-state behaviour where `m1` pushes, its claim expires, `m2` takes over with a take-over commit, sees it green and merges.
 - `fleet_broken_plainclaim` is rejected after 5 states: `m1` and `m2` fetch, then both claim `c1` with epoch 1.
 - `fleet_broken_unfenced` is rejected after 6 states: `m1` claims `c1`, a person force-releases it before any push, and `m1`, unaware, creates the branch. (A take-over before the first push gives the same violation a step later.)
 - `fleet_broken_nomove` is rejected after 9 states: `m1` pushes and sees its head green, the claim expires, `m2` takes over without moving the tip, and `m1` merges.
+- `fleet_broken_scopecount` is rejected after 7 states: `m1` claims `c1` and becomes ready, `m2` claims `c2`, and `m1`'s next scope makes two active claims with `MaxRuns = 1`. In the passing model a next scope is reachable (5 states: claim, ready, next scope) and is refused while `c2` holds the room.
 - `fleet_broken_releasekeep` is rejected after 8 states: `m1` pushes and sees its head green, `m2` fetches and force-releases the claim without moving the tip, and `m1` merges.

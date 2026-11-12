@@ -39,6 +39,9 @@ at once. That needs a claim that survives crashes and is safe under races.
     refused. The new holder rewrites the merge request's marker by epoch
     and carries on shipping.
   - `[fleet] max_runs` limits claims across all machines.
+  - A run's next task scope (`add-task-scope`) reuses its claim: a ready
+    claim becomes active again only if `max_runs` has room, checked in the
+    same compare-and-swap.
   - `tuckerbox dispatch` places approved, unclaimed changes in one pass: by
     the change's preferred machines (`add-change-settings`), free capacity,
     installed agents and sign-in. It starts runs over SSH or with
@@ -51,6 +54,8 @@ at once. That needs a claim that survives crashes and is safe under races.
     start instead of the end: an empty start commit, the same lease push,
     and a draft merge request with the claim marker. It is marked ready at
     the ship stage.
+  - A run's next task scope reuses its branch and draft, with no new
+    start commit.
   - Cards show who holds each change (forge login and machine).
   - `[team] approvers` lists the forge logins whose approval counts, read
     only from a base branch the forge confirms is protected.

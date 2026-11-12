@@ -111,11 +111,37 @@ A take-over of a change whose branch exists SHALL make the worktree from the tak
 - **THEN** `studio` opens the merge request with its own marker after the take-over push, without archiving again
 
 ### Requirement: Claims after a run
-A run that becomes `ready` SHALL mark its claim `ready`: it does not expire or count toward the fleet limit, and still refuses new claims. A run that becomes `merged` SHALL remove its claim. Any write of the fleet ref SHALL drop claims of changes archived on the base branch.
+A run that becomes `ready` SHALL mark its claim `ready`: it does not expire or count toward the fleet limit, and still refuses new claims. A dispatched run SHALL free its fleet slot when it becomes ready. A run that becomes `merged` SHALL remove its claim. Any write of the fleet ref SHALL drop claims of changes archived on the base branch.
 
 #### Scenario: Ready on one machine
 - **WHEN** `add-login` is `ready` on `studio` in local ship mode and `tuckerbox dispatch` runs on `mini`
 - **THEN** `add-login` is not placed, and the claim shows `ready` on `studio`
+
+### Requirement: Starting the next scope
+`tuckerbox run <change> --tasks <scope>` on a ready run (see `add-task-scope`) SHALL reuse the run's claim on the machine that holds it, same epoch: one lease push turns the `ready` claim `active`, checking the fleet limit in the same compare-and-swap. When the limit is full it SHALL refuse with `fleet limit reached`, leaving the run and its claim ready. Model: `formal/fleet.tla`, `WithinFleetLimit`.
+
+#### Scenario: Next group on the same machine
+- **WHEN** `add-login`'s run with scope `1` is ready on `studio`, its claim is `ready`, and the user runs `tuckerbox run add-login --tasks 2` on `studio`
+- **THEN** the claim is `active` again with the same epoch, and the first step starts with scope `2` in the same worktree
+
+#### Scenario: Room taken meanwhile
+- **WHEN** `max_runs = 1`, `add-login` is ready on `studio`, `add-users` was claimed on `mini` since, and the user runs `tuckerbox run add-login --tasks 2` on `studio`
+- **THEN** it refuses with `fleet limit reached` naming `add-users`, and `add-login`'s run and claim stay ready
+
+#### Scenario: Next scope from another machine
+- **WHEN** `add-login` is ready on `studio` and the user runs `tuckerbox run add-login --tasks 2` on `mini`
+- **THEN** it refuses with `claimed by studio` and changes no claim
+
+### Requirement: Next scope of other runs
+A next scope of a stopped, blocked or failed run SHALL make its `parked` claim `active` as `resume` does, with no new limit check, since parked claims count already. A run started by dispatch SHALL record that in its run state, and its next scope SHALL take a machine-wide fleet slot before touching the claim; with none free it SHALL refuse with `<machine> is full` and change no claim.
+
+#### Scenario: Next scope after a block
+- **WHEN** `add-login`'s run with scope `1` is blocked on `studio` with a parked claim and the user runs `tuckerbox run add-login --tasks 2`
+- **THEN** the claim becomes `active` with the same epoch and the first step starts with scope `2`
+
+#### Scenario: Dispatched run on a full machine
+- **WHEN** `add-login` was dispatched to `mini` with `fleet_capacity = 1`, is ready after scope `1`, and another dispatched run now holds `mini`'s slot
+- **THEN** `tuckerbox run add-login --tasks 2` on `mini` refuses with `mini is full`, and the claim stays `ready`
 
 ### Requirement: Showing and releasing claims
 `tuckerbox claim show [--json]` SHALL list the fleet ref's claims with change, machine, state, epoch and last renewal. `tuckerbox claim release <change>` SHALL remove this machine's claim when no run is active on it. Removing another machine's claim SHALL need `--force`.
