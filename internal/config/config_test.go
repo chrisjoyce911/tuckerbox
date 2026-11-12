@@ -606,3 +606,34 @@ func TestBoardColumns(t *testing.T) {
 		}
 	}
 }
+
+// Scenario: Repository sets the backend.
+func TestRepoAgentBackendRefused(t *testing.T) {
+	f := newFixture(t, "agent_backend = \"terminal\"\n"+minimal, "")
+	ps := f.problems()
+	wantProblem(t, ps, f.repoPath(), "agent_backend", "belongs in machine config")
+}
+
+func TestMachineAgentBackend(t *testing.T) {
+	if cfg := newFixture(t, minimal, "").mustLoad(); cfg.AgentBackend != BackendAuto {
+		t.Errorf("default backend %q, want auto", cfg.AgentBackend)
+	}
+	for _, v := range []string{BackendAuto, BackendTerminal, BackendHeadless} {
+		cfg := newFixture(t, minimal, "agent_backend = \""+v+"\"\n").mustLoad()
+		if cfg.AgentBackend != v {
+			t.Errorf("backend %q, want %q", cfg.AgentBackend, v)
+		}
+		got, err := MachineBackend(newFixture(t, "", "agent_backend = \""+v+"\"\n").machine)
+		if err != nil || got != v {
+			t.Errorf("MachineBackend: %q, %v; want %q", got, err, v)
+		}
+	}
+	f := newFixture(t, minimal, "agent_backend = \"tmux\"\n")
+	wantProblem(t, f.problems(), f.machine, "agent_backend", "unknown agent backend")
+	if _, err := MachineBackend(f.machine); err == nil || !strings.Contains(err.Error(), "unknown agent backend") {
+		t.Errorf("MachineBackend on a bad value: %v", err)
+	}
+	if got, err := MachineBackend(filepath.Join(t.TempDir(), "none.toml")); err != nil || got != BackendAuto {
+		t.Errorf("MachineBackend without a file: %q, %v", got, err)
+	}
+}

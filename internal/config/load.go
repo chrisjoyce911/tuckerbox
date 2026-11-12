@@ -166,6 +166,9 @@ type rawFile struct {
 	MaxParallel *int                 `toml:"max_parallel"`
 	Ship        *string              `toml:"ship"`
 	Editor      *string              `toml:"editor"`
+	// AgentBackend is machine-only; it is decoded from repository config
+	// too, so that setting it there gets a clear message.
+	AgentBackend *string `toml:"agent_backend"`
 	// RequireApproval is repository-only; it is decoded from machine
 	// config too, so that setting it there gets a clear message.
 	RequireApproval *bool                 `toml:"require_approval"`
@@ -280,6 +283,10 @@ func parse(path, data string, repo bool) *file {
 		if md.IsDefined("editor") {
 			f.problem("editor", "editor is machine-only; set it in machine config")
 			f.raw.Editor = nil
+		}
+		if md.IsDefined("agent_backend") {
+			f.problem("agent_backend", "agent_backend belongs in machine config: whether herdr-core is installed and running is a fact about the machine")
+			f.raw.AgentBackend = nil
 		}
 	} else if md.IsDefined("require_approval") {
 		f.problem("require_approval", "require_approval belongs in repository config (.tuckerbox/config.toml), so every machine applies the same gate")

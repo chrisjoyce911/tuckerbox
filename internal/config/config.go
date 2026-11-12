@@ -10,7 +10,8 @@
 //
 // A value set in the repository config overrides the machine value for the
 // same key. Some keys are reserved to the machine and are refused in a
-// repository config: permission profiles, raw agent arguments and the editor.
+// repository config: permission profiles, raw agent arguments, the editor
+// and agent_backend.
 // One key is reserved to the repository and refused in machine config:
 // require_approval, so every machine applies the same run gate.
 // A repository can only refer to a permission profile by name, and the
@@ -157,6 +158,9 @@ type Config struct {
 	// Editor is the command used to open files for the user. Machine only;
 	// "" if unset.
 	Editor string
+	// AgentBackend is how step agents run: [BackendAuto], [BackendTerminal]
+	// or [BackendHeadless]. Machine only; BackendAuto unless set.
+	AgentBackend string
 	// RequireApproval makes tuckerbox run refuse a change that is not
 	// approved (see package approval). Repository only; true unless the
 	// repository config sets require_approval = false.

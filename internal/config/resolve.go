@@ -79,6 +79,13 @@ func resolve(root, remote string, m, r *file) (*Config, Problems) {
 	if mr.Editor != nil {
 		cfg.Editor = *mr.Editor
 	}
+	cfg.AgentBackend = BackendAuto
+	if mr.AgentBackend != nil {
+		cfg.AgentBackend = *mr.AgentBackend
+		if err := CheckBackend(cfg.AgentBackend); err != nil {
+			add(m.path, "agent_backend", "%v", err)
+		}
+	}
 	cfg.RequireApproval = rr.RequireApproval == nil || *rr.RequireApproval
 
 	cfg.BoardColumns = BoardCompact

@@ -104,7 +104,7 @@ When a slot frees, the queued run first in admission order takes it: lowest prio
 
 Run state is kept in the worktree's git directory (`$(git rev-parse --git-dir)/tuckerbox/`), never in the tree. Next to the current state (`run.json`), each run appends its events (started, steps, hand-offs, rejections with findings, stopped, resumed, ready) to `history.jsonl` there; the format is documented in [`internal/history`](internal/history/history.go). `status` finds runs through a machine index in `$XDG_STATE_HOME/tuckerbox/`, `~/.local/state/tuckerbox/` on macOS and Linux, or `%LocalAppData%\tuckerbox\` on Windows.
 
-A repository's workflow lives in `.tuckerbox/config.toml`, committed with it. Machine defaults go in `$XDG_CONFIG_HOME/tuckerbox/config.toml` if that variable is set, otherwise `~/.config/tuckerbox/config.toml` on macOS and Linux and `%AppData%\tuckerbox\config.toml` on Windows. Repository values win, except that permission profiles (the flags that let agents run without prompts, and which repository remotes may use them) and the editor can only be set on the machine:
+A repository's workflow lives in `.tuckerbox/config.toml`, committed with it. Machine defaults go in `$XDG_CONFIG_HOME/tuckerbox/config.toml` if that variable is set, otherwise `~/.config/tuckerbox/config.toml` on macOS and Linux and `%AppData%\tuckerbox\config.toml` on Windows. Repository values win, except that permission profiles (the flags that let agents run without prompts, and which repository remotes may use them) the editor and the agent backend can only be set on the machine:
 
 ```toml
 # machine config
@@ -133,6 +133,15 @@ command = ["myagent", "--prompt-file", "{brief_file}", "--last-message", "{lastm
 ```
 
 `{brief}` is the brief's text and `{brief_file}` the brief file's path; a custom agent passes one of them. Agents get the brief in their command, so they need no read outside their worktree. When the command would be longer than 24,000 characters as a Windows command line (on every platform), Claude and Codex read the brief on standard input instead, and a custom agent's `{brief}` becomes an instruction to read the brief file. Logs and run state show the brief as `<brief: N chars, <file>>`.
+
+Where step agents run is a fact about the machine, so `agent_backend` is set only in machine config (`tuckerbox check` refuses it in a repository):
+
+```toml
+# machine config
+agent_backend = "auto" # the default; or "terminal" or "headless"
+```
+
+`auto` uses herdr-core terminals when `hc` is on the PATH and `hc server status` succeeds, and otherwise runs agents headless, as child processes of Tuckerbox with their output in the step's log. `headless` always does that. `terminal` requires herdr-core: when it isn't installed or its server isn't running, `tuckerbox run` refuses and starts nothing. `tuckerbox doctor` reports the backend in use and why, for example `agent backend: headless, because herdr-core wasn't found (no hc on the PATH)`.
 
 `doctor` exits non-zero only when a required tool (`git` or `openspec`) is missing. Agent CLIs are optional. It does not yet check whether an agent is signed in, and says `sign-in not checked`.
 
