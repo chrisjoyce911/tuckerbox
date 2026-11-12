@@ -175,6 +175,12 @@ type rawFile struct {
 	Permissions     map[string]rawProfile `toml:"permissions"`
 	Board           rawBoard              `toml:"board"`
 	Worktree        rawWorktree           `toml:"worktree"`
+	Autopilot       rawAutopilot          `toml:"autopilot"`
+}
+
+type rawAutopilot struct {
+	Scope    *string `toml:"scope"`
+	Interval *string `toml:"interval"`
 }
 
 type rawBoard struct {

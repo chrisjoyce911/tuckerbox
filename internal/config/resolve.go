@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 )
 
 // nameRE is what step, role, agent and profile names may look like. Role
@@ -85,6 +86,25 @@ func resolve(root, remote string, m, r *file) (*Config, Problems) {
 		cfg.BoardColumns = BoardColumns(v)
 		if cfg.BoardColumns != BoardCompact && cfg.BoardColumns != BoardSteps {
 			add(from, "board.columns", "unknown board layout %q; use \"compact\" or \"steps\"", v)
+		}
+	}
+
+	cfg.Autopilot = Autopilot{Scope: AutopilotGroup, Interval: DefaultAutopilotInterval}
+	if v, from, ok := pick(rr.Autopilot.Scope, mr.Autopilot.Scope, r.path, m.path); ok {
+		cfg.Autopilot.Scope = v
+		if v != AutopilotGroup && v != AutopilotChange {
+			add(from, "autopilot.scope", "unknown scope %q; use \"group\" or \"change\"", v)
+		}
+	}
+	if v, from, ok := pick(rr.Autopilot.Interval, mr.Autopilot.Interval, r.path, m.path); ok {
+		d, err := time.ParseDuration(v)
+		switch {
+		case err != nil:
+			add(from, "autopilot.interval", "%q is not a duration such as \"60s\" or \"2m\"", v)
+		case d < MinAutopilotInterval:
+			add(from, "autopilot.interval", "%s is too short; use at least %s", v, MinAutopilotInterval)
+		default:
+			cfg.Autopilot.Interval = d
 		}
 	}
 

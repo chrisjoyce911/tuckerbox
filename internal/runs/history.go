@@ -38,7 +38,7 @@ func (e *Engine) event(ws Workspace, rs *Run, ev history.Event) {
 // resumed or rerun. A run whose previous process died while queued or
 // running (it left no final state) first gets the stopped event it never
 // wrote. Called once the run is saved as queued, then queued itself.
-func (e *Engine) startEvents(ws Workspace, rs *Run, mode Mode, prev Run) {
+func (e *Engine) startEvents(ws Workspace, rs *Run, mode Mode, prev Run, by string) {
 	kind := history.Started
 	sc := rs.Scope.SpecOrEmpty()
 	if prev.Change != "" {
@@ -56,6 +56,7 @@ func (e *Engine) startEvents(ws Workspace, rs *Run, mode Mode, prev Run) {
 	if prev.Change != "" && mode == Start && prev.Scope.SpecOrEmpty() != sc {
 		ev = history.Event{Kind: history.ScopeStarted, Scope: sc, OldScope: prev.Scope.SpecOrEmpty()}
 	}
+	ev.By = by
 	e.event(ws, rs, ev)
 	e.event(ws, rs, history.Event{Kind: history.Queued})
 }

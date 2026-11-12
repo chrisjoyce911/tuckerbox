@@ -2,38 +2,38 @@
 
 ## 1. The command and its lock (autopilot)
 
-- [ ] 1.1 `tuckerbox autopilot [--once] [--dry-run]`: foreground loop; refuse when `require_approval` is false
-- [ ] 1.2 `<common-dir>/tuckerbox/autopilot.lock` and `autopilot.json` (pid, machine, start time), counted only while the lock is held; release on Ctrl-C or SIGTERM; runs keep going
-- [ ] 1.3 `[autopilot] scope` (`group`, `change`) and `interval` (at least 10 s, default 60 s) in either config, repository winning; `tuckerbox check` validates them
-- [ ] 1.4 Test: Approval off
-- [ ] 1.5 Test: Second autopilot
-- [ ] 1.6 Test: Dry run
-- [ ] 1.7 Test: Interval too short
-- [ ] 1.8 Test: Restart mid-run
+- [x] 1.1 `tuckerbox autopilot [--once] [--dry-run]`: foreground loop; refuse when `require_approval` is false
+- [x] 1.2 `<common-dir>/tuckerbox/autopilot.lock` and `autopilot.json` (pid, machine, start time), counted only while the lock is held; release on Ctrl-C or SIGTERM; runs keep going
+- [x] 1.3 `[autopilot] scope` (`group`, `change`) and `interval` (at least 10 s, default 60 s) in either config, repository winning; `tuckerbox check` validates them
+- [x] 1.4 Test: Approval off
+- [x] 1.5 Test: Second autopilot
+- [x] 1.6 Test: Dry run
+- [x] 1.7 Test: Interval too short
+- [x] 1.8 Test: Restart mid-run
 
 ## 2. Passes (autopilot)
 
 - [ ] 2.1 Watch the repository's run states every 5 s; a full pass when a run ends or the interval passes: fetch the base (warn when offline), active changes in admission order (`add-priority`)
-- [ ] 2.2 Decide per change: approved (run gate), dependencies met (engine rule, read-only), no run or a ready run with unticked tasks; start until queued and running reach `max_parallel`
-- [ ] 2.3 Start with `--tasks next` in group mode, no scope in change mode
-- [ ] 2.4 Test: Within max_parallel
-- [ ] 2.5 Test: Unapproved change
-- [ ] 2.6 Test: Dependency not met
-- [ ] 2.7 Test: Next group
-- [ ] 2.8 Test: Whole changes
+- [x] 2.2 Decide per change: approved (run gate), dependencies met (engine rule, read-only), no run or a ready run with unticked tasks; start until queued and running reach `max_parallel`
+- [x] 2.3 Start with `--tasks next` in group mode, no scope in change mode
+- [x] 2.4 Test: Within max_parallel
+- [x] 2.5 Test: Unapproved change
+- [x] 2.6 Test: Dependency not met
+- [x] 2.7 Test: Next group
+- [x] 2.8 Test: Whole changes
 
 ## 3. Conditional requests and crashes (autopilot)
 
-- [ ] 3.1 Run engine requests carry the expected state and `since`; under the change lock the engine goes ahead only if both match and the approval rule holds (start: `approved`; crash resume: not `none`), else changes nothing
+- [x] 3.1 Run engine requests carry the expected state and `since`; under the change lock the engine goes ahead only if both match and the approval rule holds (start: `approved`; crash resume: not `none`), else changes nothing
 - [ ] 3.2 Never approve, edit, tick, resume blocked or person-stopped runs, or re-run failed ones; skip changes whose lock an edit holds
 - [ ] 3.3 Crash streak from history: autopilot's `resumed` events carry `by: autopilot`; count them since the last `step_finished` or person `started`/`resumed`/`rerun`/`scope_started`; resume only at 0; leave and report otherwise
 - [ ] 3.4 `formal/autopilot.tla` passes and `autopilot_broken_unchecked`, `_nosince`, `_ungated` and `_perround` are rejected by `scripts/tla-check.sh`
 - [ ] 3.5 Test: Person stopped a run
 - [ ] 3.6 Test: Blocked run
-- [ ] 3.7 Test: Unapproved after the pass looked
-- [ ] 3.8 Test: Stopped after the pass looked
-- [ ] 3.9 Test: Crashed again after a person resumed
-- [ ] 3.10 Test: Unapproved while crashed
+- [x] 3.7 Test: Unapproved after the pass looked
+- [x] 3.8 Test: Stopped after the pass looked
+- [x] 3.9 Test: Crashed again after a person resumed
+- [x] 3.10 Test: Unapproved while crashed
 - [ ] 3.11 Test: Stale approval from the run's own step
 - [ ] 3.12 Test: Machine restarted
 - [ ] 3.13 Test: Crashes twice across rounds (rounds 1, 2 and 3; with an autopilot restart between the crashes)

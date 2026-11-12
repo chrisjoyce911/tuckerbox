@@ -31,6 +31,12 @@ ship = "local"
 # [board]
 # columns = "compact"
 
+# tuckerbox autopilot: "group" (default) runs each change group by group
+# with --tasks next, "change" runs whole changes; a full pass every interval.
+# [autopilot]
+# scope = "group"
+# interval = "60s"
+
 [workflow]
 # The steps, in run order. Each needs a [steps.<id>] table below.
 steps = ["plan", "build", "review"]
