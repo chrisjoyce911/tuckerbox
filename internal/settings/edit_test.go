@@ -104,6 +104,45 @@ func TestSetValueKeepsOtherLines(t *testing.T) {
 	}
 }
 
+// Set an agent (comments kept): a comment holding quotes or apostrophes,
+// or a value holding a #, keeps the comment when the value is rewritten.
+func TestSetValueKeepsCommentWithQuotes(t *testing.T) {
+	for _, tc := range []struct{ old, want string }{
+		{`model = "opus" # use "cheap" temporarily`, `model = "sonnet" # use "cheap" temporarily`},
+		{`model = "opus" # don't keep this`, `model = "sonnet" # don't keep this`},
+		{`model = "opus" # it's "fine"; ['x']`, `model = "sonnet" # it's "fine"; ['x']`},
+		{`model = 'opus' # 'single' and "double"`, `model = "sonnet" # 'single' and "double"`},
+		{`model = "a#b" # after`, `model = "sonnet" # after`},
+		{`model = "a\"#b" # after "q"`, `model = "sonnet" # after "q"`},
+		{`model = 'a\'  # it's`, `model = "sonnet" # it's`},
+		{`model = """a"#""" # x "y"`, `model = "sonnet" # x "y"`},
+		{`model = "opus"`, `model = "sonnet"`},
+		{`model = "opus" #`, `model = "sonnet" #`},
+	} {
+		data := "[steps.build]\n" + tc.old + "\n"
+		out, changed, err := SetValue([]byte(data), mustKey(t, "step.build.model"), "sonnet")
+		if err != nil || !changed || string(out) != "[steps.build]\n"+tc.want+"\n" {
+			t.Errorf("%s: %v %v\n%s", tc.old, changed, err, out)
+		}
+	}
+}
+
+func TestCommentStart(t *testing.T) {
+	for v, want := range map[string]int{
+		` "x"`:              -1,
+		` "x" # c`:          5,
+		` "#" # c`:          5,
+		` '#\' # c`:         6,
+		` "\\" # "c"`:       6,
+		` ["a#", 'b#'] # c`: 14,
+		` "unterminated #`:  -1,
+	} {
+		if got := commentStart(v); got != want {
+			t.Errorf("%q: got %d, want %d", v, got, want)
+		}
+	}
+}
+
 func TestSetValueRefuses(t *testing.T) {
 	for _, tc := range []struct{ data, key, value, want string }{
 		{"", "step.build.agent", "", "empty value"},

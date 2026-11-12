@@ -498,16 +498,50 @@ func insertLine(lines [][]byte, at int, line, eol string) []byte {
 }
 
 // trailingComment returns the "# …" after a one-line value, or "". It
-// only looks after the last quote, so a # inside a string is not one.
+// scans the value from the start and takes the first # outside a string,
+// so a # inside a string is not one and quotes inside the comment do not
+// matter.
 func trailingComment(l []byte) string {
 	s := strings.TrimRight(string(l), "\r\n")
 	_, v, _ := strings.Cut(s, "=")
-	from := strings.LastIndexAny(v, `"']`)
-	i := strings.IndexByte(v[from+1:], '#')
-	if i < 0 {
-		return ""
+	if i := commentStart(v); i >= 0 {
+		return strings.TrimSpace(v[i:])
 	}
-	return strings.TrimSpace(v[from+1+i:])
+	return ""
+}
+
+// commentStart returns the index of the first # in v that is outside a
+// TOML string, or -1. Basic strings ("…", with \ escapes), literal strings
+// ('…') and their one-line triple-quoted forms are skipped.
+func commentStart(v string) int {
+	for i := 0; i < len(v); {
+		switch c := v[i]; c {
+		case '#':
+			return i
+		case '"', '\'':
+			delim := string(c)
+			if strings.HasPrefix(v[i:], strings.Repeat(delim, 3)) {
+				delim = strings.Repeat(delim, 3)
+			}
+			j := i + len(delim)
+			for j < len(v) && !strings.HasPrefix(v[j:], delim) {
+				if c == '"' && v[j] == '\\' {
+					j++
+				}
+				j++
+			}
+			// A closing triple quote may be followed by up to two more
+			// quotes that belong to the string.
+			j += len(delim)
+			for len(delim) == 3 && j < len(v) && v[j] == c {
+				j++
+			}
+			i = j
+		default:
+			i++
+		}
+	}
+	return -1
 }
 
 func lineEnding(data []byte) string {
