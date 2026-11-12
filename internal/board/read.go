@@ -16,6 +16,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/chrisjoyce911/tuckerbox/internal/approval"
+	"github.com/chrisjoyce911/tuckerbox/internal/autopilot"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/deps"
 	"github.com/chrisjoyce911/tuckerbox/internal/edits"
@@ -65,6 +66,9 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 	}
 	refs := refApprovals(ctx, repo.Root)
 	doc := &Document{Version: Version, Ship: string(cfg.Ship), Repo: key, Path: repo.Root, Machine: history.Machine(), RequireApproval: cfg.RequireApproval, Columns: columns(cfg), Cards: []Card{}}
+	if m := autopilot.ReadMarker(repo.Common); m != nil {
+		doc.Autopilot = Autopilot{Running: true, Pid: m.Pid, Started: timestamp(m.Started)}
+	}
 	doc.Steps = make([]string, 0, len(cfg.Steps))
 	for _, step := range cfg.Steps {
 		doc.Steps = append(doc.Steps, step.ID)
@@ -97,6 +101,7 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 			c.State, c.Reason, c.Step, c.Round = string(r.State), r.Reason, r.Step, r.Round
 			c.Since, c.Branch, c.Worktree = timestamp(r.Since), r.Branch, r.Worktree
 			c.Scope = r.Scope
+			c.NeedsYou = needsYou(r, c.Approval.State, p.ChangeDir(), cfg.Autopilot.Scope)
 			if step, ok := cfg.Step(r.Step); ok {
 				c.Agent = step.Agent
 			}

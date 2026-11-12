@@ -249,7 +249,7 @@ func (p *Pilot) decide(ctx context.Context, id, base, rev string, active map[str
 		return nil, "", err
 	}
 	if st != approval.Approved {
-		return nil, fmt.Sprintf("needs approving again before its next group (approval is %s)", st), nil
+		return nil, fmt.Sprintf("needs approval again before %s (approval is %s)", nextGroup(l), st), nil
 	}
 	return &Request{Change: id, Mode: runs.Start, Tasks: scope.Next, Expect: runs.Expect{State: r.State, Since: r.Since}}, "", nil
 }
@@ -354,4 +354,15 @@ func (p *Pilot) report(now map[string]string) {
 		}
 	}
 	p.reported = now
+}
+
+// nextGroup names the group --tasks next would run, for messages.
+func nextGroup(l runs.LocalRun) string {
+	tasks, err := runs.ReadTasks(runs.TasksFile(l.Worktree, l.Run.Change))
+	if err == nil {
+		if sc, err := scope.Resolve(scope.Next, tasks); err == nil {
+			return "group " + sc.Spec
+		}
+	}
+	return "its next group"
 }
