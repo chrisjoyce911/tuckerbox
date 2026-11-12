@@ -952,6 +952,10 @@ type statusRun struct {
 	NotWatched bool `json:"not_watched,omitempty"`
 	// Scope is the run's task scope; absent for the whole change.
 	Scope *scope.Scope `json:"scope,omitempty"`
+	// Question is what the run asks the person: a blocked result's
+	// summary and findings, with the step and round that asked
+	// (blocked-answers), or a waiting terminal agent's last message.
+	Question *runs.QuestionView `json:"question,omitempty"`
 }
 
 // StatusVersion is the format version of tuckerbox status --json.
@@ -992,6 +996,7 @@ func (a App) statusRuns() ([]statusRun, error) {
 		if v.State == runs.Running && v.Terminal != nil {
 			sr.Terminal = v.Terminal.Address
 		}
+		sr.Question = runs.Ask(&v, st, v.AgentState)
 		out = append(out, sr)
 	}
 	return out, nil
@@ -1043,7 +1048,38 @@ func (a App) status(args []string) int {
 		rows = append(rows, []string{filepath.Base(r.Repo), r.Change, state, step, tasks, strconv.Itoa(r.Round), displayTime(since), mr, ci, shipRound, r.Reason})
 	}
 	writeTable(a.Stdout, rows)
+	for _, r := range list {
+		if q := r.Question; q != nil {
+			writeQuestion(a.Stdout, r.Change, q)
+		}
+	}
 	return 0
+}
+
+// writeQuestion prints a run's question under the status table.
+func writeQuestion(w io.Writer, change string, q *runs.QuestionView) {
+	verb := "asks"
+	if q.Kind == runs.QuestionWaiting {
+		verb = "waits for you"
+	}
+	fmt.Fprintf(w, "\n%s %s (step %s, round %d):\n", change, verb, q.Step, q.Round)
+	if q.Summary != "" {
+		for _, line := range strings.Split(q.Summary, "\n") {
+			fmt.Fprintf(w, "  %s\n", line)
+		}
+	}
+	for _, f := range q.Findings {
+		where := f.File
+		if where == "" {
+			where = "(whole change)"
+		}
+		fmt.Fprintf(w, "  - [%s] %s: %s\n", f.Severity, where, oneLine(f.Detail))
+	}
+	if n := len(q.Answers); n > 0 {
+		fmt.Fprintf(w, "  answered %d time(s); tuckerbox resume %s continues with the answers\n", n, change)
+	} else {
+		fmt.Fprintf(w, "  answer with tuckerbox answer %s <text>\n", change)
+	}
 }
 
 func (a App) writeJSON(v any) int {

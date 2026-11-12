@@ -32,6 +32,10 @@ Commands:
   logs <change> [step]      Show a step's agent output (--follow to watch)
   stop <change>             Stop a run's agent and mark the run stopped
   resume <change>           Continue a stopped or blocked run
+  answer <change> [--resume] <text> | --file <path> | -
+                            Answer a blocked run's question (for the next
+                            brief; --resume resumes it too), or type into a
+                            terminal agent that waits for you
   rerun <change> <step>     Start a run again from a step
   history <change> [--json] Show a run's events, oldest first
   edit <change> <file>      Open proposal, design, model, tasks or
@@ -61,8 +65,10 @@ type App struct {
 	// Forge supplies a fake session for foreground shipping tests.
 	Forge          func(context.Context, *config.Config) (forge.Client, func(string) string, error)
 	Stdout, Stderr io.Writer
-	DoctorEnv      doctor.Env
-	DoctorTools    []doctor.Tool
+	// Stdin is what tuckerbox answer - reads; nil means os.Stdin.
+	Stdin       io.Reader
+	DoctorEnv   doctor.Env
+	DoctorTools []doctor.Tool
 	// ConfigEnv and Getwd are used by check and init; zero values use the
 	// real git, user config directory and working directory.
 	ConfigEnv config.Env
@@ -143,6 +149,8 @@ func (a App) Run(args []string) int {
 		return a.stop(rest)
 	case "resume":
 		return a.resume(rest)
+	case "answer":
+		return a.answer(rest)
 	case "rerun":
 		return a.rerun(rest)
 	case "board":

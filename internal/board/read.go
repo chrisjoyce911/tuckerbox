@@ -107,6 +107,13 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 				}
 				c.Activity = readActivity(ctx, cfg, r, folder, p.State, events, doc.Machine)
 			}
+			if !r.ShippingStarted {
+				agentState := ""
+				if c.Activity != nil {
+					agentState = c.Activity.AgentState
+				}
+				c.Question = runs.Ask(r, p.State, agentState)
+			}
 			switch r.State {
 			case runs.Queued:
 				c.Column = "queued"

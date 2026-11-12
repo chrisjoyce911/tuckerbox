@@ -4,6 +4,7 @@ package board
 
 import (
 	"github.com/chrisjoyce911/tuckerbox/internal/agent"
+	"github.com/chrisjoyce911/tuckerbox/internal/runs"
 	"github.com/chrisjoyce911/tuckerbox/internal/scope"
 	"github.com/chrisjoyce911/tuckerbox/internal/ship"
 )
@@ -80,6 +81,12 @@ type Card struct {
 	// Activity is what the run's agent is doing, on cards whose run is
 	// running, queued or stopped (agent-activity).
 	Activity *Activity `json:"activity,omitempty"`
+	// Question is what the run asks the person: on a blocked card, its
+	// step's blocked result (summary and findings, step and round) and the
+	// answers given so far; on a card whose terminal agent waits for the
+	// person, kind "waiting" and the agent's last message
+	// (blocked-answers: The question of a blocked run).
+	Question *runs.QuestionView `json:"question,omitempty"`
 }
 type Detail struct {
 	Change   string  `json:"change"`

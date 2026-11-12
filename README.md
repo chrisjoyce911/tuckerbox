@@ -51,6 +51,7 @@ tuckerbox board --json --repo github.com/you/shop  # this machine's checkout of 
 tuckerbox logs fix-login --follow  # watch the running step's agent
 tuckerbox stop fix-login           # stop the agent; the run is marked stopped
 tuckerbox resume fix-login         # continue a stopped or blocked run
+tuckerbox answer fix-login "Keep the rollback."  # answer a blocked run's question (--resume: and resume it)
 tuckerbox rerun fix-login review   # start again from a step
 tuckerbox history fix-login        # every event of the run, oldest first (--json for tools)
 ```
@@ -152,6 +153,18 @@ interactive = ["myagent", "--on-turn-end", "{turnhook}", "{brief}"]
 ```
 
 The agent outlives Tuckerbox's run process. If that process dies, `tuckerbox status` shows the run `running (not watched)`; `tuckerbox resume` (or autopilot's crash resume) adopts the live agent in the same round, and `tuckerbox stop` ends it. A `run` or `rerun` that starts a new round ends that agent first. A run is recorded `stopped` only once its agent's terminal has ended; if herdr-core can't end it, the run stays `running (not watched)` and `stop` can be tried again. The agent keeps its parallel slot while it lives, so no other change starts in its place. `tuckerbox logs` reads a live agent's terminal, and the step's log keeps its session afterwards. `doctor` checks the turn-hook format Tuckerbox expects and the flag each installed CLI takes it with; whether a CLI version really runs the hook is only seen in a real turn, and doctor says so.
+
+### Answering a run
+
+A step that reports `blocked` asks the person something: its summary and findings are the run's question, shown by `tuckerbox status` (under the table, and as `question` in `--json`) and on the board card with the step and round that asked. Answer it with:
+
+```sh
+tuckerbox answer fix-login "Herdr check done by hand: keep the rollback."
+tuckerbox answer fix-login --file decision.md   # or - to read standard input
+tuckerbox answer fix-login --resume "use plan B" # record, then resume as tuckerbox resume does
+```
+
+`answer` takes the change lock, adds the answer (its text, your git `user.name`, the time, and the step and round it answers) to `answers` in the run's state, writes an `answered` history event, and leaves the run blocked. An answer is at most 16 KiB. It refuses a run that isn't blocked and records nothing, unless the run's step runs in a terminal whose agent waits for you: then the text is typed into that terminal (`hc send`), as typing in its tab would, and recorded in history, and the run keeps running. When the run resumes, the step's brief has a section "Answers from a person" with the question and every answer since, oldest first; they stay in that step's briefs (after a crash or a stop too) until it reports a result, and later briefs leave them out. `--resume` keeps every gate and refusal of `resume`: if the resume is refused, the answer stays recorded, the output says so, and a later `resume` uses it. On the board, a blocked card's detail (or a card whose agent waits) shows the question, the answers so far and a text box: Answer runs `tuckerbox answer <change> -` with the text on standard input, and on a blocked card Answer and resume adds `--resume`.
 
 `doctor` exits non-zero only when a required tool (`git` or `openspec`) is missing. Agent CLIs are optional. It does not yet check whether an agent is signed in, and says `sign-in not checked`.
 
