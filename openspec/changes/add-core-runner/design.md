@@ -80,7 +80,12 @@ Run state goes in `$(git rev-parse --git-dir)/tuckerbox/`, which is per worktree
 - briefs
 - logs
 
-It is never committed, needs no `.gitignore` entry, and is removed with the worktree. A machine index at `<user state dir>/tuckerbox/index.json` lists the known worktrees, so `status` can find runs across repos without scanning disks.
+It is never committed, needs no `.gitignore` entry, and is removed with the worktree. A machine index lists the known worktrees, so `status` can find runs across repos without scanning disks. It is `index.json` in the user state directory:
+- `$XDG_STATE_HOME/tuckerbox/` when `XDG_STATE_HOME` is an absolute path, on any OS
+- otherwise `~/.local/state/tuckerbox/` on macOS and Linux (not `~/Library` on macOS, to match the config directory)
+- otherwise `%LocalAppData%\tuckerbox\` on Windows
+
+Each run's engine adds its worktree when it starts, and drops entries whose worktree is gone.
 
 ### Concurrency through OS file locks
 There is no daemon. Each active run is one `tuckerbox` process that holds two locks:
@@ -89,7 +94,39 @@ There is no daemon. Each active run is one `tuckerbox` process that holds two lo
 
 Locks are `flock` on Unix and `LockFileEx` on Windows, through `github.com/gofrs/flock`. The OS releases them if the process dies, so a crash never leaves a change stuck. A run waiting for a slot is `queued`. `tuckerbox run --all` starts one process per change, which queue on the slot locks.
 
-The engine is the only writer of `run.json`. Agents write only their own result file. `stop` signals the run process, which writes the state change itself.
+The engine is the only writer of `run.json`, and writes it atomically (a temporary file, then a rename). Agents write only their own result file. `stop` signals the run process, which writes the state change itself.
+
+How the pieces fit, as built:
+- **Order of locks.** A run takes the change lock first, then waits for a slot, as in the model. Runs waiting for a slot hold a ticket in `<common-dir>/tuckerbox/queue/`, and only the oldest live ticket may take one, so queued runs start in the order requested. A ticket is live while its change lock is held, so a dead run's ticket is dropped by the next waiter. `run` starts its changes one at a time and waits until each holds its lock and has joined the queue.
+- **Worktree creation** happens before the change lock exists (the lock lives in the worktree's git directory). It is serialised by `<common-dir>/tuckerbox/worktree.lock`, so two processes racing for one change make the worktree once, and then race only for the change lock. A new worktree is refused, and nothing is made, when the change is not on the base branch, since its agents could not read it.
+- **Rounds.** A run's round is stored in `run.json` and only grows. It goes up when a rejection loops back, and also on `resume` and `rerun`, so nothing an earlier attempt's agent writes can match. `max_rounds` counts the rejecting step's rejections since the last `resume` or `rerun`.
+- **`run` on a change that already has a run** continues it from its current step, in its worktree, unless it is `ready`; then `run` refuses and points to `rerun`. `run --all` skips ready and active changes.
+- **Paused runs end their process.** A `blocked`, `stopped`, `failed` or `ready` run records its state and then frees its slot and change lock. `resume` and `rerun` start a new process.
+- **Stop** creates `<git-dir>/tuckerbox/stop` and, on Unix, sends SIGTERM. The engine polls for the file, which is how a detached run on Windows is stopped gracefully. If the run has not stopped within 30 seconds, `stop` kills it and its agent; `run.json` then still says `running`.
+- **A crashed run** leaves `run.json` saying `queued` or `running` with its change lock free. `status` shows it as `stopped` with the reason "the run process ended without recording a final state", and `resume` treats it as stopped. Nothing rewrites the file except the next engine.
+- **Detached processes.** `run`, `resume` and `rerun` start `tuckerbox engine` for each run: a new session with no controlling terminal on Unix, a detached process with its own process group on Windows. It writes its log to `<git-dir>/tuckerbox/run.log`. `--foreground` runs one change in the calling process instead, and Ctrl-C stops it.
+
+### Locks and the model
+
+`formal/runs.tla` assumes three things of the code: the change lock is taken atomically, at most `MaxParallel` slots are held, and a result is accepted only for the current round. Each action and invariant maps to code as follows (paths under `internal/`):
+
+| Model | Code |
+|---|---|
+| `Pick(p, c)`: take a free change lock in one step | `runs.TryChangeLock`: one `flock.TryLock` on `<git-dir>/tuckerbox/run.lock`. It retries a few times, each retry atomic, and never checks first and locks second. Called by `Engine.Run` before anything else is written. |
+| `TakeSlot(p)`: take a slot while fewer than `MaxParallel` are taken | `runs.TrySlot`: try-lock `<common-dir>/tuckerbox/slots/<n>.lock` for `n < max_parallel`, through `runs.WaitSlot`. The queue (`runs.Queue`) only decides who may try first, so it cannot add a run beyond the limit. |
+| `AgentWrites(p)` | The agent writes `<git-dir>/tuckerbox/results/<step>-<round>.json`, the path in its brief. |
+| `LateWrite(c)`: an earlier round's agent overwrites the file | Not prevented, only tolerated. Agents of earlier rounds are stopped before the next round starts, and each round has its own file, but the round check below is what makes it safe. |
+| `AcceptGuard(c)`: `result[c] = round[c]` | `agent.ReadResult` with `agent.Expect{Change, Step, Round}` accepts only an exact match; anything else is a `StaleError` and is ignored. `agent.Run` also moves a leftover file at the round's path aside before the agent starts. |
+| `Accept(p)`: rejection starts the next round, otherwise release | `Engine.steps`: `rejected` does `Round++` and goes to `on_reject`; `done` goes to the next step (the model has one step per round; more steps under the same lock change nothing it checks). The last `done`, `blocked`, `failed`, `stopped` and the round limit all end in `Engine.finish`. |
+| `round`, written only by the lock holder | `Run.Round` in `run.json`, written only by `Engine.save` while the change lock is held. It only grows, also on `resume` and `rerun`. |
+| `Release(p)`: free the change lock and the slot | `Engine.finish` writes the final state, then the deferred `Slot.Release` and `ChangeLock.Release` run, in that order. Between the two the process holds a change lock and no slot, which the model's `locked` state allows. If the process dies, the OS frees both. |
+| `OneRunPerChange` | Only the holder of the change lock runs steps. Tested by `TestChangeAlreadyRunning` (`internal/runs`) and, with two real processes, `TestTwoProcessesRaceForOneChange` (`internal/cli`). |
+| `WithinLimit` | Steps run only while a slot lock is held. Tested by `TestSlots`, `TestQueueWithOneSlot`, `TestMoreChangesThanSlots` and `TestRunAllQueuesWithOneSlot`. |
+| `StaleNeverAccepted` | `TestStaleResultIgnored` (`internal/runs`), and the stale-result tests in `internal/agent`. |
+
+Two things the code does that the model leaves out, neither of which breaks an invariant:
+- **`status`, `stop` and the queue probe a change lock** with `runs.Active`, which takes a free lock for an instant and releases it. That is a `Pick` followed by a release without running. A run starting at that moment fails its try-lock, so `TryChangeLock` retries for about 200 ms before it reports the change as running.
+- **The slot count comes from each process's config.** The limit holds for one `max_parallel` value. If the config changes while runs are active, processes using the old and new values share the slot files, and the larger value is the effective limit until the old runs end.
 
 ### Agents run headless in this change
 Agents run headless as child processes:

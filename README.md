@@ -4,7 +4,7 @@ Tuckerbox runs [OpenSpec](https://github.com/Fission-AI/OpenSpec) changes throug
 
 It's a single Go binary for macOS, Linux and Windows. It works on its own, and it fits into [Herdr](https://herdr.dev), where it shows a board of your changes and their agents.
 
-> **Status:** early development. `tuckerbox version`, `doctor`, `init` and `check` work so far; runs, agents and status are not built yet. The plan is in [`openspec/changes/`](openspec/changes/):
+> **Status:** early development. Local runs work: `run`, `status`, `logs`, `stop`, `resume` and `rerun`, as well as `version`, `doctor`, `init` and `check`. Shipping (pushing, MRs) and Herdr come later. The plan is in [`openspec/changes/`](openspec/changes/):
 > - [`add-core-runner`](openspec/changes/add-core-runner/proposal.md): per-repo workflows, local runs, agents, status
 > - [`add-herdr-board`](openspec/changes/add-herdr-board/proposal.md): run history, dependencies, and a kanban board in Herdr
 
@@ -35,6 +35,23 @@ tuckerbox doctor    # checks git, openspec and the agent CLIs (claude, codex)
 tuckerbox init      # writes a commented starter .tuckerbox/config.toml
 tuckerbox check     # validates it, merged with this machine's config
 ```
+
+Run changes from inside the repository:
+
+```sh
+tuckerbox run fix-login            # one change, in the background
+tuckerbox run --all                # every valid active change
+tuckerbox run --foreground fix-login   # one change, attached to this terminal
+tuckerbox status                   # every run on this machine (--json for dashboards)
+tuckerbox logs fix-login --follow  # watch the running step's agent
+tuckerbox stop fix-login           # stop the agent; the run is marked stopped
+tuckerbox resume fix-login         # continue a stopped or blocked run
+tuckerbox rerun fix-login review   # start again from a step
+```
+
+Each change gets its own worktree (by default `../<repo>-worktrees/<change>`) and branch, made from the remote's default branch after a fetch. Existing worktrees are reused as they are: Tuckerbox never resets, cleans or stashes them. At most `max_parallel` changes run at once; the rest are `queued` and start in the order given. With `ship = "local"`, a run that finishes commits what is left on its branch and becomes `ready`; nothing is pushed. A change must pass `openspec validate` and be committed on the base branch.
+
+Run state is kept in the worktree's git directory (`$(git rev-parse --git-dir)/tuckerbox/`), never in the tree. `status` finds runs through a machine index in `$XDG_STATE_HOME/tuckerbox/`, `~/.local/state/tuckerbox/` on macOS and Linux, or `%LocalAppData%\tuckerbox\` on Windows.
 
 A repository's workflow lives in `.tuckerbox/config.toml`, committed with it. Machine defaults go in `$XDG_CONFIG_HOME/tuckerbox/config.toml` if that variable is set, otherwise `~/.config/tuckerbox/config.toml` on macOS and Linux and `%AppData%\tuckerbox\config.toml` on Windows. Repository values win, except that permission profiles (the flags that let agents run without prompts, and which repository remotes may use them) and the editor can only be set on the machine:
 
