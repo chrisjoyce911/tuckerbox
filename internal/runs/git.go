@@ -192,6 +192,53 @@ type Workspace struct {
 // is: nothing in it is reset, cleaned or stashed. Creation is serialised by
 // a lock in the common directory, so two processes never both make it.
 func (r Repo) EnsureWorktree(ctx context.Context, cfg config.Worktree, change string, warn func(string)) (Workspace, error) {
+	return r.EnsureWorktreeFrom(ctx, cfg, change, nil, warn)
+}
+
+// StartPoint is what a change's worktree comes from: its existing
+// worktree, or the commit a new one would be made at.
+type StartPoint struct {
+	// Worktree is the change's existing worktree; then Rev is "".
+	Worktree string
+	// Rev is the commit a new worktree is made at, and Ref what it was
+	// resolved from: the change's own branch when Branch is set, else the
+	// base branch.
+	Rev, Ref string
+	Branch   bool
+}
+
+// ResolveStart says where change's worktree would come from, as
+// EnsureWorktree decides it: an existing worktree, the change's existing
+// branch, or base (resolved with Base, which fetches, when "").
+func (r Repo) ResolveStart(ctx context.Context, cfg config.Worktree, change, base string, warn func(string)) (StartPoint, error) {
+	path, branch := r.WorktreePath(cfg, change), r.BranchName(cfg, change)
+	wts, err := r.Worktrees(ctx)
+	if err != nil {
+		return StartPoint{}, err
+	}
+	for _, w := range wts {
+		if samePath(w, path) {
+			return StartPoint{Worktree: w}, nil
+		}
+	}
+	if r.refExists(ctx, "refs/heads/"+branch) {
+		rev, err := git(ctx, r.Root, "rev-parse", "refs/heads/"+branch+"^{commit}")
+		return StartPoint{Rev: rev, Ref: branch, Branch: true}, err
+	}
+	if base == "" {
+		if base, err = r.Base(ctx, cfg.Base, warn); err != nil {
+			return StartPoint{}, err
+		}
+	}
+	rev, err := git(ctx, r.Root, "rev-parse", base+"^{commit}")
+	return StartPoint{Rev: rev, Ref: base}, err
+}
+
+// EnsureWorktreeFrom is EnsureWorktree with a new worktree pinned to
+// pin.Rev, when pin is not nil: made at that commit from the base, or
+// from the change's branch only while the branch is still at it. An
+// existing worktree is reused as it is.
+func (r Repo) EnsureWorktreeFrom(ctx context.Context, cfg config.Worktree, change string, pin *StartPoint, warn func(string)) (Workspace, error) {
 	ws := Workspace{Path: r.WorktreePath(cfg, change), Branch: r.BranchName(cfg, change)}
 	if err := os.MkdirAll(r.Common, 0o755); err != nil {
 		return ws, err
@@ -224,19 +271,41 @@ func (r Repo) EnsureWorktree(ctx context.Context, cfg config.Worktree, change st
 		if _, err := os.Stat(ws.Path); err == nil {
 			return ws, fmt.Errorf("%s exists but is not a worktree of this repository", ws.Path)
 		}
+		if pin != nil {
+			if !pin.Branch {
+				return ws, fmt.Errorf("branch %s appeared since change %s was checked; run it again", ws.Branch, change)
+			}
+			if rev, err := git(ctx, r.Root, "rev-parse", "refs/heads/"+ws.Branch+"^{commit}"); err != nil || rev != pin.Rev {
+				return ws, fmt.Errorf("branch %s moved since change %s was checked; run it again", ws.Branch, change)
+			}
+		}
 		if _, err := git(ctx, r.Root, "worktree", "add", ws.Path, ws.Branch); err != nil {
 			return ws, err
 		}
 		ws.Created = true
+		if pin != nil {
+			if head, err := git(ctx, ws.Path, "rev-parse", "HEAD"); err != nil || head != pin.Rev {
+				return ws, fmt.Errorf("branch %s moved while its worktree was made; check %s and run it again", ws.Branch, ws.Path)
+			}
+		}
 	default:
 		if _, err := os.Stat(ws.Path); err == nil {
 			return ws, fmt.Errorf("%s exists but is not a worktree of this repository", ws.Path)
 		}
-		base, err := r.Base(ctx, cfg.Base, warn)
-		if err != nil {
-			return ws, err
+		var base string
+		switch {
+		case pin != nil && pin.Branch:
+			return ws, fmt.Errorf("branch %s of change %s disappeared since it was checked; run it again", ws.Branch, change)
+		case pin != nil:
+			// The commit that was checked, not wherever the base is now.
+			base, ws.Base = pin.Rev, pin.Ref
+		default:
+			var err error
+			if base, err = r.Base(ctx, cfg.Base, warn); err != nil {
+				return ws, err
+			}
+			ws.Base = base
 		}
-		ws.Base = base
 		// The change must be on the base, or its agents can't read it.
 		if out, err := git(ctx, r.Root, "ls-tree", "--name-only", base, "openspec/changes/"+change+"/"); err != nil || out == "" {
 			return ws, fmt.Errorf("change %s is not on the base branch %s; commit it there first", change, base)

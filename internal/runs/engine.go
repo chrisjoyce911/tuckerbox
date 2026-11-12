@@ -40,6 +40,10 @@ type Request struct {
 	// Worktree is the change's existing worktree, for Resume and Rerun.
 	// When "", the worktree is found or made from the config patterns.
 	Worktree string
+	// StartRev, for Start with a Gate, is the commit the caller checked:
+	// a new worktree is made at it, or refused if the change's branch is
+	// no longer there.
+	StartRev string
 }
 
 // Engine runs one change's workflow in this process.
@@ -64,6 +68,11 @@ type Engine struct {
 	OnLocked func(ws Workspace, r *Run)
 	// Now returns the time; nil means time.Now.
 	Now func() time.Time
+	// Gate, when set, may refuse a Start request (the approval run gate).
+	// It judges the commit a new worktree will be made at, before it is
+	// made, and the worktree's files again once the change lock is held,
+	// before the run state changes. Resume and Rerun are not gated.
+	Gate func(ctx context.Context, change string, at StartPoint) error
 
 	mu      sync.Mutex
 	saved   Run
@@ -158,7 +167,7 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	if req.Worktree != "" {
 		ws, err = OpenWorkspace(ctx, req.Worktree)
 	} else {
-		ws, err = e.Repo.EnsureWorktree(ctx, e.Config.Worktree, req.Change, func(msg string) { e.logf(req.Change, "%s", msg) })
+		ws, err = e.ensureWorktree(ctx, req)
 	}
 	if err != nil {
 		return nil, err
@@ -178,6 +187,13 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	defer lock.Release()
 	// We hold the lock, so an edit marker is from an edit that died.
 	RemoveEditMarker(ws.State)
+	if e.gated(req) {
+		// Under the change lock, which approve and unapprove also take:
+		// what is judged here is what the run starts with.
+		if err := e.Gate(ctx, req.Change, StartPoint{Worktree: ws.Path}); err != nil {
+			return nil, err
+		}
+	}
 	if err := ws.State.Ensure(); err != nil {
 		return nil, err
 	}
@@ -274,6 +290,33 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	e.logf(req.Change, "running in slot %d", slot.N)
 
 	return e.steps(ctx, ws, rs, startIdx, stopReq)
+}
+
+func (e *Engine) gated(req Request) bool { return e.Gate != nil && req.Mode == Start }
+
+// ensureWorktree finds or makes req's worktree. With a Gate, a new one is
+// made at a commit the gate has judged.
+func (e *Engine) ensureWorktree(ctx context.Context, req Request) (Workspace, error) {
+	warn := func(msg string) { e.logf(req.Change, "%s", msg) }
+	if !e.gated(req) {
+		return e.Repo.EnsureWorktree(ctx, e.Config.Worktree, req.Change, warn)
+	}
+	sp, err := e.Repo.ResolveStart(ctx, e.Config.Worktree, req.Change, "", warn)
+	if err != nil {
+		return Workspace{}, err
+	}
+	if sp.Worktree == "" {
+		if req.StartRev != "" {
+			if sp.Branch && sp.Rev != req.StartRev {
+				return Workspace{}, fmt.Errorf("branch %s moved since change %s was checked; run it again", sp.Ref, req.Change)
+			}
+			sp.Rev = req.StartRev
+		}
+		if err := e.Gate(ctx, req.Change, sp); err != nil {
+			return Workspace{}, err
+		}
+	}
+	return e.Repo.EnsureWorktreeFrom(ctx, e.Config.Worktree, req.Change, &sp, warn)
 }
 
 // prepare reads or makes the run state for req and returns the index of
