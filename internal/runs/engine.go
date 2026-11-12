@@ -139,6 +139,9 @@ type Engine struct {
 	mu      sync.Mutex
 	saved   Run
 	machine string
+	// term is the run's terminal name, labels and slot, for the terminal
+	// backend.
+	term agent.TermInfo
 }
 
 // ActiveError means the change already has an active run.
@@ -180,6 +183,76 @@ func StopFile(d statedir.Dir) string { return filepath.Join(string(d), "stop") }
 
 // EngineLog is the engine's own log in a state directory.
 func EngineLog(d statedir.Dir) string { return filepath.Join(string(d), "run.log") }
+
+// templates are the agents config defines, as templates.
+func (e *Engine) templates() map[string]agent.Template {
+	templates := map[string]agent.Template{}
+	for name, a := range e.Config.Agents {
+		templates[name] = agent.Template{Name: name, Command: a.Command, Interactive: a.Interactive}
+	}
+	return templates
+}
+
+// stepBackend is the backend a step's agent runs in: the engine's, except
+// that an agent without an interactive command, or a step outside a slot,
+// runs headless under the terminal backend (agent-terminals: Agents that
+// run in a terminal).
+func (e *Engine) stepBackend(tmpl agent.Template, term agent.TermInfo) agent.Backend {
+	b := e.backend()
+	if _, ok := b.(agent.Adopter); ok && (!tmpl.HasInteractive() || term.Name == "" || term.Slot < 0) {
+		return agent.Headless{}
+	}
+	return b
+}
+
+// agentOptions are the backend options for a step of rs: the engine's,
+// with callbacks that record the agent's pid, terminal and state.
+func (e *Engine) agentOptions(ws Workspace, rs *Run) agent.Options {
+	opts := e.Agent
+	opts.OnStart = func(pid int) {
+		rs.AgentPid = pid
+		_ = e.save(ws, rs)
+	}
+	opts.OnTerminal = func(name, address string) {
+		rs.Terminal = &TerminalRef{Name: name, Address: address}
+		_ = e.save(ws, rs)
+	}
+	opts.OnAgentState = func(state string) {
+		rs.AgentState = state
+		_ = e.save(ws, rs)
+	}
+	return opts
+}
+
+// adoption is a live agent a resumed run adopts.
+type adoption struct {
+	Name    string
+	Backend agent.Adopter
+}
+
+// adoptable returns the live agent a Resume request adopts, or nil: the
+// run's process died (we hold the lock) while it was running a step in a
+// terminal, and a live terminal of that name has the run's change, step
+// and round, and the run recorded its slot.
+func (e *Engine) adoptable(ctx context.Context, req Request, ws Workspace) *adoption {
+	b, ok := e.backend().(agent.Adopter)
+	if !ok || req.Mode != Resume {
+		return nil
+	}
+	rs, err := ReadRun(ws.State.RunFile())
+	if err != nil || rs.State != Running || rs.Terminal == nil || rs.Slot == nil {
+		return nil
+	}
+	t, err := b.LiveAgent(ctx, rs.Terminal.Name)
+	if err != nil {
+		e.logf(req.Change, "warning: looking for the agent's terminal %s: %v", rs.Terminal.Name, err)
+		return nil
+	}
+	if !agent.MatchesStep(t, rs.Change, rs.Step, rs.Round) {
+		return nil
+	}
+	return &adoption{Name: rs.Terminal.Name, Backend: b}
+}
 
 // backend is the backend that runs step agents: e.Backend, or headless.
 func (e *Engine) backend() agent.Backend {
@@ -286,9 +359,20 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	}
 	_ = os.Remove(StopFile(ws.State))
 
-	rs, startIdx, err := e.prepare(req, ws)
+	// Adopt: a resumed run whose process died while its agent works on in
+	// a terminal of this step and round keeps that agent, its round and
+	// its slot (formal/terminals.tla and liveslots.tla, Adopt).
+	adopt := e.adoptable(ctx, req, ws)
+	rs, startIdx, err := e.prepare(req, ws, adopt != nil)
 	if err != nil {
 		return nil, err
+	}
+	e.term = agent.TermInfo{
+		Name:   agent.TerminalName(e.Repo.Identity(ctx), req.Change),
+		Space:  filepath.Base(e.Repo.Main),
+		RunID:  strconv.FormatInt(rs.Created.UnixNano(), 10),
+		Common: e.Repo.Common,
+		Slot:   -1,
 	}
 	prev := e.saved
 	pidPath := ws.State.PidFile()
@@ -328,11 +412,36 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 		return e.forgeShip(ctx, ws, rs, true)
 	}
 
+	var slot *Slot
+	if adopt != nil {
+		n := *rs.Slot
+		e.logf(req.Change, "adopting the live agent in terminal %s (step %s round %d): taking its slot %d", adopt.Name, rs.Step, rs.Round, n)
+		notify()
+		s, err := TakeOwnSlot(ctx, e.Repo.Common, n, e.poll(), func() bool {
+			t, err := adopt.Backend.LiveAgent(ctx, adopt.Name)
+			return err != nil || (t != nil && agent.MatchesStep(t, rs.Change, rs.Step, rs.Round))
+		})
+		switch {
+		case ctx.Err() != nil:
+			return e.finish(ws, rs, Stopped, stopReason(stopReq, "while taking its slot back"))
+		case err != nil:
+			return e.finish(ws, rs, Failed, "taking slot "+strconv.Itoa(n)+" back: "+err.Error())
+		case s == nil:
+			// The agent ended before its slot was free: a new round, admitted
+			// as any other run.
+			e.logf(req.Change, "the agent in terminal %s ended before it could be adopted; starting a new round", adopt.Name)
+			rs.Round++
+			if err := e.save(ws, rs); err != nil {
+				return rs, err
+			}
+		default:
+			slot = s
+		}
+	}
 	dw, fail := e.newDepWait(ws, rs)
-	if fail != "" {
+	if fail != "" && slot == nil {
 		return e.finish(ws, rs, Failed, fail)
 	}
-	var slot *Slot
 	for slot == nil {
 		// Wait for dependencies before joining the slot queue, so a
 		// waiting run holds neither a slot nor a place in the queue.
@@ -382,6 +491,11 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	// deferred lock release runs after this one).
 	defer slot.Release()
 	e.workflowSlot = slot
+	e.term.Slot = slot.N
+	rs.Slot = &slot.N
+	if err := e.save(ws, rs); err != nil {
+		return rs, err
+	}
 	e.logf(req.Change, "running in slot %d", slot.N)
 
 	return e.steps(ctx, ws, rs, startIdx, stopReq)
@@ -416,7 +530,7 @@ func (e *Engine) ensureWorktree(ctx context.Context, req Request) (Workspace, er
 
 // prepare reads or makes the run state for req and returns the index of
 // the step to start from. The caller holds the change lock.
-func (e *Engine) prepare(req Request, ws Workspace) (*Run, int, error) {
+func (e *Engine) prepare(req Request, ws Workspace, adopt bool) (*Run, int, error) {
 	steps := e.Config.Steps
 	if len(steps) == 0 {
 		return nil, 0, errors.New("the workflow has no steps")
@@ -496,8 +610,11 @@ func (e *Engine) prepare(req Request, ws Workspace) (*Run, int, error) {
 		return nil, 0, err
 	}
 	// A new attempt at a step is a new round, so nothing an earlier
-	// attempt's agent writes can be accepted.
-	rs.Round++
+	// attempt's agent writes can be accepted. An adopted agent is the
+	// same attempt: its round stays.
+	if !adopt {
+		rs.Round++
+	}
 	rs.Worktree, rs.Repo = ws.Path, e.Repo.Root
 	if ws.Branch != "" {
 		rs.Branch = ws.Branch
@@ -519,10 +636,7 @@ func (e *Engine) stepIndex(id string) (int, error) {
 // steps runs the workflow from step index i.
 func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopReq *stopRequest) (*Run, error) {
 	steps := e.Config.Steps
-	templates := map[string]agent.Template{}
-	for name, a := range e.Config.Agents {
-		templates[name] = agent.Template{Name: name, Command: a.Command}
-	}
+	templates := e.templates()
 	for i < len(steps) {
 		st := steps[i]
 		if ctx.Err() != nil {
@@ -542,21 +656,18 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 			model = firstNonEmpty(model, a.Model)
 			effort = firstNonEmpty(effort, a.Effort)
 		}
-		backend := e.backend()
+		backend := e.stepBackend(tmpl, e.term)
+		rs.AgentBackend = backend.Name()
 		e.logf(rs.Change, "step %s round %d: starting agent %s (%s)", st.ID, rs.Round, st.Agent, backend.Name())
-		opts := e.Agent
-		opts.OnStart = func(pid int) {
-			rs.AgentPid = pid
-			_ = e.save(ws, rs)
-		}
+		opts := e.agentOptions(ws, rs)
 		out, err := backend.Run(ctx, agent.Step{
 			Change: rs.Change, Step: st.ID, Role: st.Role, Round: rs.Round,
 			Agent: tmpl, Model: model, Effort: effort,
 			Permissions: e.Config.PermissionArgs(st),
 			Worktree:    ws.Path, State: ws.State, Base: rs.Base,
-			Earlier: rs.Earlier(), Scope: rs.Scope,
+			Earlier: rs.Earlier(), Scope: rs.Scope, Term: e.term,
 		}, opts)
-		rs.AgentPid = 0
+		rs.AgentPid, rs.Terminal, rs.AgentState = 0, nil, ""
 		switch {
 		case err != nil:
 			return e.finish(ws, rs, Failed, err.Error())
@@ -656,6 +767,7 @@ func (e *Engine) ship(ctx context.Context, ws Workspace, rs *Run) (*Run, error) 
 func (e *Engine) finish(ws Workspace, rs *Run, s State, reason string) (*Run, error) {
 	rs.State, rs.Reason = s, reason
 	rs.Pid, rs.AgentPid = 0, 0
+	rs.Slot, rs.Terminal, rs.AgentState = nil, nil, ""
 	if s != Failed {
 		rs.Tail = ""
 	}

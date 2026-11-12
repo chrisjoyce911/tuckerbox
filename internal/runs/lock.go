@@ -86,6 +86,13 @@ func Active(path string) bool {
 // Slot is a held parallel slot: an exclusive lock on
 // <common-dir>/tuckerbox/slots/<n>.lock with n < max_parallel
 // (formal/runs.tla, action TakeSlot).
+//
+// Each slot also has an agent lock, <n>.agent.lock, which tuckerbox
+// agent-hold takes in an agent's terminal for as long as the agent lives.
+// An agent in a terminal outlives the run process that started it; when
+// that process dies the OS frees the slot's run lock but not its agent
+// lock, so the slot stays taken (formal/liveslots.tla, OrphanHoldsSlot).
+// Admission takes a slot only when both are free (WithinLimitLive).
 type Slot struct {
 	N int
 	f *flock.Flock
@@ -95,14 +102,75 @@ type Slot struct {
 // Tuckerbox directory.
 func SlotDir(common string) string { return filepath.Join(common, "slots") }
 
+// SlotLock is slot n's run lock file.
+func SlotLock(common string, n int) string {
+	return filepath.Join(SlotDir(common), strconv.Itoa(n)+".lock")
+}
+
+// AgentLock is slot n's agent lock file.
+func AgentLock(common string, n int) string {
+	return filepath.Join(SlotDir(common), strconv.Itoa(n)+".agent.lock")
+}
+
 // TrySlot takes any free slot n < max, or returns nil when all are taken.
+// A slot is free when its run lock and its agent lock are both free: the
+// run lock is taken, then the agent lock tried; if an agent holds it the
+// run lock is let go and the next slot tried (liveslots.tla, Admit). The
+// agent lock is only tested, never kept: the run lock keeps every other
+// admission off the slot until this run's own agent takes it.
 func TrySlot(common string, max int) (*Slot, error) {
 	dir := SlotDir(common)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
 	for n := 0; n < max; n++ {
-		f := flock.New(filepath.Join(dir, strconv.Itoa(n)+".lock"))
+		f := flock.New(SlotLock(common, n))
+		ok, err := f.TryLock()
+		if err != nil {
+			return nil, fmt.Errorf("locking slot %d: %w", n, err)
+		}
+		if !ok {
+			continue
+		}
+		free, err := agentLockFree(common, n)
+		if err != nil {
+			_ = f.Unlock()
+			return nil, err
+		}
+		if !free {
+			_ = f.Unlock()
+			continue
+		}
+		return &Slot{N: n, f: f}, nil
+	}
+	return nil, nil
+}
+
+// agentLockFree tests slot n's agent lock by taking and freeing it.
+func agentLockFree(common string, n int) (bool, error) {
+	a := flock.New(AgentLock(common, n))
+	ok, err := a.TryLock()
+	if err != nil {
+		return false, fmt.Errorf("locking slot %d's agent lock: %w", n, err)
+	}
+	if ok {
+		_ = a.Unlock()
+	}
+	return ok, nil
+}
+
+// TakeOwnSlot takes the run lock of slot n, the slot whose agent lock a
+// live agent being adopted holds (liveslots.tla, Adopt). It needs no free
+// slot and does not test the agent lock. An admission testing that slot
+// holds its run lock only for a moment; TakeOwnSlot waits it out, polling.
+// It gives up, returning nil, when live reports the agent gone, or with
+// ctx's error when ctx ends.
+func TakeOwnSlot(ctx context.Context, common string, n int, poll time.Duration, live func() bool) (*Slot, error) {
+	if err := os.MkdirAll(SlotDir(common), 0o755); err != nil {
+		return nil, err
+	}
+	for {
+		f := flock.New(SlotLock(common, n))
 		ok, err := f.TryLock()
 		if err != nil {
 			return nil, fmt.Errorf("locking slot %d: %w", n, err)
@@ -110,8 +178,15 @@ func TrySlot(common string, max int) (*Slot, error) {
 		if ok {
 			return &Slot{N: n, f: f}, nil
 		}
+		if !live() {
+			return nil, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(poll):
+		}
 	}
-	return nil, nil
 }
 
 // Release frees the slot.
@@ -121,6 +196,47 @@ func (s *Slot) Release() error {
 	}
 	err := s.f.Unlock()
 	s.f = nil
+	return err
+}
+
+// AgentHold is a held agent lock of a slot.
+type AgentHold struct{ f *flock.Flock }
+
+// ErrAgentLockHeld means another agent holds the slot's agent lock.
+var ErrAgentLockHeld = errors.New("the slot's agent lock is held by another agent")
+
+// HoldAgentLock takes slot n's agent lock (tuckerbox agent-hold,
+// liveslots.tla Launch). It retries for wait, so a previous agent of the
+// same run that is just exiting can let go, and then returns
+// ErrAgentLockHeld.
+func HoldAgentLock(common string, n int, wait time.Duration) (*AgentHold, error) {
+	if err := os.MkdirAll(SlotDir(common), 0o755); err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		f := flock.New(AgentLock(common, n))
+		ok, err := f.TryLock()
+		if err != nil {
+			return nil, fmt.Errorf("locking slot %d's agent lock: %w", n, err)
+		}
+		if ok {
+			return &AgentHold{f: f}, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, ErrAgentLockHeld
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// Release frees the agent lock. The OS frees it too when the process ends.
+func (h *AgentHold) Release() error {
+	if h == nil || h.f == nil {
+		return nil
+	}
+	err := h.f.Unlock()
+	h.f = nil
 	return err
 }
 

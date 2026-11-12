@@ -80,6 +80,18 @@ type Run struct {
 	// Pid is the engine process, AgentPid the running step's agent.
 	Pid      int `json:"pid,omitempty"`
 	AgentPid int `json:"agent_pid,omitempty"`
+	// Slot is the parallel slot the run holds while it runs. A terminal
+	// agent holds that slot's agent lock; adoption takes the same slot
+	// (formal/liveslots.tla, Adopt).
+	Slot *int `json:"slot,omitempty"`
+	// AgentBackend is the backend the current or last step's agent runs
+	// in: "terminal" or "headless".
+	AgentBackend string `json:"agent_backend,omitempty"`
+	// Terminal is the agent's herdr-core terminal while a step runs in one.
+	Terminal *TerminalRef `json:"terminal,omitempty"`
+	// AgentState is the terminal agent's state: "working", or "waiting for
+	// you" when its turn ended without a result.
+	AgentState string `json:"agent_state,omitempty"`
 	// Since is when the state, step or round last changed.
 	Since time.Time `json:"since"`
 	// Created is when the run was first started.
@@ -95,6 +107,14 @@ type Entry struct {
 	Findings []agent.Finding `json:"findings,omitempty"`
 	ExitCode int             `json:"exit_code"`
 	Ended    time.Time       `json:"ended"`
+}
+
+// TerminalRef is the herdr-core terminal of a step's agent.
+type TerminalRef struct {
+	// Name is the change's terminal name (agent.TerminalName).
+	Name string `json:"name"`
+	// Address is herdr-core's address of the terminal, such as t7.
+	Address string `json:"address,omitempty"`
 }
 
 // ErrNoRun means there is no run.json.
@@ -203,4 +223,30 @@ func (r *Run) Effective(active bool) Run {
 		v.Pid, v.AgentPid = 0, 0
 	}
 	return v
+}
+
+// NotWatched is the reason shown for a running run whose process died
+// while its agent keeps working in a terminal.
+const NotWatched = "not watched: the run process ended while its agent works in a terminal; tuckerbox resume adopts it, tuckerbox stop ends it"
+
+// Orphaned reports whether the run's process died while a step's agent
+// ran in a terminal: run.json says running with a terminal, and nobody
+// holds the change lock. Whether that terminal still lives is herdr-core's
+// to say.
+func (r *Run) Orphaned(active bool) bool {
+	return !active && r.State == Running && r.Terminal != nil
+}
+
+// View is Effective for a run whose agent may outlive its process:
+// agentLive says its terminal still lives. Such a run is shown running,
+// not watched, rather than stopped (agent-terminals: Adopting a live
+// agent). watched is false then.
+func (r *Run) View(active, agentLive bool) (v Run, watched bool) {
+	if r.Orphaned(active) && agentLive {
+		v = *r
+		v.Reason = NotWatched
+		v.Pid, v.AgentPid = 0, 0
+		return v, false
+	}
+	return r.Effective(active), true
 }

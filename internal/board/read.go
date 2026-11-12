@@ -91,7 +91,7 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 			c.Column = "approved"
 		}
 		if r != nil {
-			effective := r.Effective(runs.Active(p.State.RunLock()))
+			effective, _ := runs.Seen(ctx, r, runs.Active(p.State.RunLock()))
 			r = &effective
 			states[id] = r
 			c.State, c.Reason, c.Step, c.Round = string(r.State), r.Reason, r.Step, r.Round
