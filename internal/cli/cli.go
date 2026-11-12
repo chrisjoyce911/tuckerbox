@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/doctor"
 	"github.com/chrisjoyce911/tuckerbox/internal/version"
 )
@@ -17,6 +18,8 @@ Usage:
 Commands:
   version   Print the version, commit, Go version and platform
   doctor    Check that git, openspec and the agent CLIs are installed
+  check     Validate this repository's .tuckerbox/config.toml with machine config
+  init      Write a commented starter .tuckerbox/config.toml
   help      Show this help
 `
 
@@ -25,6 +28,10 @@ type App struct {
 	Stdout, Stderr io.Writer
 	DoctorEnv      doctor.Env
 	DoctorTools    []doctor.Tool
+	// ConfigEnv and Getwd are used by check and init; zero values use the
+	// real git, user config directory and working directory.
+	ConfigEnv config.Env
+	Getwd     func() (string, error)
 }
 
 // Run runs the command in args (without the program name) and returns the
@@ -58,6 +65,16 @@ func (a App) Run(args []string) int {
 			return 1
 		}
 		return 0
+	case "check":
+		if len(rest) > 0 {
+			return a.tooMany(cmd)
+		}
+		return a.check()
+	case "init":
+		if len(rest) > 0 {
+			return a.tooMany(cmd)
+		}
+		return a.initConfig()
 	default:
 		fmt.Fprintf(a.Stderr, "tuckerbox: unknown command %q\n\n%s", cmd, usage)
 		return 2
