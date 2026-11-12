@@ -1,0 +1,2 @@
+title = "Task scope"
+depends_on = ["add-herdr-board"]
