@@ -204,8 +204,8 @@ export class BoardView extends View {
         .child(stateChip(c) ?? div()))
       .child(h_flex().items_center().gap(6)
         .child(approvalChip(c.approval, { short: true }))
-        .when(!c.approval.committed && c.approval.state !== "none", (el) => el.child(div().text_size(10.5).text_color(tm.blocked).child("not committed")))
-        .when(!c.approval.published, (el) => el.child(div().text_size(10.5).text_color(tm.blocked).child("not published")))
+        .when(!c.approval.committed && c.approval.state !== "none", (el) => el.child(div().min_w(0).truncate().text_size(10.5).text_color(tm.blocked).child("not committed")))
+        .when(!c.approval.published, (el) => el.child(div().min_w(0).truncate().text_size(10.5).text_color(tm.blocked).child("not published")))
         .child(div().flex_1())
         .when(c.tasks.total > 0, (el) => el.child(progressBar(c.tasks, 46))))
       .when(Boolean(c.badge || c.step || c.agent || c.scope), (el) => el.child(h_flex().items_center().gap(6).text_size(10.5).text_color(tm.dim)
@@ -272,7 +272,7 @@ export class BoardView extends View {
       .child(div().flex_1())
       // Machines that couldn't be asked: named, their cards missing, the others shown.
       .children((b?.unreachable ?? []).map((u, i) => div().id(`unreachable-${i}`).text_size(11).text_color(tm.blocked)
-        .tooltip(u.message).child(`${u.machine ?? "this computer"} unreachable`)))
+        .tooltip(u.message).child(`${u.machine ?? "this computer"} ${u.missing ? "has no tuckerbox" : "unreachable"}`)))
       .when(Boolean(b?.machine), (el) => el.child(div().text_size(11).text_color(tm.dim).child(b.machine)))
       // Dock only with a board to show: no Tuckerbox config, no Dock.
       .when(Boolean(overlay && b && !b.fixtures), (el) => el.child(tiny("dock", "Dock ⇥", (_e, cx) => this.dock(cx), { tooltip: "Show the board as a pane beside the terminals" })))
