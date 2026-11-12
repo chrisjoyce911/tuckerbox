@@ -105,8 +105,8 @@ func sameDir(a, b string) bool {
 func TestCustomAgent(t *testing.T) {
 	omp := Template{Name: "omp", Command: []string{
 		fakeAgent, "argv",
-		"--brief", PhBrief, "--dir", PhWorkdir, "--result=" + PhResult,
-		"--model", PhModel, "--effort", PhEffort, PhPrompt,
+		"--brief-file", PhBriefFile, "--dir", PhWorkdir, "--result=" + PhResult,
+		"--model", PhModel, "--effort", PhEffort, PhBrief,
 	}}
 	s := newStep(t, "build", "builder", 1, omp)
 	s.Model = "omp-large"
@@ -125,13 +125,13 @@ func TestCustomAgent(t *testing.T) {
 		t.Errorf("agent ran in %s, want the worktree %s", got.WD, s.Worktree)
 	}
 	want := []string{
-		"--brief", o.BriefPath, "--dir", s.Worktree, "--result=" + o.ResultPath,
-		"--model", "omp-large", promptFor(o.BriefPath),
+		"--brief-file", o.BriefPath, "--dir", s.Worktree, "--result=" + o.ResultPath,
+		"--model", "omp-large", readFile(t, o.BriefPath),
 	}
 	if strings.Join(got.Args, "\x00") != strings.Join(want, "\x00") {
 		t.Errorf("args\n got %q\nwant %q", got.Args, want)
 	}
-	for _, a := range got.Args {
+	for _, a := range got.Args[:len(got.Args)-1] {
 		if strings.Contains(a, "{") {
 			t.Errorf("placeholder left in %q", a)
 		}
