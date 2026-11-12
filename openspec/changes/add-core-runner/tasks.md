@@ -26,11 +26,11 @@
 
 ## 4. Agents (agent-launch)
 
-- [ ] 4.1 Agent command templates; built-in `claude` and `codex`; custom agents from config
-- [ ] 4.2 Brief writer with built-in role prompts (planner, builder, reviewer) and `.tuckerbox/roles/` overrides
-- [ ] 4.3 Result file parsing with round and step checks; stale and malformed files ignored and logged
+- [x] 4.1 Agent command templates; built-in `claude` and `codex`; custom agents from config
+- [x] 4.2 Brief writer with built-in role prompts (planner, builder, reviewer) and `.tuckerbox/roles/` overrides
+- [x] 4.3 Result file parsing with round and step checks; stale and malformed files ignored and logged
 - [ ] 4.4 Per-step logs; `tuckerbox logs <change> [step] [--follow]`
-- [ ] 4.5 Tests with a fake agent binary for each agent-launch scenario
+- [x] 4.5 Tests with a fake agent binary for each agent-launch scenario
 
 ## 5. Status (run-status)
 
