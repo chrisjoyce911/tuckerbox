@@ -491,7 +491,45 @@ func TestAdoptionLookupFails(t *testing.T) {
 	}
 }
 
-// Cancelling the run (stop) ends the agent's terminal.
+// A stop that reaches Run while it looks for the terminal it would adopt
+// ends the adopted agent and appends its session to the step log before
+// Run reports stopped: the run then lets the terminal go, and the step's
+// next agent starts in a terminal of the same name.
+func TestStopDuringAdoptionLookupSavesHistory(t *testing.T) {
+	f := newTermFixture(t)
+	f.env.SetPlan(t, map[string]testenv.Action{"build": {WaitFor: filepath.Join(f.env.Home, "never")}})
+	s := f.step("build", "builder", 2, interactiveFake())
+	f.startOrphan(s)
+	waitUntil(t, "the orphaned agent to start", 20*time.Second, func() bool { return len(f.env.Starts(t)) == 1 })
+	waitUntil(t, "the orphaned agent's output", 20*time.Second, func() bool {
+		out, _ := f.hc.Read(context.Background(), s.Term.Name)
+		return strings.Contains(string(out), "fakeagent: "+s.Change+" build round 2")
+	})
+	// Cancelled already: the first lookup fails on it, and Run looks
+	// again with a context of its own.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	o, err := f.be.Run(ctx, s, termOpts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !o.Stopped || o.Result != nil {
+		t.Errorf("outcome %+v", o)
+	}
+	if f.get(s.Term.Name).Live() {
+		t.Error("the adopted agent's terminal is live after the stop")
+	}
+	log := readFile(t, s.State.Log("build"))
+	for _, w := range []string{"history of terminal " + s.Term.Name, "fakeagent: " + s.Change + " build round 2"} {
+		if !strings.Contains(log, w) {
+			t.Errorf("step log lacks %q:\n%s", w, log)
+		}
+	}
+	if n := len(f.runCalls()); n != 1 {
+		t.Errorf("%d terminals started, want only the orphan", n)
+	}
+}
+
 // A run adopting a live agent whose step log can't be opened does not
 // treat the step as failed with no agent left: Run returns an *EndError
 // naming the terminal, so the run keeps it, and stop can still end it.

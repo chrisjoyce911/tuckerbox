@@ -110,6 +110,12 @@ func (t Terminal) LiveAgent(ctx context.Context, name string) (*HCTerminal, erro
 	return term, nil
 }
 
+// FindAgent returns the terminal called name, live or ended, or nil when
+// herdr-core has none.
+func (t Terminal) FindAgent(ctx context.Context, name string) (*HCTerminal, error) {
+	return t.HC.Get(ctx, name)
+}
+
 // EndAgent ends the terminal called name and waits until it is gone.
 func (t Terminal) EndAgent(ctx context.Context, name string) error {
 	return t.HC.End(ctx, name, endTimeout)
@@ -120,6 +126,9 @@ func (t Terminal) EndAgent(ctx context.Context, name string) error {
 type Adopter interface {
 	Backend
 	LiveAgent(ctx context.Context, name string) (*HCTerminal, error)
+	// FindAgent returns the terminal called name even when its agent has
+	// ended, or nil when there is none.
+	FindAgent(ctx context.Context, name string) (*HCTerminal, error)
 	EndAgent(ctx context.Context, name string) error
 	// SaveHistory appends the history of the terminal called name to the
 	// step log at logPath, once it has ended and before the run lets the
@@ -246,6 +255,11 @@ func (t Terminal) Run(ctx context.Context, s Step, opts Options) (Outcome, error
 			if err != nil {
 				return o, fmt.Errorf("step %s: %w", s.Step, &EndError{Name: name, Err: err})
 			}
+			// Its session goes to the step log before the run lets the
+			// terminal go: the next start replaces it.
+			logLine(log, "step %s round %d: stopped before the step began; ended terminal %s (step %s round %s)",
+				s.Step, s.Round, name, cur.Labels[LabelStep], cur.Labels[LabelRound])
+			t.appendHistory(log, labelledStep(s, cur), name)
 		}
 		o.Stopped, o.ExitCode = true, -1
 		return o, nil
@@ -257,6 +271,7 @@ func (t Terminal) Run(ctx context.Context, s Step, opts Options) (Outcome, error
 		if err := t.HC.End(ctx, name, opts.EndTimeout); err != nil {
 			return o, fmt.Errorf("step %s: %w", s.Step, &EndError{Name: name, Err: err})
 		}
+		t.appendHistory(log, labelledStep(s, cur), name)
 	}
 
 	var addr string
@@ -584,6 +599,21 @@ func (t Terminal) appendHistory(log io.Writer, s Step, name string) {
 	if len(out) > 0 && out[len(out)-1] != '\n' {
 		_, _ = io.WriteString(log, "\n")
 	}
+}
+
+// labelledStep is s with the step and round a terminal's labels name, for
+// the heading of that terminal's history.
+func labelledStep(s Step, term *HCTerminal) Step {
+	if term == nil {
+		return s
+	}
+	if st := term.Labels[LabelStep]; st != "" {
+		s.Step = st
+	}
+	if r, err := strconv.Atoi(term.Labels[LabelRound]); err == nil {
+		s.Round = r
+	}
+	return s
 }
 
 // turnWatcher reads the last-message file the turn hook writes after each
