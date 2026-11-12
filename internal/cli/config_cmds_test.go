@@ -99,3 +99,46 @@ func TestCheckAndInitRejectArgs(t *testing.T) {
 		}
 	}
 }
+
+// change-dependencies, scenarios Unknown dependency and Cycle: tuckerbox
+// check fails, naming both changes or listing the cycle.
+func TestCheckDependencies(t *testing.T) {
+	a, root, out, errOut := configApp(t)
+	if code := a.Run([]string{"init"}); code != 0 {
+		t.Fatalf("init exit %d: %s", code, errOut)
+	}
+	write := func(rel, data string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("openspec/changes/b/tuckerbox.toml", "depends_on = [\"add-login\"]\n\n[approval]\nhash = \"sha256:00\"\n")
+	out.Reset()
+	if code := a.Run([]string{"check"}); code != 1 {
+		t.Fatalf("unknown dependency: check exit %d", code)
+	}
+	if s := errOut.String(); !strings.Contains(s, "change b depends on add-login") || !strings.Contains(s, "1 problem") {
+		t.Errorf("unknown dependency: %s", s)
+	}
+
+	write("openspec/changes/b/tuckerbox.toml", "depends_on = [\"a\"]\n")
+	write("openspec/changes/a/tuckerbox.toml", "depends_on = [\"b\"]\n")
+	errOut.Reset()
+	if code := a.Run([]string{"check"}); code != 1 {
+		t.Fatalf("cycle: check exit %d", code)
+	}
+	if s := errOut.String(); !strings.Contains(s, "dependency cycle: a -> b -> a") {
+		t.Errorf("cycle: %s", s)
+	}
+
+	write("openspec/changes/a/tuckerbox.toml", "")
+	errOut.Reset()
+	if code := a.Run([]string{"check"}); code != 0 {
+		t.Fatalf("clean: check exit %d: %s", code, errOut)
+	}
+}

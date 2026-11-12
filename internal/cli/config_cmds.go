@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
+	"github.com/chrisjoyce911/tuckerbox/internal/deps"
 )
 
 func (a App) configEnv() (config.Env, func() (string, error)) {
@@ -50,21 +51,31 @@ func (a App) check() int {
 		return 1
 	}
 	cfg, err := config.Load(opts)
+	depProblems, depErr := deps.Check(opts.RepoRoot)
+	if depErr != nil {
+		fmt.Fprintln(a.Stderr, "tuckerbox check: dependencies:", depErr)
+	}
 	var problems config.Problems
-	switch {
-	case errors.As(err, &problems):
+	if err != nil && !errors.As(err, &problems) {
+		fmt.Fprintln(a.Stderr, "tuckerbox check:", err)
+		return 1
+	}
+	if n := len(problems) + len(depProblems); n > 0 {
 		for _, p := range problems {
 			p.File = displayPath(opts.RepoRoot, p.File)
 			fmt.Fprintln(a.Stderr, p)
 		}
+		for _, p := range depProblems {
+			fmt.Fprintln(a.Stderr, p)
+		}
 		noun := "problems"
-		if len(problems) == 1 {
+		if n == 1 {
 			noun = "problem"
 		}
-		fmt.Fprintf(a.Stderr, "tuckerbox check: %d %s\n", len(problems), noun)
+		fmt.Fprintf(a.Stderr, "tuckerbox check: %d %s\n", n, noun)
 		return 1
-	case err != nil:
-		fmt.Fprintln(a.Stderr, "tuckerbox check:", err)
+	}
+	if depErr != nil {
 		return 1
 	}
 
