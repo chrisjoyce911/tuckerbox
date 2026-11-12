@@ -25,31 +25,31 @@
 ## 3. Conditional requests and crashes (autopilot)
 
 - [x] 3.1 Run engine requests carry the expected state and `since`; under the change lock the engine goes ahead only if both match and the approval rule holds (start: `approved`; crash resume: not `none`), else changes nothing
-- [ ] 3.2 Never approve, edit, tick, resume blocked or person-stopped runs, or re-run failed ones; skip changes whose lock an edit holds
-- [ ] 3.3 Crash streak from history: autopilot's `resumed` events carry `by: autopilot`; count them since the last `step_finished` or person `started`/`resumed`/`rerun`/`scope_started`; resume only at 0; leave and report otherwise
-- [ ] 3.4 `formal/autopilot.tla` passes and `autopilot_broken_unchecked`, `_nosince`, `_ungated` and `_perround` are rejected by `scripts/tla-check.sh`
-- [ ] 3.5 Test: Person stopped a run
-- [ ] 3.6 Test: Blocked run
+- [x] 3.2 Never approve, edit, tick, resume blocked or person-stopped runs, or re-run failed ones; skip changes whose lock an edit holds
+- [x] 3.3 Crash streak from history: autopilot's `resumed` events carry `by: autopilot`; count them since the last `step_finished` or person `started`/`resumed`/`rerun`/`scope_started`; resume only at 0; leave and report otherwise
+- [x] 3.4 `formal/autopilot.tla` passes and `autopilot_broken_unchecked`, `_nosince`, `_ungated` and `_perround` are rejected by `scripts/tla-check.sh`
+- [x] 3.5 Test: Person stopped a run
+- [x] 3.6 Test: Blocked run
 - [x] 3.7 Test: Unapproved after the pass looked
 - [x] 3.8 Test: Stopped after the pass looked
 - [x] 3.9 Test: Crashed again after a person resumed
 - [x] 3.10 Test: Unapproved while crashed
-- [ ] 3.11 Test: Stale approval from the run's own step
-- [ ] 3.12 Test: Machine restarted
-- [ ] 3.13 Test: Crashes twice across rounds (rounds 1, 2 and 3; with an autopilot restart between the crashes)
-- [ ] 3.14 Test: Progress renews the budget
-- [ ] 3.15 Test: A person renews the budget
+- [x] 3.11 Test: Stale approval from the run's own step
+- [x] 3.12 Test: Machine restarted
+- [x] 3.13 Test: Crashes twice across rounds (rounds 1, 2 and 3; with an autopilot restart between the crashes)
+- [x] 3.14 Test: Progress renews the budget
+- [x] 3.15 Test: A person renews the budget
 
 ## 4. Shipping and modes (autopilot)
 
-- [ ] 4.1 Rely on task-scope's completeness rules; autopilot never archives, pushes or merges; a change archived on the base is finished
+- [x] 4.1 Rely on task-scope's completeness rules; autopilot never archives, pushes or merges; a change archived on the base is finished
 - [ ] 4.2 Modes: `solo` starts runs here; `fleet` runs `tuckerbox dispatch` each pass; `team` refuses
-- [ ] 4.3 Test: First group in merge mode
+- [x] 4.3 Test: First group in merge mode
 - [ ] 4.4 Test: Last group in merge mode (with a real `(ship)` archive task in the change)
-- [ ] 4.5 Test: Whole change left incomplete
+- [x] 4.5 Test: Whole change left incomplete
 - [ ] 4.6 Incomplete ready runs: continue with `--tasks next` when the run has a scope or in group mode; in change mode report once, request no start, mark the card `needs_you`
-- [ ] 4.7 Test: Whole change left ready in local mode (several passes, no start requested)
-- [ ] 4.8 Test: Group mode picks up the rest
+- [x] 4.7 Test: Whole change left ready in local mode (several passes, no start requested)
+- [x] 4.8 Test: Group mode picks up the rest
 - [ ] 4.9 Test: Whole change left ready (board)
 - [ ] 4.10 Test: Fleet mode
 - [ ] 4.11 Test: Team mode
