@@ -24,26 +24,35 @@
 
 ## 3. Conditional requests and crashes (autopilot)
 
-- [ ] 3.1 Run engine requests carry the expected state and `since`; under the change lock the engine goes ahead only if both match and the gate passes, else changes nothing
+- [ ] 3.1 Run engine requests carry the expected state and `since`; under the change lock the engine goes ahead only if both match and the approval rule holds (start: `approved`; crash resume: not `none`), else changes nothing
 - [ ] 3.2 Never approve, edit, tick, resume blocked or person-stopped runs, or re-run failed ones; skip changes whose lock an edit holds
-- [ ] 3.3 Resume a crashed run once per step and round; `resumed` events carry `by: autopilot`; leave it after a second crash in the same step and round
-- [ ] 3.4 `formal/autopilot.tla` passes and `formal/autopilot_broken_unchecked.tla` is rejected by `scripts/tla-check.sh`
+- [ ] 3.3 Crash streak from history: autopilot's `resumed` events carry `by: autopilot`; count them since the last `step_finished` or person `started`/`resumed`/`rerun`/`scope_started`; resume only at 0; leave and report otherwise
+- [ ] 3.4 `formal/autopilot.tla` passes and `autopilot_broken_unchecked`, `_nosince`, `_ungated` and `_perround` are rejected by `scripts/tla-check.sh`
 - [ ] 3.5 Test: Person stopped a run
 - [ ] 3.6 Test: Blocked run
 - [ ] 3.7 Test: Unapproved after the pass looked
 - [ ] 3.8 Test: Stopped after the pass looked
-- [ ] 3.9 Test: Machine restarted
-- [ ] 3.10 Test: Crashes twice
+- [ ] 3.9 Test: Crashed again after a person resumed
+- [ ] 3.10 Test: Unapproved while crashed
+- [ ] 3.11 Test: Stale approval from the run's own step
+- [ ] 3.12 Test: Machine restarted
+- [ ] 3.13 Test: Crashes twice across rounds (rounds 1, 2 and 3; with an autopilot restart between the crashes)
+- [ ] 3.14 Test: Progress renews the budget
+- [ ] 3.15 Test: A person renews the budget
 
-## 4. Shipping (autopilot, with add-forge-shipping)
+## 4. Shipping and modes (autopilot)
 
-- [ ] 4.1 In `mr` and `merge` modes, a run whose change has unticked tasks becomes `ready` after its last step without archiving or pushing
-- [ ] 4.2 Test: First group in merge mode
-- [ ] 4.3 Test: Last group in merge mode
+- [ ] 4.1 Rely on task-scope's completeness rules; autopilot never archives, pushes or merges; a change archived on the base is finished
+- [ ] 4.2 Modes: `solo` starts runs here; `fleet` runs `tuckerbox dispatch` each pass; `team` refuses
+- [ ] 4.3 Test: First group in merge mode
+- [ ] 4.4 Test: Last group in merge mode (with a real `(ship)` archive task in the change)
+- [ ] 4.5 Test: Whole change left incomplete
+- [ ] 4.6 Test: Fleet mode
+- [ ] 4.7 Test: Team mode
 
 ## 5. Asking for a person (autopilot, autopilot-board)
 
-- [ ] 5.1 Print one line per run that newly needs a person (blocked, failed, crash left, stale approval before a next group); keep the reported set in memory
+- [ ] 5.1 Print one line per run that newly needs a person (blocked, failed, crash budget spent, stale approval before a next group); keep the reported set in memory
 - [ ] 5.2 Board document: `autopilot` (running, pid, start time); `needs_you` with a reason on cards; header count uses it
 - [ ] 5.3 Mod: Herdr toast for cards that newly need you between two reads (board and drawer), none at the first read; autopilot on or off in the header
 - [ ] 5.4 Test: Blocked review
@@ -59,4 +68,4 @@
 
 - [ ] 6.1 README: `tuckerbox autopilot`, that it is not a service, approval as the one gate, and running it in a Herdr pane
 - [ ] 6.2 `go vet ./...`, `go test -race ./...` and `scripts/tla-check.sh` pass
-- [ ] 6.3 Archive after `add-task-scope`, `add-priority` and `add-forge-shipping`, once accepted; move "Partial runs don't ship" into `forge-shipping` and the board requirements into `board-data` and `herdr-board`
+- [ ] 6.3 (ship) Archive after `add-task-scope`, `add-priority`, `add-forge-shipping` and `add-operating-modes`, once accepted; move the board requirements into `board-data` and `herdr-board`

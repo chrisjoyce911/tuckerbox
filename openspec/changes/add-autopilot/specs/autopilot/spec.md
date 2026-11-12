@@ -50,16 +50,20 @@ With `[autopilot] scope = "group"`, the default, autopilot SHALL start a change 
 - **WHEN** `scope = "change"` and an approved change has no run
 - **THEN** the pass starts it with no scope
 
-### Requirement: Partial runs don't ship
-With `ship = "mr"` or `"merge"`, a run whose last step reports `done` while its change still has unticked tasks SHALL become `ready` without shipping. Once every task is ticked, it SHALL ship as `add-forge-shipping` says. This applies to every run, started by autopilot or not.
+#### Scenario: Whole change left incomplete
+- **WHEN** `scope = "change"`, `ship = "merge"`, and a run's last step finishes with task 3.2 unticked
+- **THEN** the run is `blocked` (task-scope, `Incomplete whole-change runs`), autopilot reports it once, and no pass restarts it
+
+### Requirement: Shipping is the run's
+Autopilot SHALL NOT archive, push or merge itself. In `mr` and `merge` mode, a run ships when its change is complete and stays `ready` otherwise, as task-scope and add-forge-shipping say. A change SHALL count as finished for autopilot once it is archived on the base branch.
 
 #### Scenario: First group in merge mode
 - **WHEN** `ship = "merge"` and a run with scope `1` finishes while group 2 is unticked
 - **THEN** the run is `ready`, nothing is archived or pushed, and the next pass starts group 2
 
 #### Scenario: Last group in merge mode
-- **WHEN** `ship = "merge"` and a run with scope `2` finishes with every task ticked
-- **THEN** the run enters `shipping`, and archives, pushes and merges as forge shipping says
+- **WHEN** `ship = "merge"`, the last group's run finishes with every task ticked except `(ship)` tasks, and the merge request merges
+- **THEN** the change is archived on the base branch, and later passes start nothing for it
 
 ### Requirement: Autopilot never overrides a person
 Autopilot SHALL NOT approve, unapprove, edit or tick, SHALL NOT resume a `blocked` run or one a person stopped, and SHALL NOT re-run a `failed` one. It SHALL leave a change alone while a person's edit holds its lock.
@@ -73,7 +77,7 @@ Autopilot SHALL NOT approve, unapprove, edit or tick, SHALL NOT resume a `blocke
 - **THEN** no pass resumes it
 
 ### Requirement: Acting on what it saw
-Each start or resume autopilot makes SHALL carry the run state it saw. Once it holds the change lock, the run engine SHALL go ahead only if the run is still in that state and the run gate passes, and otherwise SHALL change nothing. Model: `formal/autopilot.tla`, `ApprovedAtStart` and `PersonStopsHold`.
+Each start or resume autopilot makes SHALL carry the state and `since` time it read in the run state. Under the change lock, the engine SHALL go ahead only if both still match and the approval rule holds: a start needs the change `approved`; a crash resume needs it `approved` or `stale`, not `none`. Otherwise it SHALL change nothing. Model: `formal/autopilot.tla`.
 
 #### Scenario: Unapproved after the pass looked
 - **WHEN** a pass saw `add-login` approved, and the owner unapproves it before autopilot's start takes the lock
@@ -83,19 +87,39 @@ Each start or resume autopilot makes SHALL carry the run state it saw. Once it h
 - **WHEN** a pass saw `add-login`'s run crashed, and a person resumes and then stops it before autopilot's resume takes the lock
 - **THEN** autopilot's resume changes nothing and the run stays stopped
 
+#### Scenario: Crashed again after a person resumed
+- **WHEN** a pass saw `add-login`'s run crashed, and a person resumes it and it crashes again before autopilot's resume takes the lock
+- **THEN** autopilot's resume changes nothing, because `since` changed, and the next pass judges the new crash
+
+#### Scenario: Unapproved while crashed
+- **WHEN** a run crashed and the owner then ran `tuckerbox unapprove add-login`
+- **THEN** no pass resumes it
+
+#### Scenario: Stale approval from the run's own step
+- **WHEN** a run's build step edited design.md, making the approval `stale`, and the run then crashed
+- **THEN** the next pass resumes it, as `tuckerbox resume` would
+
 ### Requirement: Crashed runs
-Autopilot SHALL resume a run whose process died without recording a final state, once per step and round. When the history shows the same step and round already crashed after an autopilot resume, it SHALL leave the run for a person and report it.
+Autopilot SHALL resume a run whose process died without recording a final state only while the run's history shows no autopilot resume since the run's last step result, or its last start, resume or rerun by a person. Rounds SHALL NOT reset this count: each resume still starts a new round. Otherwise it SHALL leave the run and report it.
 
 #### Scenario: Machine restarted
 - **WHEN** the machine restarts while a run is in build, and autopilot is started again
-- **THEN** its first pass resumes the run's build step
+- **THEN** its first pass resumes the run's build step, in a new round
 
-#### Scenario: Crashes twice
-- **WHEN** a run crashes in build, autopilot resumes it, and it crashes again in the same round
-- **THEN** no pass resumes it again, and autopilot reports it as needing a person
+#### Scenario: Crashes twice across rounds
+- **WHEN** a run crashes in build round 1, autopilot resumes it as round 2, and it crashes again before its step reports a result
+- **THEN** no pass resumes it again, also after autopilot restarts, and autopilot reports it as needing a person
+
+#### Scenario: Progress renews the budget
+- **WHEN** autopilot resumed a crashed build, the build then reported `done`, and the review step later crashes
+- **THEN** the next pass resumes the review step
+
+#### Scenario: A person renews the budget
+- **WHEN** autopilot left a run after its second crash, and a person runs `tuckerbox resume`
+- **THEN** a later crash of that run is resumed once again by autopilot
 
 ### Requirement: Asking for a person
-When a run on this machine becomes `blocked` or `failed`, or autopilot can't start a change's next group because its approval is stale, autopilot SHALL print one line naming the change and the reason, once per state change, and SHALL carry on with other changes.
+When a run on this machine becomes `blocked` or `failed`, autopilot leaves a crashed run, or it can't start a change's next group because its approval is stale, autopilot SHALL print one line naming the change and the reason, once per state change, and SHALL carry on with other changes.
 
 #### Scenario: Blocked review
 - **WHEN** autopilot runs and `add-login`'s review blocks with `review limit reached`
@@ -104,6 +128,17 @@ When a run on this machine becomes `blocked` or `failed`, or autopilot can't sta
 #### Scenario: Stale before the next group
 - **WHEN** a ready run's build edited design.md during group 1
 - **THEN** autopilot prints that `add-login` needs approval again before group 2, once
+
+### Requirement: Operating modes
+In `solo` mode, autopilot SHALL start runs on this machine as this capability says. In `fleet` mode, each pass SHALL run `tuckerbox dispatch` (add-operating-modes) for placement instead of starting runs itself, and SHALL still report runs that need a person. In `team` mode, autopilot SHALL refuse to start.
+
+#### Scenario: Fleet mode
+- **WHEN** the repository sets `mode = "fleet"` and autopilot makes a pass
+- **THEN** it runs `tuckerbox dispatch` and starts no run on this machine itself
+
+#### Scenario: Team mode
+- **WHEN** the repository sets `mode = "team"` and the user runs `tuckerbox autopilot`
+- **THEN** it exits non-zero and says autopilot is for solo and fleet repositories
 
 ### Requirement: No state of its own
 Autopilot SHALL keep no state except its lock and a marker with its process id, machine and start time, which count only while the lock is held. Every decision SHALL come from OpenSpec, run state and history. Runs SHALL keep going when autopilot exits, and a new autopilot SHALL carry on from them.
