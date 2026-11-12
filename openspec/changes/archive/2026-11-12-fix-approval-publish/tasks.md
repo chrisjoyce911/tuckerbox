@@ -28,8 +28,7 @@
 
 ## 4. Team mode (approval-publish)
 
-- [ ] 4.1 In team mode `approve` and `unapprove` write `tuckerbox.toml` as before and the gate ignores the ref
-- [ ] 4.2 Test "Ref entry in a team repository"
+- Moved to add-operating-modes tasks 5.30 and 5.31: team mode does not exist yet.
 
 ## 5. Integration
 
