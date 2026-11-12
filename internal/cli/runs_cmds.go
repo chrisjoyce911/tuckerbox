@@ -148,12 +148,15 @@ func (a App) run(args []string) int {
 		err := a.spawn(repo.Root, []string{"--mode", "start", id})
 		var se *runs.StateError
 		var ae *runs.ActiveError
+		var ee *runs.EditingError
 		switch {
 		case err == nil:
 		case all && errors.As(err, &se):
 			fmt.Fprintf(a.Stdout, "%s: skipped, %v\n", id, err)
 		case all && errors.As(err, &ae):
 			fmt.Fprintf(a.Stdout, "%s: skipped, already running\n", id)
+		case all && errors.As(err, &ee):
+			fmt.Fprintf(a.Stdout, "%s: skipped, being edited\n", id)
 		default:
 			fmt.Fprintf(a.Stderr, "tuckerbox run: %s: %v\n", id, err)
 			code = 1
@@ -222,6 +225,8 @@ func (a App) spawn(dir string, engineArgs []string) error {
 	switch {
 	case strings.Contains(msg, "already has an active run"):
 		se.err = &runs.ActiveError{}
+	case strings.Contains(msg, " is being edited "):
+		se.err = &runs.EditingError{}
 	case strings.HasPrefix(msg, "change ") && strings.Contains(msg, " is "+string(runs.Ready)):
 		se.err = &runs.StateError{State: runs.Ready}
 	}
@@ -496,7 +501,7 @@ func (a App) restart(cmd string, fg bool, change string, req runs.Request) int {
 		return a.errf(cmd, "%v", err)
 	}
 	if l.active() {
-		return a.errf(cmd, "%v", &runs.ActiveError{Change: change, Worktree: l.Run.Worktree, Pid: runs.ReadPid(l.State)})
+		return a.errf(cmd, "%v", runs.LockedError(change, l.Run.Worktree, l.State))
 	}
 	req.Worktree = l.Run.Worktree
 	if fg {
