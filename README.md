@@ -4,7 +4,7 @@ Tuckerbox runs [OpenSpec](https://github.com/Fission-AI/OpenSpec) changes throug
 
 It's a single Go binary for macOS, Linux and Windows. It works on its own, and it fits into [Herdr](https://herdr.dev), where it shows a board of your changes and their agents.
 
-> **Status:** early development. Only `tuckerbox version` and `tuckerbox doctor` work so far; runs, config, agents and status are not built yet. The plan is in [`openspec/changes/`](openspec/changes/):
+> **Status:** early development. `tuckerbox version`, `doctor`, `init` and `check` work so far; runs, agents and status are not built yet. The plan is in [`openspec/changes/`](openspec/changes/):
 > - [`add-core-runner`](openspec/changes/add-core-runner/proposal.md): per-repo workflows, local runs, agents, status
 > - [`add-herdr-board`](openspec/changes/add-herdr-board/proposal.md): run history, dependencies, and a kanban board in Herdr
 
@@ -32,7 +32,20 @@ The binary is built without cgo, so it is a single static file on macOS, Linux a
 ```sh
 tuckerbox version   # version, commit, Go version and platform
 tuckerbox doctor    # checks git, openspec and the agent CLIs (claude, codex)
+tuckerbox init      # writes a commented starter .tuckerbox/config.toml
+tuckerbox check     # validates it, merged with this machine's config
 ```
+
+A repository's workflow lives in `.tuckerbox/config.toml`, committed with it. Machine defaults go in `tuckerbox/config.toml` under your user config directory (`~/Library/Application Support` on macOS, `$XDG_CONFIG_HOME` or `~/.config` on Linux, `%AppData%` on Windows). Repository values win, except that permission profiles (the flags that let agents run without prompts, and which repository remotes may use them) and the editor can only be set on the machine:
+
+```toml
+# machine config
+[permissions.edit]
+allowed_remotes = ["github.com/you/*"]
+args = { claude = ["--permission-mode", "acceptEdits"] }
+```
+
+A step in the repository then asks for it by name with `permissions = "edit"`.
 
 `doctor` exits non-zero only when a required tool (`git` or `openspec`) is missing. Agent CLIs are optional. It does not yet check whether an agent is signed in, and says `sign-in not checked`.
 
