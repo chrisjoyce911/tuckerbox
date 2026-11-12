@@ -489,8 +489,16 @@ func TestStarterIsValid(t *testing.T) {
 	if len(cfg.Steps) != 3 {
 		t.Errorf("starter steps %+v", cfg.Steps)
 	}
-	if !strings.Contains(Starter, "#") {
-		t.Error("starter has no comments")
+	// The user-visible rules are explained in the file itself.
+	for _, frag := range []string{
+		"cannot be", "redefined here", "--dangerously-skip-permissions", // repo agents
+		"this step or an earlier one", "needs on_reject", "listed in workflow.steps", // loops
+		"(default 1)", "default 3", `"../{repo}-worktrees/{change}"`, `branch = "{change}"`, "remote default branch", // defaults
+		"$XDG_CONFIG_HOME", "~/.config/tuckerbox", "%AppData%", // machine path
+	} {
+		if !strings.Contains(Starter, frag) {
+			t.Errorf("starter does not mention %q", frag)
+		}
 	}
 }
 

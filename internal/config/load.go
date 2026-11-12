@@ -18,7 +18,7 @@ import (
 // file it is in and, when it is about a setting, the dotted key.
 type Problem struct {
 	File    string // config file, as given to Load
-	Line    int    // line in File, or 0 when unknown
+	Line    int    // line in File for syntax and type errors; 0 otherwise (the TOML decoder gives no line for unknown keys)
 	Key     string // dotted key, such as "steps.review.on_reject"; may be "" for syntax errors
 	Message string
 }

@@ -2,8 +2,9 @@
 //
 // Two files are read:
 //
-//   - the machine config, config.toml in the tuckerbox folder of the user's
-//     config directory (see [MachinePath]), which is optional; and
+//   - the machine config: config.toml in $XDG_CONFIG_HOME/tuckerbox, else
+//     ~/.config/tuckerbox on macOS and Linux, or %AppData%\tuckerbox on
+//     Windows (see [MachinePath]); it is optional; and
 //   - the repository config, .tuckerbox/config.toml at the repository root
 //     (see [RepoFile]), which a run requires.
 //
@@ -12,6 +13,27 @@
 // repository config: permission profiles, raw agent arguments and the editor.
 // A repository can only refer to a permission profile by name, and the
 // machine decides which repositories (by remote) may use it.
+//
+// Rules beyond the file format:
+//
+//   - Remotes. A profile is matched against the repository's origin remote,
+//     or its only remote when there is no origin (see [Remote]). Remotes and
+//     patterns are compared as host/path (see [NormalizeRemote]); "*" allows
+//     any repository, including one with no remote, and other patterns use
+//     path.Match, so "github.com/owner/*" allows every repository of owner.
+//   - Profiles grant flags per agent ([Profile.Args]). A step whose profile
+//     grants no flags for the step's agent is invalid.
+//   - Agents. A repository may define new agents, but may not redefine the
+//     built-ins (claude, codex) and may not put permission flags such as
+//     --dangerously-skip-permissions or --sandbox in a command; machine
+//     config may override a built-in's template.
+//   - Loops. on_reject names the same step or an earlier one; max_rounds
+//     without on_reject is invalid; a [steps.<id>] table in the repository
+//     config that is not listed in workflow.steps is unreachable and invalid.
+//   - Defaults. max_parallel is [DefaultMaxParallel] (1), max_rounds is
+//     [DefaultMaxRounds] (3), ship is "local", worktrees go to
+//     [DefaultWorktreePath] on branch [DefaultBranch], and the base branch
+//     is the remote's default branch.
 //
 // [Load] returns the merged result as a [Config], which is what later
 // packages (runs, agents) consume, together with every [Problem] found.
@@ -46,7 +68,8 @@ const (
 
 // BuiltinAgents are the agents Tuckerbox defines itself. The agents package
 // owns their command templates. Machine config may override a built-in's
-// template (it appears in [Config.Agents]); repository config may not.
+// template (it then appears in [Config.Agents]); repository config may not
+// redefine a built-in at all.
 var BuiltinAgents = []string{"claude", "codex"}
 
 // BuiltinRoles are the roles with a built-in prompt. A repository may add or
@@ -83,7 +106,8 @@ type Config struct {
 	// was none.
 	MachinePath string
 	// Remote is the repository remote that permission profiles were matched
-	// against, normalised by [NormalizeRemote]; "" if the repository has none.
+	// against (origin, or the only remote; see [Remote]), normalised by
+	// [NormalizeRemote]; "" if the repository has none.
 	Remote string
 
 	// Steps is the workflow, in run order. Every step's fields are resolved:
@@ -98,7 +122,9 @@ type Config struct {
 
 	// Agents holds the agent command templates defined in config, by name:
 	// custom agents from either file and machine overrides of built-ins. An
-	// agent named by a step is either here or in [BuiltinAgents].
+	// agent named by a step is either here or in [BuiltinAgents]. A
+	// repository agent overrides a machine agent of the same name, never a
+	// built-in, and its command holds no permission flags.
 	Agents map[string]Agent
 	// Permissions holds the machine's permission profiles, by name. Only
 	// profiles from machine config ever appear here.
@@ -126,10 +152,11 @@ type Step struct {
 	Model, Effort string
 	// OnReject names the step to go back to when this step reports
 	// rejected, or "" if this step does not loop. It is this step or an
-	// earlier one.
+	// earlier one in the workflow; a later step is invalid.
 	OnReject string
 	// MaxRounds is the limit of rounds of the on_reject loop; after that many
-	// rejections the run is blocked. It is DefaultMaxRounds unless set.
+	// rejections the run is blocked. It is DefaultMaxRounds unless set, and
+	// setting it without OnReject is invalid.
 	MaxRounds int
 }
 
@@ -153,11 +180,13 @@ type Profile struct {
 	// Name is the profile's name, as steps refer to it.
 	Name string
 	// Args maps an agent name to the extra arguments the profile adds to
-	// that agent's command.
+	// that agent's command. A step may use the profile only with an agent
+	// that has an entry here.
 	Args map[string][]string
 	// AllowedRemotes lists the repository remotes that may use the profile,
-	// normalised by [NormalizeRemote]. An entry may be "*" (any repository)
-	// or a path.Match pattern such as "github.com/owner/*".
+	// normalised by [NormalizeRemote]. An entry may be "*" (any repository,
+	// including one with no remote) or a path.Match pattern such as
+	// "github.com/owner/*". A repository with no remote matches only "*".
 	AllowedRemotes []string
 }
 
@@ -165,14 +194,16 @@ type Profile struct {
 // Patterns may use {change} (the change id) and {repo} (the repository
 // folder's name).
 type Worktree struct {
-	// Base is the branch new change branches start from. "" means the remote
-	// default branch after a fetch, or the local default branch if there is
-	// no remote.
+	// Base is the branch new change branches start from. "" (the default)
+	// means the remote default branch after a fetch, or the local default
+	// branch if there is no remote.
 	Base string
-	// Path is the worktree location pattern. A relative path is relative to
-	// the repository root. It contains {change}.
+	// Path is the worktree location pattern, [DefaultWorktreePath] unless
+	// set. A relative path is relative to the repository root. It contains
+	// {change}.
 	Path string
-	// Branch is the branch name pattern. It contains {change}.
+	// Branch is the branch name pattern, [DefaultBranch] unless set. It
+	// contains {change}.
 	Branch string
 }
 

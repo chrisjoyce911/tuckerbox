@@ -13,11 +13,13 @@ import (
 const Starter = `# Tuckerbox repository config. Commit this file: every machine that checks
 # out this revision runs the same workflow. Check it with: tuckerbox check
 #
-# Machine defaults live in config.toml in the tuckerbox folder of your user
-# config directory. Values here win, except for machine-only settings:
-# permission profiles, agent arguments and the editor.
+# Machine defaults live in $XDG_CONFIG_HOME/tuckerbox/config.toml, else
+# ~/.config/tuckerbox/config.toml on macOS and Linux, or
+# %AppData%\tuckerbox\config.toml on Windows. Values here win, except for
+# machine-only settings: permission profiles, agent arguments and the editor.
 
-# How many changes from this repository may run at once on one machine.
+# How many changes from this repository may run at once on one machine
+# (default 1).
 max_parallel = 1
 
 # What happens when a run finishes: "local" leaves the work committed on the
@@ -37,23 +39,31 @@ agent = "claude"
 role = "builder"
 # model = ""            # passed to the agent as {model}
 # effort = ""           # passed to the agent as {effort}
-# permissions = "edit"  # a profile that machine config must define and allow for this repo
+# permissions = "edit"  # a machine profile that allows this repo's origin remote
+#                       # (or "*") and grants flags for this step's agent
 
 [steps.review]
 agent = "claude"
 role = "reviewer"
-on_reject = "build"     # on "rejected", go back to this step
-max_rounds = 3          # then block the run instead of looping again
+on_reject = "build"     # on "rejected", go back to this step (this step or an earlier one)
+max_rounds = 3          # then block the run (default 3; needs on_reject)
+
+# Every [steps.<id>] table must be listed in workflow.steps; one that is not
+# can never run, and tuckerbox check reports it.
 
 # Where runs put worktrees and what they call branches. {change} is the change
 # id, {repo} this folder's name. A relative path is relative to this repo.
+# These are the defaults.
 # [worktree]
-# base = ""             # "" means the remote default branch
+# base = ""             # "" means the remote default branch (local default if no remote)
 # path = "../{repo}-worktrees/{change}"
 # branch = "{change}"
 
-# A custom agent. The command gets {brief}, {workdir}, {model} and {effort}.
-# Permission flags may not go here; they belong in machine config.
+# A custom agent. The command must pass {brief} and may use {workdir},
+# {model} and {effort}. The built-in agents (claude, codex) cannot be
+# redefined here, and permission flags (such as --dangerously-skip-permissions,
+# --permission-mode or --sandbox) may not go in the command: they belong in a
+# permission profile in machine config.
 # [agents.myagent]
 # command = ["myagent", "--prompt-file", "{brief}", "--cwd", "{workdir}"]
 `
