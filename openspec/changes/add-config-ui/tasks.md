@@ -5,23 +5,23 @@
 - [x] 1.1 Gather every key the loader knows into one table (path, type, allowed values, scope, default, secret); make `check`'s repository-only and machine-only rules read it; a unit test fails when the loader accepts a key the table lacks
 - [x] 1.2 Test "Scopes agree" (for every `machine` and `repo` row, `check` refuses it in the other file)
 - [x] 1.3 Track each effective value's source (`repo`, `machine`, `default`) and the machine value it overrode in the merged config
-- [ ] 1.4 `tuckerbox config show` and `--json` (key, value, source, scope, file, allowed values; each file's path and revision), machine-scope keys under "this machine only" with the machine's name; document in README
-- [ ] 1.5 Test "Repository value wins"
-- [ ] 1.6 Test "Built-in default"
-- [ ] 1.7 Test "Permission profile"
-- [ ] 1.8 Test "Revision for a later save" (revision is the SHA-256 of the file's bytes; none when absent)
-- [ ] 1.9 `tuckerbox config get <key>` for a key or a table, with `--json` and a nearest-key suggestion
-- [ ] 1.10 Test "Step setting"
-- [ ] 1.11 Test "Misspelt key"
+- [x] 1.4 `tuckerbox config show` and `--json` (key, value, source, scope, file, allowed values; each file's path and revision), machine-scope keys under "this machine only" with the machine's name; document in README
+- [x] 1.5 Test "Repository value wins"
+- [x] 1.6 Test "Built-in default"
+- [x] 1.7 Test "Permission profile"
+- [x] 1.8 Test "Revision for a later save" (revision is the SHA-256 of the file's bytes; none when absent)
+- [x] 1.9 `tuckerbox config get <key>` for a key or a table, with `--json` and a nearest-key suggestion
+- [x] 1.10 Test "Step setting"
+- [x] 1.11 Test "Misspelt key"
 
 ## 2. Credentials file (repo-config, config-cli)
 
-- [ ] 2.1 Read `credentials.toml` from the machine config folder; refuse it when group or others can read it (macOS, Linux); put its token after `token_env` and before the default variables in forge access; `doctor` names the source; refuse `token` in machine `config.toml`
-- [ ] 2.2 Test "Stored token used first"
-- [ ] 2.3 Test "Token in machine config" (the value is not printed)
-- [ ] 2.4 Test "File readable by others"
-- [ ] 2.5 `show` and `get` print secrets only as `set` or `not set` with the source in use
-- [ ] 2.6 Test "Token set" (the token appears nowhere in text or JSON output)
+- [x] 2.1 Read `credentials.toml` from the machine config folder; refuse it when group or others can read it (macOS, Linux); put its token after `token_env` and before the default variables in forge access; `doctor` names the source; refuse `token` in machine `config.toml`
+- [x] 2.2 Test "Stored token used first"
+- [x] 2.3 Test "Token in machine config" (the value is not printed)
+- [x] 2.4 Test "File readable by others"
+- [x] 2.5 `show` and `get` print secrets only as `set` or `not set` with the source in use
+- [x] 2.6 Test "Token set" (the token appears nowhere in text or JSON output)
 
 ## 3. Saving (config-save, config-cli)
 

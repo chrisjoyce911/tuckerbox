@@ -91,6 +91,14 @@ func LookupToken(ctx context.Context, target Target, cfg Credentials, getenv fun
 	}
 	return Token{}, nil
 }
+
+// BorrowCLIToken runs gh or glab to read the token it holds, as
+// [ReadToken] does when borrow_cli_token is set. Its errors never carry
+// the CLI's output.
+func BorrowCLIToken(ctx context.Context, program string, args ...string) (string, error) {
+	return borrowToken(ctx, program, args...)
+}
+
 func borrowToken(ctx context.Context, program string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, program, args...)
 	cmd.Stderr = io.Discard

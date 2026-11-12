@@ -63,3 +63,21 @@ func TestMissingTokenAndBorrowingOff(t *testing.T) {
 		t.Fatal(line)
 	}
 }
+
+// Scenario: Stored token used first (doctor names the credentials file).
+func TestForgeStoredTokenSource(t *testing.T) {
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "env-secret")
+	s := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer stored-secret" {
+			t.Error("stored token not used")
+		}
+		fmt.Fprint(w, `{"permissions":{"push":true}}`)
+	}))
+	defer s.Close()
+	line := CheckForge(context.Background(), forge.Target{Host: "github.com", Project: "sam/app", Kind: forge.GitHub, APIURL: s.URL},
+		forge.Credentials{Stored: forge.StoredToken("stored-secret")}, s.Client())
+	if !strings.Contains(line, "token source credentials file") || strings.Contains(line, "secret") {
+		t.Fatal(line)
+	}
+}
