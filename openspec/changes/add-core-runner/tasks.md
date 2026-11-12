@@ -31,6 +31,7 @@
 - [x] 4.3 Result file parsing with round and step checks; stale and malformed files ignored and logged
 - [x] 4.4 Per-step logs; `tuckerbox logs <change> [step] [--follow]`
 - [x] 4.5 Tests with a fake agent binary for each agent-launch scenario
+- [x] 4.6 Result from the agent's final message (Claude stream-json result event, Codex `-o` file, custom `{lastmessage}` or stdout), written to the result file by the engine; agent-written file still accepted and preferred when they differ
 
 ## 5. Status (run-status)
 
