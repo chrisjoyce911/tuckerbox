@@ -11,16 +11,22 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
+	"github.com/chrisjoyce911/tuckerbox/internal/scope"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 )
 
 // Step is everything needed to run one step's agent once.
 type Step struct {
-	Change string
-	Step   string
-	Role   string
-	Round  int
+	ShippingFeedback bool
+	// ShipsToForge is set when the run ships to a forge (ship = "mr" or
+	// "merge"), where shipping ticks CI tasks; see Brief.ShipsToForge.
+	ShipsToForge bool
+	Change       string
+	Step         string
+	Role         string
+	Round        int
 	// Agent is the resolved agent definition (see Resolve).
 	Agent  Template
 	Model  string
@@ -40,6 +46,8 @@ type Step struct {
 	Earlier []Result
 	// Env is extra environment for the agent, as KEY=value.
 	Env []string
+	// Scope is the run's task scope, or nil; it goes in the brief.
+	Scope *scope.Scope
 }
 
 // Options tune Run. The zero value is ready to use.
@@ -78,7 +86,8 @@ type Outcome struct {
 	Source string
 	// Tail is the end of the step's log, set when Result is nil.
 	Tail string
-	// Argv is the command line that was run.
+	// Argv is the command line that was run, with the brief's text shown as
+	// "<brief: N chars, <file>>".
 	Argv []string
 	// BriefPath, ResultPath and LogPath are the step's files. MessagePath is
 	// the {lastmessage} file, set only when the agent's template passes it.
@@ -109,10 +118,50 @@ func (o Outcome) FailureReason() string {
 	return msg
 }
 
-// promptFor is the short instruction passed to agents as {prompt}.
-func promptFor(brief string) string {
-	return "Read the Tuckerbox brief at " + brief +
-		" and follow it. It ends with the result JSON your final message must contain."
+// readBriefAt is what a custom agent gets as {brief} when the brief is too
+// long to pass inline.
+func readBriefAt(file string) string {
+	return "The Tuckerbox brief is too long to pass here. Read it at " + file +
+		" and follow it; it ends with the result JSON your final message must contain. " +
+		"If you can't read that file, end with a result whose status is blocked and whose summary names the file."
+}
+
+// briefLabel stands in for the brief's text in logs and run state.
+func briefLabel(text, file string) string {
+	return fmt.Sprintf("<brief: %d chars, %s>", utf8.RuneCountInString(text), file)
+}
+
+// command expands the step's command line with the brief inline, or, when
+// that would be longer than MaxInlineCommand as a Windows command line, with
+// the brief on standard input (built-ins) or an instruction to read the brief
+// file (other agents). It also returns the command as logged, with the brief
+// shown as briefLabel, whether the brief goes on standard input, and a note
+// for the log when the brief could not be passed inline.
+func command(t Template, v Values) (argv, shown []string, stdin bool, note string, err error) {
+	text := v.Brief
+	argv, err = t.Expand(v)
+	if err != nil {
+		return nil, nil, false, "", err
+	}
+	if n := windowsCmdLineLen(argv); n > MaxInlineCommand {
+		if t.Long.UsesStdin() {
+			stdin, v.BriefOnStdin = true, true
+			note = fmt.Sprintf("brief too long to pass inline (command line %d characters, limit %d); sending it on standard input",
+				n, MaxInlineCommand)
+		} else {
+			v.Brief = readBriefAt(v.BriefFile)
+			note = fmt.Sprintf("brief too long to pass inline (command line %d characters, limit %d); the agent is told to read %s",
+				n, MaxInlineCommand, v.BriefFile)
+		}
+		if argv, err = t.Expand(v); err != nil {
+			return nil, nil, false, "", err
+		}
+	}
+	if v.Brief == text {
+		v.Brief = briefLabel(text, v.BriefFile)
+	}
+	shown, err = t.Expand(v)
+	return argv, shown, stdin, note, err
 }
 
 // Run writes the step's brief, starts its agent headless in the worktree with
@@ -155,8 +204,13 @@ func Run(ctx context.Context, s Step, opts Options) (Outcome, error) {
 	brief := Brief{
 		Change: s.Change, Step: s.Step, Role: s.Role, Round: s.Round,
 		Root: s.Worktree, ResultPath: o.ResultPath, Base: s.Base, Earlier: s.Earlier,
+		Scope: s.Scope, ShippingFeedback: s.ShippingFeedback, ShipsToForge: s.ShipsToForge,
 	}
-	if err := brief.Write(o.BriefPath); err != nil {
+	text, err := brief.Render()
+	if err == nil {
+		err = writeBrief(o.BriefPath, text)
+	}
+	if err != nil {
 		return o, fmt.Errorf("step %s: brief: %w", s.Step, err)
 	}
 	// A result file already at this round's path was not written by this
@@ -173,14 +227,14 @@ func Run(ctx context.Context, s Step, opts Options) (Outcome, error) {
 		}
 	}
 
-	argv, err := s.Agent.Expand(Values{
-		Prompt: promptFor(o.BriefPath), Brief: o.BriefPath, Result: o.ResultPath, LastMessage: o.MessagePath,
+	argv, shown, briefOnStdin, note, err := command(s.Agent, Values{
+		Brief: text, BriefFile: o.BriefPath, Result: o.ResultPath, LastMessage: o.MessagePath,
 		Workdir: s.Worktree, Model: s.Model, Effort: s.Effort, Permissions: s.Permissions,
 	})
 	if err != nil {
 		return o, err
 	}
-	o.Argv = argv
+	o.Argv = shown
 
 	logf, err := openLog(o.LogPath)
 	if err != nil {
@@ -192,11 +246,19 @@ func Run(ctx context.Context, s Step, opts Options) (Outcome, error) {
 	var logMu sync.Mutex
 	log := lockedWriter{mu: &logMu, w: logf}
 	stdout := &tailBuffer{max: maxResultSize + 64<<10}
-	logLine(log, "step %s round %d started: %s", s.Step, s.Round, strings.Join(quoteArgs(argv), " "))
+	if note != "" {
+		logLine(log, "step %s round %d: %s", s.Step, s.Round, note)
+	}
+	logLine(log, "step %s round %d started: %s", s.Step, s.Round, strings.Join(quoteArgs(shown), " "))
 
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = s.Worktree
-	cmd.Stdin = nil
+	var stdin io.WriteCloser
+	if briefOnStdin {
+		if stdin, err = cmd.StdinPipe(); err != nil {
+			return o, fmt.Errorf("step %s: standard input: %w", s.Step, err)
+		}
+	}
 	cmd.Stdout = io.MultiWriter(log, stdout)
 	cmd.Stderr = log
 	// Children the agent leaves behind may hold its output open; don't let
@@ -215,6 +277,15 @@ func Run(ctx context.Context, s Step, opts Options) (Outcome, error) {
 		logLine(log, "step %s round %d: agent did not start: %v", s.Step, s.Round, err)
 		o.ExitCode = -1
 		return o, fmt.Errorf("step %s: starting agent %s: %w", s.Step, s.Agent.Name, err)
+	}
+	if stdin != nil {
+		// Written from a goroutine so an agent that reads slowly can't hold
+		// up the step; closed after, so the agent sees end of file. An agent
+		// that exits without reading it all only ends the write early.
+		go func() {
+			_, _ = io.WriteString(stdin, text)
+			_ = stdin.Close()
+		}()
 	}
 	if opts.OnStart != nil {
 		opts.OnStart(cmd.Process.Pid)

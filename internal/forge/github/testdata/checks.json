@@ -1,0 +1,7 @@
+[
+ {"method":"GET","path":"/repos/sam/app/commits/abc123/check-runs?filter=latest&per_page=100&page=1","headers":{"Link":"<https://api.github.com/ignored>; rel=\"next\""},"response":{"check_runs":[{"id":1,"name":"build","status":"completed","conclusion":"success"}]}},
+ {"method":"GET","path":"/repos/sam/app/commits/abc123/check-runs?filter=latest&per_page=100&page=2","response":{"check_runs":[{"id":2,"name":"test","status":"completed","conclusion":"failure","html_url":"https://github.com/sam/app/actions/runs/9/job/22","details_url":"https://github.com/sam/app/actions/runs/9/job/22","output":{"title":"failed","summary":"test failed","text":"details"}},{"id":3,"name":"pending","status":"queued","conclusion":null}]}},
+ {"method":"GET","path":"/repos/sam/app/commits/abc123/status?per_page=100&page=1","response":{"statuses":[{"id":8,"context":"external","state":"success","target_url":"https://ci.example/job/8"},{"id":7,"context":"external","state":"failure"}]}},
+ {"method":"GET","path":"/repos/sam/app/rules/branches/main","response":[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"build"},{"context":"missing"}]}}]},
+ {"method":"GET","path":"/repos/sam/app/actions/jobs/22/logs","text":"test failed\n"}
+]

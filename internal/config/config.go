@@ -11,8 +11,10 @@
 // A value set in the repository config overrides the machine value for the
 // same key. Some keys are reserved to the machine and are refused in a
 // repository config: permission profiles, raw agent arguments and the editor.
-// One key is reserved to the repository and refused in machine config:
-// require_approval, so every machine applies the same run gate.
+// Two keys are reserved to the repository and refused in machine config:
+// require_approval, so every machine applies the same run gate, and the
+// [overrides] allow-list, so every machine allows the same change
+// overrides (see package settings).
 // A repository can only refer to a permission profile by name, and the
 // machine decides which repositories (by remote) may use it.
 //
@@ -42,8 +44,12 @@
 package config
 
 import (
+	"fmt"
+
+	"github.com/chrisjoyce911/tuckerbox/internal/forge"
 	"path/filepath"
 	"slices"
+	"time"
 )
 
 // RepoDir is the folder at the repository root that holds Tuckerbox files:
@@ -76,26 +82,34 @@ var BuiltinAgents = []string{"claude", "codex"}
 
 // BuiltinRoles are the roles with a built-in prompt. A repository may add or
 // override roles with .tuckerbox/roles/<role>.md.
-var BuiltinRoles = []string{"planner", "builder", "reviewer"}
+var BuiltinRoles = []string{"planner", "builder", "reviewer", "fixer"}
 
 // Placeholders are the names an agent command template may use, written as
-// {name} inside an argument. {brief} is required.
+// {name} inside an argument. A command must pass {brief} or {brief_file}.
 //
-//   - {brief}: path of the brief file the agent reads first
+//   - {brief}: the brief's text, what the agent is told to do; when the
+//     command would be too long with it inline, an instruction to read the
+//     brief file instead
+//   - {brief_file}: path of the brief file, for an agent that reads its
+//     prompt from a file
 //   - {workdir}: the change's worktree
 //   - {model}: the step's model, or the agent's default model
 //   - {effort}: the step's effort, or the agent's default effort
 //   - {lastmessage}: a file, owned by Tuckerbox, where the agent CLI writes
 //     the agent's final message; without it the final message is read from
 //     the agent's standard output
-var Placeholders = []string{"brief", "workdir", "model", "effort", "lastmessage"}
+var Placeholders = []string{"brief", "brief_file", "workdir", "model", "effort", "lastmessage"}
 
 // ShipMode says what happens when a run finishes its last step.
 type ShipMode string
 
 // ShipLocal leaves the work committed on the change's branch and pushes
-// nothing. It is the only mode in this release.
-const ShipLocal ShipMode = "local"
+// nothing. ShipMR and ShipMerge opt into the forge shipping stage.
+const (
+	ShipLocal ShipMode = "local"
+	ShipMR    ShipMode = "mr"
+	ShipMerge ShipMode = "merge"
+)
 
 // Config is the resolved configuration for one repository on this machine:
 // the machine config merged with the repository config, defaults filled in.
@@ -121,11 +135,19 @@ type Config struct {
 	// MaxParallel is the most changes from this repository that run at once.
 	MaxParallel int
 	// Ship is the ship mode.
-	Ship ShipMode
+	Ship        ShipMode
+	Shipping    Shipping
+	Forge       forge.Settings
+	ForgeTarget forge.Target
+	Forges      map[string]ForgeHost
+	Machine     string
+	FixSteps    map[string]Step
 	// Worktree holds the worktree and branch settings for runs.
 	Worktree Worktree
 	// BoardColumns defaults to compact; steps shows each workflow step separately.
 	BoardColumns BoardColumns
+	// Autopilot holds the [autopilot] settings, defaults filled in.
+	Autopilot Autopilot
 
 	// Agents holds the agent command templates defined in config, by name:
 	// custom agents from either file and machine overrides of built-ins. An
@@ -143,7 +165,43 @@ type Config struct {
 	// approved (see package approval). Repository only; true unless the
 	// repository config sets require_approval = false.
 	RequireApproval bool
+	// Overrides is the repository's [overrides] allow-list: what a change
+	// may choose for its own steps. nil when the repository config has no
+	// [overrides] table, so no change may override anything. Repository
+	// only.
+	Overrides *Overrides
 }
+
+// Overrides is the [overrides] table of repository config: the values a
+// change may pick for its steps in its tuckerbox.toml. A nil or empty list
+// means a change may not override that key. Permissions lists profile
+// names only; machine config still decides what each profile grants.
+type Overrides struct {
+	Agents []string
+	// Models lists the allowed models per agent name, because a model name
+	// only means something to one agent CLI.
+	Models      map[string][]string
+	Efforts     []string
+	Permissions []string
+}
+
+// Autopilot is the [autopilot] table: how tuckerbox autopilot works
+// through changes. Either file may set it; repository values win.
+type Autopilot struct {
+	// Scope is AutopilotGroup (each change group by group, the default)
+	// or AutopilotChange (whole changes).
+	Scope string
+	// Interval is the time between full passes (default 60s, at least 10s).
+	Interval time.Duration
+}
+
+// Autopilot scopes and limits.
+const (
+	AutopilotGroup           = "group"
+	AutopilotChange          = "change"
+	DefaultAutopilotInterval = 60 * time.Second
+	MinAutopilotInterval     = 10 * time.Second
+)
 
 // BoardColumns selects the board layout. Repository values override machine defaults.
 type BoardColumns string
@@ -177,6 +235,27 @@ type Step struct {
 	// rejections the run is blocked. It is DefaultMaxRounds unless set, and
 	// setting it without OnReject is invalid.
 	MaxRounds int
+	// From says which file set Agent, Model, Effort and Permissions:
+	// SourceRepo or SourceMachine, or "" when neither did.
+	From StepSources
+}
+
+// Source is where a step setting's value came from.
+type Source string
+
+// Sources of a step setting, from weakest to strongest. A change's own
+// overrides (package settings) win over the repository's.
+const (
+	SourceDefault Source = "default"
+	SourceMachine Source = "machine"
+	SourceRepo    Source = "repo"
+	SourceChange  Source = "change"
+)
+
+// StepSources says where each of a step's agent, model, effort and
+// permissions came from; "" when not set in either config file.
+type StepSources struct {
+	Agent, Model, Effort, Permissions Source
 }
 
 // Agent is a command template for an agent CLI defined in config.
@@ -233,7 +312,8 @@ func (c *Config) Step(id string) (Step, bool) {
 			return s, true
 		}
 	}
-	return Step{}, false
+	s, ok := c.FixSteps[id]
+	return s, ok
 }
 
 // PermissionArgs returns the extra arguments the step's permission profile
@@ -243,6 +323,34 @@ func (c *Config) PermissionArgs(s Step) []string {
 		return nil
 	}
 	return slices.Clone(c.Permissions[s.Permissions].Args[s.Agent])
+}
+
+// ProfileProblem says why the permission profile prof cannot be used by a
+// step of this repository run by agent, or returns "" when it can: machine
+// config defines it, it allows this repository's remote, and it grants
+// flags for agent (when agent is not "").
+func (c *Config) ProfileProblem(prof, agent string) string {
+	p, defined := c.Permissions[prof]
+	switch {
+	case !defined:
+		return fmt.Sprintf("permission profile %q is not defined in machine config; only machine config may define permission profiles", prof)
+	case !remoteAllowed(p.AllowedRemotes, c.Remote):
+		shown := c.Remote
+		if shown == "" {
+			shown = "(none)"
+		}
+		return fmt.Sprintf("permission profile %q does not allow this repository's remote %s; add it to permissions.%s.allowed_remotes in machine config", prof, shown, prof)
+	case agent != "" && p.Args[agent] == nil:
+		return fmt.Sprintf("permission profile %q grants no flags for agent %q; add permissions.%s.args.%s in machine config", prof, agent, prof, agent)
+	}
+	return ""
+}
+
+// KnownAgent reports whether name is a built-in agent or one defined in
+// config.
+func (c *Config) KnownAgent(name string) bool {
+	_, ok := c.Agents[name]
+	return ok || IsBuiltinAgent(name)
 }
 
 // IsBuiltinAgent reports whether name is a built-in agent.

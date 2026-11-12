@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -17,8 +18,13 @@ import (
 	"time"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/agent"
+	"github.com/chrisjoyce911/tuckerbox/internal/approval"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
+	"github.com/chrisjoyce911/tuckerbox/internal/forge"
+	"github.com/chrisjoyce911/tuckerbox/internal/priority"
 	"github.com/chrisjoyce911/tuckerbox/internal/runs"
+	"github.com/chrisjoyce911/tuckerbox/internal/scope"
+	"github.com/chrisjoyce911/tuckerbox/internal/ship"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 )
 
@@ -78,14 +84,21 @@ func (a App) loadRepo(cmd, dir string) (runs.Repo, *config.Config, bool) {
 	return repo, cfg, true
 }
 
-// run: tuckerbox run [--foreground] <change>... | --all
+// run: tuckerbox run [--foreground] [--tasks <scope>] <change>... | --all
 func (a App) run(args []string) int {
 	var all, fg bool
-	pos, err := parseArgs(args, map[string]*bool{"all": &all, "foreground": &fg}, nil)
+	var tasks string
+	pos, err := parseArgs(args, map[string]*bool{"all": &all, "foreground": &fg}, map[string]*string{"tasks": &tasks})
 	if err != nil {
 		return a.usageErr("run", err.Error())
 	}
 	switch {
+	case tasks != "" && (all || len(pos) != 1):
+		return a.usageErr("run", "--tasks takes one change, not --all or several")
+	case tasks != "":
+		if err := scope.Valid(tasks); err != nil {
+			return a.usageErr("run", err.Error())
+		}
 	case all && len(pos) > 0:
 		return a.usageErr("run", "give change ids or --all, not both")
 	case !all && len(pos) == 0:
@@ -119,10 +132,16 @@ func (a App) run(args []string) int {
 				continue
 			}
 			rev, err := gate.check(ctx, id)
+			if err == nil {
+				err = gate.overrides(ctx, id)
+			}
 			if err != nil {
 				var na *notApprovedError
+				var oe *runs.OverridesError
 				if errors.As(err, &na) {
 					fmt.Fprintf(a.Stdout, "%s: skipped, not approved (%s)\n", id, na.State)
+				} else if errors.As(err, &oe) {
+					fmt.Fprintf(a.Stdout, "%s: skipped, step overrides not allowed\n", id)
 				}
 				fmt.Fprintf(a.Stderr, "tuckerbox run: skipping %s: %v\n", id, err)
 				continue
@@ -134,6 +153,13 @@ func (a App) run(args []string) int {
 			fmt.Fprintln(a.Stdout, "no valid active changes to run")
 			return 0
 		}
+		// Requested oldest first, started in admission order (each waits
+		// for the one before to join the queue), so the queue agrees.
+		all, err := priority.Load(repo.Checkout())
+		if err != nil {
+			return a.errf("run", "%v", err)
+		}
+		changes = priority.RunAll(changes, all)
 	} else {
 		bad := false
 		gate := &runGate{a: a, repo: repo, cfg: cfg}
@@ -149,25 +175,41 @@ func (a App) run(args []string) int {
 				continue
 			}
 			rev, err := gate.check(ctx, id)
+			if err == nil {
+				err = gate.overrides(ctx, id)
+			}
 			if err != nil {
 				a.errf("run", "%v", err)
 				bad = true
+				continue
 			}
 			startRevs[id] = rev
+			if tasks != "" {
+				if tasks, err = a.runScope(ctx, gate, id, tasks); err != nil {
+					a.errf("run", "%v", err)
+					bad = true
+				}
+			}
 		}
 		if bad {
 			fmt.Fprintln(a.Stderr, "tuckerbox run: nothing started")
 			return 1
 		}
 	}
+	if !a.shippingPreflight(ctx, repo, cfg, changes) {
+		return 1
+	}
 	if fg {
-		return a.foreground(repo, cfg, runs.Request{Change: changes[0], Mode: runs.Start, StartRev: startRevs[changes[0]]})
+		return a.foreground(repo, cfg, runs.Request{Change: changes[0], Mode: runs.Start, StartRev: startRevs[changes[0]], Scope: tasks})
 	}
 	code := 0
 	for _, id := range changes {
 		engineArgs := []string{"--mode", "start", id}
 		if rev := startRevs[id]; rev != "" {
 			engineArgs = append([]string{"--start-rev", rev}, engineArgs...)
+		}
+		if tasks != "" {
+			engineArgs = append([]string{"--tasks", tasks}, engineArgs...)
 		}
 		err := a.spawn(repo.Root, engineArgs)
 		var se *runs.StateError
@@ -282,16 +324,27 @@ func (s *switchWriter) set(w io.Writer) {
 // engine runs one run in this process. Users reach it through run, resume
 // and rerun; --handshake is for the detached process they start.
 //
-//	tuckerbox engine [--handshake] --mode start|resume|rerun [--step s] [--worktree p] [--start-rev c] <change>
+//	tuckerbox engine [--handshake] --mode start|resume|rerun [--step s] [--worktree p] [--start-rev c] [--tasks scope] <change>
 func (a App) engine(args []string) int {
-	var handshake bool
-	var mode, step, worktree, startRev string
-	pos, err := parseArgs(args, map[string]*bool{"handshake": &handshake},
-		map[string]*string{"mode": &mode, "step": &step, "worktree": &worktree, "start-rev": &startRev})
+	var handshake, expectNone bool
+	var mode, step, worktree, startRev, tasks, expectState, expectSince, by string
+	pos, err := parseArgs(args, map[string]*bool{"handshake": &handshake, "expect-none": &expectNone},
+		map[string]*string{"mode": &mode, "step": &step, "worktree": &worktree, "start-rev": &startRev, "tasks": &tasks,
+			"expect-state": &expectState, "expect-since": &expectSince, "by": &by})
 	if err != nil || len(pos) != 1 {
 		return a.usageErr("engine", "usage: tuckerbox engine --mode start|resume|rerun [--step s] [--worktree p] <change>")
 	}
-	req := runs.Request{Change: pos[0], Step: step, Worktree: worktree, StartRev: startRev}
+	req := runs.Request{Change: pos[0], Step: step, Worktree: worktree, StartRev: startRev, Scope: tasks, By: by}
+	switch {
+	case expectNone:
+		req.Expect = &runs.Expect{NoRun: true}
+	case expectState != "":
+		since, err := time.Parse(time.RFC3339Nano, expectSince)
+		if err != nil {
+			return a.usageErr("engine", "--expect-state needs --expect-since as an RFC 3339 time")
+		}
+		req.Expect = &runs.Expect{State: runs.State(expectState), Since: since}
+	}
 	switch mode {
 	case "start":
 		req.Mode = runs.Start
@@ -349,8 +402,29 @@ func (a App) engine(args []string) int {
 
 func (a App) newEngine(repo runs.Repo, cfg *config.Config, log io.Writer) *runs.Engine {
 	e := &runs.Engine{Repo: repo, Config: cfg, Log: log}
+	if a.Forge != nil {
+		e.Forge = func(ctx context.Context) (forge.Client, func(string) string, error) { return a.Forge(ctx, cfg) }
+	}
 	if cfg.RequireApproval {
 		e.Gate = approvalGate(repo)
+		e.SettingsGate = func(ctx context.Context, change, worktree string) error {
+			return settingsGate(ctx, repo.Root, change, worktree)
+		}
+		e.ResumeGate = func(ctx context.Context, change, worktree string) error {
+			// The approvals ref wins over the sidecar, as in the run gate.
+			entry, err := refEntry(ctx, repo.Root, change)
+			if err != nil {
+				return err
+			}
+			st, err := approval.JudgeWith(approval.DirOf(worktree, change), entry)
+			if err != nil {
+				return err
+			}
+			if st.State == approval.None {
+				return fmt.Errorf("change %s is no longer approved", change)
+			}
+			return nil
+		}
 	}
 	if home, err := a.stateHome(); err == nil {
 		e.StateHome = home
@@ -531,11 +605,21 @@ func (a App) restart(cmd string, fg bool, change string, req runs.Request) int {
 		return a.errf(cmd, "%v", runs.LockedError(change, l.Run.Worktree, l.State))
 	}
 	req.Worktree = l.Run.Worktree
-	if fg {
-		repo, cfg, ok := a.loadRepo(cmd, l.Run.Repo)
-		if !ok {
-			return 1
+	repo, cfg, ok := a.loadRepo(cmd, l.Run.Repo)
+	if !ok {
+		return 1
+	}
+	// A clear refusal before any process starts; the engine checks again
+	// under the change lock.
+	if err := runs.CheckOverrides(context.Background(), cfg, repo.Root, change, runs.StartPoint{Worktree: req.Worktree}); err != nil {
+		return a.errf(cmd, "%v", err)
+	}
+	if cfg.RequireApproval {
+		if err := settingsGate(context.Background(), repo.Root, change, req.Worktree); err != nil {
+			return a.errf(cmd, "%v", err)
 		}
+	}
+	if fg {
 		return a.foreground(repo, cfg, req)
 	}
 	args := []string{"--mode", cmd, "--worktree", req.Worktree}
@@ -650,17 +734,22 @@ func displayTime(t time.Time) string {
 // statusRun is one run in tuckerbox status --json. Fields may be added
 // within a version, never renamed or removed.
 type statusRun struct {
-	Repo     string `json:"repo"`
-	Change   string `json:"change"`
-	State    string `json:"state"`
-	Step     string `json:"step"`
-	Round    int    `json:"round"`
-	Since    string `json:"since"`
-	Reason   string `json:"reason"`
-	Worktree string `json:"worktree"`
-	Branch   string `json:"branch"`
-	Pid      int    `json:"pid,omitempty"`
-	Created  string `json:"created"`
+	MR        *ship.MRInfo `json:"mr,omitempty"`
+	CI        *ship.CIInfo `json:"ci,omitempty"`
+	ShipRound int          `json:"ship_round,omitempty"`
+	Repo      string       `json:"repo"`
+	Change    string       `json:"change"`
+	State     string       `json:"state"`
+	Step      string       `json:"step"`
+	Round     int          `json:"round"`
+	Since     string       `json:"since"`
+	Reason    string       `json:"reason"`
+	Worktree  string       `json:"worktree"`
+	Branch    string       `json:"branch"`
+	Pid       int          `json:"pid,omitempty"`
+	Created   string       `json:"created"`
+	// Scope is the run's task scope; absent for the whole change.
+	Scope *scope.Scope `json:"scope,omitempty"`
 }
 
 // StatusVersion is the format version of tuckerbox status --json.
@@ -695,7 +784,7 @@ func (a App) statusRuns() ([]statusRun, error) {
 		out = append(out, statusRun{
 			Repo: e.Repo, Change: v.Change, State: string(v.State), Step: v.Step, Round: v.Round,
 			Since: rfc3339(v.Since), Reason: v.Reason, Worktree: v.Worktree, Branch: v.Branch,
-			Pid: v.Pid, Created: rfc3339(v.Created),
+			Pid: v.Pid, Created: rfc3339(v.Created), Scope: v.Scope, MR: v.MR, CI: v.CI, ShipRound: v.ShipRound,
 		})
 	}
 	return out, nil
@@ -719,14 +808,28 @@ func (a App) status(args []string) int {
 		fmt.Fprintln(a.Stdout, "no runs on this machine")
 		return 0
 	}
-	rows := [][]string{{"REPO", "CHANGE", "STATE", "STEP", "ROUND", "SINCE", "REASON"}}
+	rows := [][]string{{"REPO", "CHANGE", "STATE", "STEP", "TASKS", "ROUND", "SINCE", "MR", "CI", "SHIP ROUND", "REASON"}}
 	for _, r := range list {
 		since, _ := time.Parse(time.RFC3339, r.Since)
 		step := r.Step
 		if step == "" {
 			step = "-"
 		}
-		rows = append(rows, []string{filepath.Base(r.Repo), r.Change, r.State, step, strconv.Itoa(r.Round), displayTime(since), r.Reason})
+		tasks := "all"
+		if r.Scope != nil {
+			tasks = r.Scope.Spec
+		}
+		mr, ci, shipRound := "", "", ""
+		if r.MR != nil {
+			mr = r.MR.Link
+		}
+		if r.CI != nil {
+			ci = r.CI.State
+		}
+		if r.ShipRound > 0 {
+			shipRound = strconv.Itoa(r.ShipRound)
+		}
+		rows = append(rows, []string{filepath.Base(r.Repo), r.Change, r.State, step, tasks, strconv.Itoa(r.Round), displayTime(since), mr, ci, shipRound, r.Reason})
 	}
 	writeTable(a.Stdout, rows)
 	return 0
@@ -762,4 +865,41 @@ func writeTable(w io.Writer, rows [][]string) {
 		}
 		fmt.Fprintln(w, strings.TrimRight(b.String(), " "))
 	}
+}
+
+// runScope judges the task scope spec of tuckerbox run --tasks in the
+// tasks.md the run will use (its worktree, else the commit a new worktree
+// would be made at), before any worktree or run is made, and returns it
+// with next resolved to a group number.
+func (a App) runScope(ctx context.Context, g *runGate, change, spec string) (string, error) {
+	sp, err := g.start(ctx, change)
+	if err != nil {
+		return "", err
+	}
+	var data []byte
+	var cur *runs.Run
+	if sp.Worktree != "" {
+		data, err = os.ReadFile(runs.TasksFile(sp.Worktree, change))
+		if st, serr := statedir.Resolve(ctx, sp.Worktree); serr == nil {
+			if r, rerr := runs.ReadRun(st.RunFile()); rerr == nil {
+				cur = r
+			}
+		}
+	} else {
+		var rev *approval.Rev
+		if rev, err = approval.NewRev(ctx, g.repo.Root, sp.Rev, change); err == nil {
+			data, err = rev.Read("tasks.md")
+		}
+	}
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("change %s: reading tasks.md: %v", change, err)
+	}
+	sc, same, err := runs.ScopeFor(spec, string(data), cur)
+	if err != nil {
+		return "", fmt.Errorf("change %s: %v", change, err)
+	}
+	if same {
+		return cur.Scope.Spec, nil
+	}
+	return sc.Spec, nil
 }

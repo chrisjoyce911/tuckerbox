@@ -1,0 +1,434 @@
+// Package settings reads a change's own step settings from its sidecar,
+// openspec/changes/<id>/tuckerbox.toml, and checks them against the
+// repository's [overrides] allow-list (see [config.Overrides]).
+//
+// The sidecar may hold, besides title, depends_on, priority and [approval]:
+//
+//	machines = ["studio", "mini"]   # machines the change prefers, in order
+//
+//	[steps.build]
+//	agent = "codex"
+//	model = "gpt-5.5"
+//	effort = "high"
+//	permissions = "edit"            # a machine permission profile's name
+//
+// A step table may hold only agent, model, effort and permissions, and
+// must name a step the repository defines in [steps]. A change can never
+// carry agent arguments or permission flags: those belong in a permission
+// profile in machine config. machines has no effect in solo mode.
+package settings
+
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"maps"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+
+	"github.com/BurntSushi/toml"
+
+	"github.com/chrisjoyce911/tuckerbox/internal/config"
+	"github.com/chrisjoyce911/tuckerbox/internal/deps"
+)
+
+// FileName is the sidecar file in a change folder.
+const FileName = deps.FileName
+
+// Keys a change may set in a [steps.<step>] table.
+const (
+	KeyAgent       = "agent"
+	KeyModel       = "model"
+	KeyEffort      = "effort"
+	KeyPermissions = "permissions"
+)
+
+// StepKeys lists the keys a [steps.<step>] table may hold, in display order.
+var StepKeys = []string{KeyAgent, KeyModel, KeyEffort, KeyPermissions}
+
+// Override is one step's settings in a change's sidecar. An empty field is
+// not overridden.
+type Override struct {
+	Agent, Model, Effort, Permissions string
+}
+
+// Get returns the value of key (one of [StepKeys]).
+func (o Override) Get(key string) string {
+	switch key {
+	case KeyAgent:
+		return o.Agent
+	case KeyModel:
+		return o.Model
+	case KeyEffort:
+		return o.Effort
+	case KeyPermissions:
+		return o.Permissions
+	}
+	return ""
+}
+
+// Sidecar is the part of a change's tuckerbox.toml this package reads.
+// Other keys (such as priority and [approval]) are left to their packages.
+type Sidecar struct {
+	Title     string
+	DependsOn []string
+	// Machines lists the machines the change prefers to run on, in order.
+	// It has no effect in solo mode.
+	Machines []string
+	// Steps holds the change's step overrides, by step id.
+	Steps map[string]Override
+}
+
+// Problem is one thing wrong with a change's settings.
+type Problem struct {
+	// File is the sidecar, relative to the repository root with forward
+	// slashes.
+	File string
+	// Change is the change id.
+	Change string
+	// Key is the dotted key in the sidecar, such as "steps.build.agent".
+	Key     string
+	Message string
+}
+
+func (p Problem) String() string {
+	var b strings.Builder
+	if p.File != "" {
+		b.WriteString(p.File)
+		b.WriteString(": ")
+	}
+	if p.Change != "" {
+		fmt.Fprintf(&b, "change %s: ", p.Change)
+	}
+	if p.Key != "" {
+		b.WriteString(p.Key)
+		b.WriteString(": ")
+	}
+	b.WriteString(p.Message)
+	return b.String()
+}
+
+// rawStep is a [steps.<step>] table. Any other key is undecoded and
+// reported.
+type rawStep struct {
+	Agent       *string `toml:"agent"`
+	Model       *string `toml:"model"`
+	Effort      *string `toml:"effort"`
+	Permissions *string `toml:"permissions"`
+}
+
+type rawSidecar struct {
+	Title     string             `toml:"title"`
+	DependsOn []string           `toml:"depends_on"`
+	Machines  []string           `toml:"machines"`
+	Steps     map[string]rawStep `toml:"steps"`
+}
+
+// Parse reads a sidecar's contents. It returns an error only when data is
+// not valid TOML or a known key has the wrong type; problems with the
+// settings themselves (unknown or forbidden keys in a step table, empty
+// values) are returned as problems, with Key set and File and Change
+// empty. Values of refused keys are never put in a problem, so a flag
+// someone wrote by mistake is not echoed.
+func Parse(data []byte) (Sidecar, []Problem, error) {
+	var raw rawSidecar
+	md, err := toml.Decode(string(data), &raw)
+	if err != nil {
+		return Sidecar{}, nil, err
+	}
+	if t := md.Type("steps"); t != "" && t != "Hash" {
+		// The decoder leaves a non-table into a map alone without error.
+		return Sidecar{}, nil, fmt.Errorf("steps: must be tables, such as [steps.build], not a %s", strings.ToLower(t))
+	}
+	sc := Sidecar{Title: raw.Title, Steps: map[string]Override{}}
+	var ps []Problem
+	add := func(key, format string, args ...any) {
+		ps = append(ps, Problem{Key: key, Message: fmt.Sprintf(format, args...)})
+	}
+	seen := map[string]bool{}
+	for _, d := range raw.DependsOn {
+		if d = strings.TrimSpace(d); d != "" && !seen[d] {
+			seen[d] = true
+			sc.DependsOn = append(sc.DependsOn, d)
+		}
+	}
+	for i, m := range raw.Machines {
+		if strings.TrimSpace(m) == "" {
+			add("machines", "entry %d is empty; list machine names", i+1)
+			continue
+		}
+		sc.Machines = append(sc.Machines, m)
+	}
+
+	// Keys in step tables the struct does not know: refused, by name only.
+	// A deeper key (such as args.codex = [...] in [steps.build]) is
+	// reported by its key in the step table, once: the decoder lists only
+	// the leaf when the table in between is implicit, so a deeper key cannot
+	// be assumed to have its parent reported.
+	reported := map[string]bool{}
+	for _, k := range md.Undecoded() {
+		if len(k) < 2 || k[0] != "steps" {
+			continue // other top-level keys belong to other packages
+		}
+		if len(k) == 2 {
+			continue // a step table itself; its keys are reported below
+		}
+		k = k[:3]
+		if reported[k.String()] {
+			continue
+		}
+		reported[k.String()] = true
+		name := k[2]
+		if config.IsArgKey(name) {
+			add(k.String(), "agent arguments and permission flags are not allowed in a change; they belong in a permission profile in machine config, which a change may name with permissions = \"<profile>\"")
+		} else {
+			add(k.String(), "not allowed in a change; a step table may set only %s", strings.Join(StepKeys, ", "))
+		}
+	}
+
+	for _, id := range slices.Sorted(maps.Keys(raw.Steps)) {
+		rs := raw.Steps[id]
+		var o Override
+		for _, f := range []struct {
+			key string
+			src *string
+			dst *string
+		}{
+			{KeyAgent, rs.Agent, &o.Agent},
+			{KeyModel, rs.Model, &o.Model},
+			{KeyEffort, rs.Effort, &o.Effort},
+			{KeyPermissions, rs.Permissions, &o.Permissions},
+		} {
+			if f.src == nil {
+				continue
+			}
+			if strings.TrimSpace(*f.src) == "" {
+				add("steps."+id+"."+f.key, "empty value; remove the key to use the repository's value")
+				continue
+			}
+			*f.dst = *f.src
+		}
+		sc.Steps[id] = o
+	}
+	return sc, ps, nil
+}
+
+// Judge parses a sidecar's contents (nil: the change has none) and checks
+// it against cfg, returning the sidecar and every problem with it. A
+// sidecar that does not parse is one problem.
+func Judge(cfg *config.Config, data []byte) (Sidecar, []Problem) {
+	if data == nil {
+		return Sidecar{Steps: map[string]Override{}}, nil
+	}
+	sc, ps, err := Parse(data)
+	if err != nil {
+		return Sidecar{Steps: map[string]Override{}}, []Problem{{Message: err.Error()}}
+	}
+	return sc, append(ps, Check(cfg, sc)...)
+}
+
+// Read reads and parses change id's sidecar in the checkout at root. A
+// missing sidecar is an empty one.
+func Read(root, id string) (Sidecar, []Problem, error) {
+	data, err := os.ReadFile(filepath.Join(deps.ChangesDir(root), id, FileName))
+	if errors.Is(err, fs.ErrNotExist) {
+		return Sidecar{Steps: map[string]Override{}}, nil, nil
+	}
+	if err != nil {
+		return Sidecar{}, nil, err
+	}
+	return Parse(data)
+}
+
+// Check checks a change's step overrides against the repository config
+// cfg: each step must be defined in [steps], each value must be in the
+// [overrides] allow-list (a model in the list for the step's effective
+// agent), and a permission profile must be usable on this machine, as for
+// a repository step. Problems have Key set and File and Change empty.
+func Check(cfg *config.Config, sc Sidecar) []Problem {
+	return check(cfg, sc, true)
+}
+
+// check is [Check]; with machine false it leaves out whether this machine
+// grants a permission profile.
+func check(cfg *config.Config, sc Sidecar, machine bool) []Problem {
+	var ps []Problem
+	add := func(key, format string, args ...any) {
+		ps = append(ps, Problem{Key: key, Message: fmt.Sprintf(format, args...)})
+	}
+	for _, id := range slices.Sorted(maps.Keys(sc.Steps)) {
+		o := sc.Steps[id]
+		key := "steps." + id
+		step, ok := cfg.Step(id)
+		if !ok {
+			add(key, "unknown step %q; the repository config defines no step %q in [steps]", id, id)
+			continue
+		}
+		agent := step.Agent
+		if o.Agent != "" {
+			agent = o.Agent
+		}
+		for _, k := range StepKeys {
+			if k == KeyAgent && o.Agent != "" && allowed(cfg.Overrides, k, o.Agent, agent) == "" && !cfg.KnownAgent(o.Agent) {
+				add(key+"."+k, "agent %q is allowed but not defined; use %s, or define it under [agents.%s]", o.Agent, strings.Join(config.BuiltinAgents, ", "), o.Agent)
+				continue
+			}
+			v := o.Get(k)
+			if v == "" {
+				continue
+			}
+			if msg := allowed(cfg.Overrides, k, v, agent); msg != "" {
+				add(key+"."+k, "%s", msg)
+				continue
+			}
+			if k == KeyPermissions && machine {
+				if msg := cfg.ProfileProblem(v, agent); msg != "" {
+					add(key+"."+k, "%s", msg)
+				}
+			}
+		}
+		// The repository's profile is kept when the change picks another
+		// agent; it must grant that agent flags, as for a repository step.
+		if machine && o.Agent != "" && o.Permissions == "" && step.Permissions != "" {
+			if msg := cfg.ProfileProblem(step.Permissions, agent); msg != "" {
+				add(key+"."+KeyAgent, "%s (the step's profile from %s config)", msg, step.From.Permissions)
+			}
+		}
+	}
+	return ps
+}
+
+// Effective is the settings a step runs with, and where each came from
+// (config.SourceChange, SourceRepo, SourceMachine or SourceDefault). An
+// empty Model or Effort leaves the agent CLI's own default; an empty
+// Permissions runs the agent with no profile.
+type Effective struct {
+	Agent, Model, Effort, Permissions string
+	From                              config.StepSources
+}
+
+// Resolve works out the effective settings of step for a change whose
+// override for it is o: for each key the change's value, else the
+// repository's, else the machine's (both already merged into step, with
+// step.From saying which), else the agent's default ([agents.<name>] model
+// and effort, or none). When o changes the step's agent, a model or effort
+// set for the old agent in config is dropped: the change's value is used,
+// else the new agent's default. The permission profile is kept, by name;
+// [Check] refuses it if it grants the new agent nothing.
+func Resolve(cfg *config.Config, step config.Step, o Override) Effective {
+	var e Effective
+	or := func(src config.Source) config.Source {
+		if src == "" {
+			return config.SourceDefault
+		}
+		return src
+	}
+	e.Agent, e.From.Agent = step.Agent, or(step.From.Agent)
+	if o.Agent != "" {
+		e.Agent, e.From.Agent = o.Agent, config.SourceChange
+	}
+	changed := e.Agent != step.Agent
+	def := cfg.Agents[e.Agent] // a built-in agent not in config has no defaults
+	for _, f := range []struct {
+		over, inherited, fallback string
+		src                       config.Source
+		dst                       *string
+		from                      *config.Source
+	}{
+		{o.Model, step.Model, def.Model, step.From.Model, &e.Model, &e.From.Model},
+		{o.Effort, step.Effort, def.Effort, step.From.Effort, &e.Effort, &e.From.Effort},
+	} {
+		switch {
+		case f.over != "":
+			*f.dst, *f.from = f.over, config.SourceChange
+		case f.inherited != "" && !changed:
+			*f.dst, *f.from = f.inherited, or(f.src)
+		default:
+			*f.dst, *f.from = f.fallback, config.SourceDefault
+		}
+	}
+	e.Permissions, e.From.Permissions = step.Permissions, or(step.From.Permissions)
+	if step.Permissions == "" {
+		e.From.Permissions = config.SourceDefault
+	}
+	if o.Permissions != "" {
+		e.Permissions, e.From.Permissions = o.Permissions, config.SourceChange
+	}
+	return e
+}
+
+// Apply returns step with its agent, model, effort and permissions set to
+// e's, ready to run.
+func (e Effective) Apply(step config.Step) config.Step {
+	step.Agent, step.Model, step.Effort, step.Permissions = e.Agent, e.Model, e.Effort, e.Permissions
+	step.From = e.From
+	return step
+}
+
+// allowed returns "" when the allow-list o lets a change set key to v on a
+// step whose effective agent is agent, else why not, with the allowed
+// values.
+func allowed(o *config.Overrides, key, v, agent string) string {
+	if o == nil {
+		return fmt.Sprintf("%s %q: the repository allows no change overrides; list allowed values under [overrides] in .tuckerbox/config.toml", key, v)
+	}
+	var list []string
+	what := key
+	switch key {
+	case KeyAgent:
+		list, what = o.Agents, "agents"
+	case KeyEffort:
+		list, what = o.Efforts, "efforts"
+	case KeyPermissions:
+		list, what = o.Permissions, "permissions"
+	case KeyModel:
+		list = o.Models[agent]
+		if slices.Contains(list, v) {
+			return ""
+		}
+		if len(list) == 0 {
+			return fmt.Sprintf("model %q is not an allowed model for %q; [overrides] models allows no models for %q", v, agent, agent)
+		}
+		return fmt.Sprintf("model %q is not an allowed model for %q; allowed: %s", v, agent, strings.Join(list, ", "))
+	}
+	if slices.Contains(list, v) {
+		return ""
+	}
+	if len(list) == 0 {
+		return fmt.Sprintf("%s %q: the repository allows no change to override %s; add [overrides] %s to .tuckerbox/config.toml", key, v, key, what)
+	}
+	return fmt.Sprintf("%s %q is not allowed; allowed %s: %s", key, v, what, strings.Join(list, ", "))
+}
+
+// CheckAll reads the sidecar of every active change in the checkout at
+// root and checks it against cfg. A sidecar that is not valid TOML is
+// skipped, because [deps.Check] already reports it; a valid one whose
+// settings have the wrong type is reported here. When cfg is nil (the config
+// could not be loaded) only the sidecars' own problems are reported.
+func CheckAll(root string, cfg *config.Config) ([]Problem, error) {
+	active, err := deps.Active(root)
+	if err != nil {
+		return nil, err
+	}
+	var out []Problem
+	for _, id := range active {
+		sc, ps, err := Read(root, id)
+		if err != nil {
+			if _, derr := deps.Read(root, id); derr != nil {
+				continue // reported by deps.Check
+			}
+			ps = []Problem{{Message: err.Error()}}
+		}
+		if cfg != nil {
+			ps = append(ps, Check(cfg, sc)...)
+		}
+		for _, p := range ps {
+			p.File = "openspec/changes/" + id + "/" + FileName
+			p.Change = id
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}

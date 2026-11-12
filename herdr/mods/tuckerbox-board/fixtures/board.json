@@ -4,7 +4,12 @@
   "path": "/work/shop",
   "machine": "studio",
   "require_approval": true,
-  "steps": ["plan", "build", "review"],
+  "autopilot": { "running": true, "pid": 4242, "started": "2026-11-12T08:00:00+10:00" },
+  "steps": [
+    "plan",
+    "build",
+    "review"
+  ],
   "columns": [
     {
       "id": "proposed",
@@ -53,6 +58,8 @@
   "cards": [
     {
       "change": "add-search",
+      "priority": null,
+      "position": 8,
       "title": "add search",
       "column": "proposed",
       "tasks": {
@@ -63,11 +70,13 @@
         "state": "none",
         "by": "",
         "at": "",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "",
       "reason": "",
-      "badge": "", "step": "",
+      "badge": "",
+      "step": "",
       "agent": "",
       "round": 0,
       "since": "",
@@ -76,10 +85,72 @@
       "machine": "studio",
       "edit_folder": "/work/shop",
       "depends_on": [],
-      "error": "tasks.md is unreadable; task progress may be incomplete"
+      "error": "tasks.md is unreadable; task progress may be incomplete",
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "high",
+            "source": "repo"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          }
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "",
+            "source": "default"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": []
     },
     {
       "change": "refund-flow",
+      "priority": null,
+      "position": 9,
       "title": "Refunds from the order page",
       "column": "proposed",
       "tasks": {
@@ -90,11 +161,13 @@
         "state": "stale",
         "by": "Sam Example",
         "at": "2026-11-10T16:20:00+10:00",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "",
       "reason": "",
-      "badge": "", "step": "",
+      "badge": "",
+      "step": "",
       "agent": "",
       "round": 0,
       "since": "",
@@ -102,10 +175,72 @@
       "worktree": "",
       "machine": "studio",
       "edit_folder": "/work/shop",
-      "depends_on": []
+      "depends_on": [],
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "high",
+            "source": "repo"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          }
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "",
+            "source": "default"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": []
     },
     {
       "change": "add-wishlist",
+      "priority": 5000,
+      "position": 5,
       "title": "add wishlist",
       "column": "approved",
       "tasks": {
@@ -116,11 +251,13 @@
         "state": "approved",
         "by": "Sam Example",
         "at": "2026-11-12T08:55:00+10:00",
-        "committed": false
+        "committed": false,
+        "published": true
       },
       "state": "",
       "reason": "",
-      "badge": "", "step": "",
+      "badge": "",
+      "step": "",
       "agent": "",
       "round": 0,
       "since": "",
@@ -128,10 +265,72 @@
       "worktree": "",
       "machine": "studio",
       "edit_folder": "/work/shop",
-      "depends_on": []
+      "depends_on": [],
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "high",
+            "source": "repo"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          }
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "",
+            "source": "default"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": []
     },
     {
       "change": "checkout-v2",
+      "priority": 4000,
+      "position": 4,
       "title": "Checkout v2",
       "column": "queued",
       "tasks": {
@@ -142,11 +341,13 @@
         "state": "approved",
         "by": "Sam Example",
         "at": "2026-11-11T14:00:00+10:00",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "queued",
       "reason": "waiting on add-users",
-      "badge": "queued", "step": "",
+      "badge": "queued",
+      "step": "",
       "agent": "",
       "round": 0,
       "since": "2026-11-12T09:02:11+10:00",
@@ -159,10 +360,72 @@
           "change": "add-users",
           "column": "step:build"
         }
-      ]
+      ],
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "high",
+            "source": "repo"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          }
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "",
+            "source": "default"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": []
     },
     {
       "change": "fix-tax-rounding",
+      "priority": 3000,
+      "position": 3,
       "title": "fix tax rounding",
       "column": "step:plan",
       "tasks": {
@@ -173,11 +436,13 @@
         "state": "approved",
         "by": "Sam Example",
         "at": "2026-11-12T08:30:00+10:00",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "running",
       "reason": "",
-      "badge": "plan", "step": "plan",
+      "badge": "plan",
+      "step": "plan",
       "agent": "claude",
       "round": 1,
       "since": "2026-11-12T09:10:40+10:00",
@@ -185,10 +450,72 @@
       "worktree": "/work/shop-worktrees/fix-tax-rounding",
       "machine": "studio",
       "edit_folder": "/work/shop-worktrees/fix-tax-rounding",
-      "depends_on": []
+      "depends_on": [],
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "high",
+            "source": "repo"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          }
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "",
+            "source": "default"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": []
     },
     {
       "change": "add-users",
+      "priority": 1000,
+      "position": 1,
       "title": "add users",
       "column": "step:build",
       "tasks": {
@@ -199,11 +526,13 @@
         "state": "approved",
         "by": "Sam Example",
         "at": "2026-11-11T10:00:00+10:00",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "running",
       "reason": "",
-      "badge": "build", "step": "build",
+      "badge": "build",
+      "step": "build",
       "agent": "codex",
       "round": 2,
       "since": "2026-11-12T08:41:05+10:00",
@@ -211,10 +540,75 @@
       "worktree": "/work/shop-worktrees/add-users",
       "machine": "studio",
       "edit_folder": "/work/shop-worktrees/add-users",
-      "depends_on": []
+      "depends_on": [],
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "codex",
+            "source": "change"
+          },
+          "model": {
+            "value": "",
+            "source": "default"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          },
+          "started": true
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "",
+            "source": "default"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": [
+        "studio"
+      ]
     },
     {
       "change": "image-cdn",
+      "priority": null,
+      "position": 6,
       "title": "image cdn",
       "column": "step:build",
       "tasks": {
@@ -225,11 +619,13 @@
         "state": "approved",
         "by": "Sam Example",
         "at": "2026-11-11T11:00:00+10:00",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "failed",
       "reason": "agent exited with code 1",
-      "badge": "build", "step": "build",
+      "badge": "build",
+      "step": "build",
       "agent": "claude",
       "round": 1,
       "since": "2026-11-12T07:58:00+10:00",
@@ -237,10 +633,72 @@
       "worktree": "/work/shop-worktrees/image-cdn",
       "machine": "studio",
       "edit_folder": "/work/shop-worktrees/image-cdn",
-      "depends_on": []
+      "depends_on": [],
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "high",
+            "source": "repo"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          }
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "",
+            "source": "default"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": []
     },
     {
       "change": "add-login-page",
+      "priority": 2000,
+      "position": 2,
       "title": "add login page",
       "column": "step:review",
       "tasks": {
@@ -251,11 +709,14 @@
         "state": "approved",
         "by": "Sam Example",
         "at": "2026-11-10T09:00:00+10:00",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "blocked",
       "reason": "review limit reached",
-      "badge": "review", "step": "review",
+      "needs_you": "blocked: review limit reached",
+      "badge": "review",
+      "step": "review",
       "agent": "codex",
       "round": 3,
       "since": "2026-11-12T08:15:30+10:00",
@@ -268,10 +729,75 @@
           "change": "add-users",
           "column": "step:build"
         }
+      ],
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "codex",
+            "source": "change"
+          },
+          "model": {
+            "value": "gpt-5.5",
+            "source": "change"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          }
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "gpt-5.5",
+            "source": "change"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": [
+        "studio",
+        "mini"
       ]
     },
     {
       "change": "order-emails",
+      "priority": null,
+      "position": 7,
       "title": "order emails",
       "column": "step:plan",
       "tasks": {
@@ -282,11 +808,13 @@
         "state": "stale",
         "by": "Sam Example",
         "at": "2026-11-09T12:00:00+10:00",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "stopped",
       "reason": "",
-      "badge": "plan", "step": "plan",
+      "badge": "plan",
+      "step": "plan",
       "agent": "claude",
       "round": 1,
       "since": "2026-11-11T17:45:00+10:00",
@@ -294,10 +822,72 @@
       "worktree": "/work/shop-worktrees/order-emails",
       "machine": "studio",
       "edit_folder": "/work/shop-worktrees/order-emails",
-      "depends_on": []
+      "depends_on": [],
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "high",
+            "source": "repo"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          }
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "",
+            "source": "default"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": []
     },
     {
       "change": "cart-badge",
+      "priority": null,
+      "position": 10,
       "title": "cart badge",
       "column": "ready",
       "tasks": {
@@ -308,11 +898,13 @@
         "state": "approved",
         "by": "Sam Example",
         "at": "2026-11-11T09:00:00+10:00",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "ready",
       "reason": "",
-      "badge": "", "step": "",
+      "badge": "",
+      "step": "",
       "agent": "",
       "round": 1,
       "since": "2026-11-11T15:30:00+10:00",
@@ -320,10 +912,89 @@
       "worktree": "/work/shop-worktrees/cart-badge",
       "machine": "studio",
       "edit_folder": "/work/shop-worktrees/cart-badge",
-      "depends_on": []
+      "depends_on": [],
+      "scope": {
+        "spec": "2",
+        "tasks": [
+          "2.1",
+          "2.2"
+        ]
+      },
+      "mr": {
+        "link": "https://github.com/example/shop/pull/12",
+        "number": 12,
+        "state": "open"
+      },
+      "ci": {
+        "state": "green",
+        "commit": "abc123"
+      },
+      "ship_round": 2,
+      "max_rounds": 3,
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "high",
+            "source": "repo"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          }
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "",
+            "source": "default"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": []
     },
     {
       "change": "add-sitemap",
+      "priority": null,
       "title": "add sitemap",
       "column": "done",
       "tasks": {
@@ -334,11 +1005,13 @@
         "state": "none",
         "by": "",
         "at": "",
-        "committed": true
+        "committed": true,
+        "published": true
       },
       "state": "",
       "reason": "",
-      "badge": "", "step": "",
+      "badge": "",
+      "step": "",
       "agent": "",
       "round": 0,
       "since": "",
@@ -347,7 +1020,10 @@
       "machine": "studio",
       "edit_folder": "",
       "depends_on": [],
-      "archived": "2026-11-08"
+      "archived": "2026-11-08",
+      "settings": [],
+      "machines": []
     }
-  ]
+  ],
+  "ship": "local"
 }

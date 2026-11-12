@@ -19,8 +19,9 @@
 //
 // Every line has "v" (Version). Fields may be added within a version,
 // never renamed or removed, and readers must ignore fields and kinds they
-// don't know. A line looks like:
+// don't know. Lines look like:
 //
+//	{"v":1,"time":"2026-11-12T08:59:00.456+10:00","kind":"step_started","change":"fix-login","step":"build","round":1,"agent":"codex","machine":"build-01","settings":{"agent":{"value":"codex","source":"change"},"model":{"source":"default"},"effort":{"value":"high","source":"repo"},"permissions":{"value":"edit","source":"machine"}}}
 //	{"v":1,"time":"2026-11-12T09:00:00.123+10:00","kind":"rejected","change":"fix-login","step":"review","round":1,"agent":"codex","machine":"build-01","to":"build","summary":"not yet","findings":[{"severity":"high","file":"login.go","detail":"password is logged"}]}
 //
 // # Events
@@ -36,7 +37,16 @@
 //   - queued: the run joined the queue for a slot. Every started, resumed
 //     and rerun is followed by queued, then by step_started once a slot is
 //     free (or by stopped or failed).
-//   - step_started: step's agent was started for round.
+//   - step_started: step's agent was started for round. agent is the
+//     effective agent, and settings what the step started with: its agent,
+//     model, effort and permissions (a machine permission profile's name),
+//     each as {"value": ..., "source": ...}. source is "change" (the
+//     change's tuckerbox.toml), "repo" (.tuckerbox/config.toml),
+//     "machine" (machine config) or "default"; with "default" the value is
+//     the agent's default from [agents.<name>], or absent for the agent
+//     CLI's own default (or, for permissions, no profile). A profile's
+//     flags are never recorded, only its name. Events written before
+//     settings were recorded have no settings.
 //   - step_finished: the step's agent reported a result: status (done,
 //     rejected, blocked or failed), summary, findings and exit_code. A step
 //     that ends without a result has no step_finished; a failed or stopped
@@ -52,6 +62,23 @@
 //     resume or rerun for a run whose process died without recording a
 //     final state; its time is when that was found, not when it died.
 //   - ready: the last step was done and the run's work is on its branch.
+//   - scope_started: the run starts again from its first step for a new
+//     task scope (tuckerbox run --tasks): scope is the new scope, old_scope
+//     the one it had ("" or absent for the whole change). It comes where
+//     started, resumed or rerun would, and is followed by queued.
+//
+// started, resumed and scope_started carry by = "autopilot" when tuckerbox
+// autopilot started the run; it is absent when a person did.
+//
+// started, resumed, rerun, ready and blocked carry scope, the run's task
+// scope as typed with next resolved (such as "2" or "2.1-2.4"); it is
+// absent for a run of the whole change.
+//
+// Shipping adds archived (commit), pushed (branch, commit, ship_round),
+// mr_opened (link, number), ci_finished (commit, ci, jobs), review_findings
+// (number, threads), review_replied (commit, threads), merged (commit, method)
+// and branch_deleted (branch). Every event retains the common fields above.
+// Lost claims and moved branches are blocked events with their reason.
 //
 // After a rejection that loops back, the next event is step_started for
 // the to step in the next round.
@@ -98,10 +125,20 @@ const (
 	Failed       Kind = "failed"
 	Stopped      Kind = "stopped"
 	Ready        Kind = "ready"
+	ScopeStarted Kind = "scope_started"
 )
 
 // Event is one line of history.jsonl.
 type Event struct {
+	CI        string   `json:"ci,omitempty"`
+	Jobs      []string `json:"jobs,omitempty"`
+	Threads   []string `json:"threads,omitempty"`
+	Commit    string   `json:"commit,omitempty"`
+	Branch    string   `json:"branch,omitempty"`
+	Link      string   `json:"link,omitempty"`
+	Number    int      `json:"number,omitempty"`
+	Method    string   `json:"method,omitempty"`
+	ShipRound int      `json:"ship_round,omitempty"`
 	// V is the line's format version (Version); Append sets it.
 	V int `json:"v"`
 	// Time is when the event happened, with the writer's offset.
@@ -129,6 +166,34 @@ type Event struct {
 	ExitCode *int `json:"exit_code,omitempty"`
 	// Reason says why, for blocked, failed and stopped.
 	Reason string `json:"reason,omitempty"`
+	// Scope is the run's task scope, for started, resumed, rerun, ready,
+	// blocked and scope_started; "" for the whole change.
+	Scope string `json:"scope,omitempty"`
+	// OldScope is the scope before, for scope_started.
+	OldScope string `json:"old_scope,omitempty"`
+	// Settings is what the step started with, for step_started.
+	Settings *Settings `json:"settings,omitempty"`
+	// By is "autopilot" on started, resumed and scope_started events that
+	// tuckerbox autopilot asked for; absent when a person did.
+	By string `json:"by,omitempty"`
+}
+
+// Settings is what a step started with: its effective agent, model,
+// effort and permission profile name, and where each came from. It never
+// holds a profile's flags.
+type Settings struct {
+	Agent       Setting `json:"agent"`
+	Model       Setting `json:"model"`
+	Effort      Setting `json:"effort"`
+	Permissions Setting `json:"permissions"`
+}
+
+// Setting is one effective step setting and its source: "change", "repo",
+// "machine" or "default". Value is absent when the agent's own default
+// applies (or, for permissions, no profile).
+type Setting struct {
+	Value  string `json:"value,omitempty"`
+	Source string `json:"source"`
 }
 
 // Machine returns this machine's name for Event.Machine: its host name,

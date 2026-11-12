@@ -32,6 +32,8 @@
     "on_click",
     "on_key_down",
     "on_mouse_down",
+    "on_mouse_move",
+    "on_mouse_up",
     "opacity",
     "overflow_x_scrollbar",
     "overflow_y_scrollbar",
@@ -81,7 +83,8 @@
       "run",
       "notify",
       "openOverlay",
-      "closeOverlay"
+      "closeOverlay",
+      "machines"
     ]
   }
 }

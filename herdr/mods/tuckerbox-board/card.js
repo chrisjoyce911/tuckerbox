@@ -1,14 +1,16 @@
 // One change in a dialog: proposal, tasks, approval, last validation,
-// dependencies, rounds, history and the actions its state offers. Everything
+// step settings with their pickers, dependencies, rounds, history and the
+// actions its state offers. Everything
 // comes from `tuckerbox board --json --change <id>`, read when it opens.
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, TextView } from "gpui-base";
 import { theme, props, closeOverlay } from "herdr";
 import { loadDetail } from "./data.js";
-import { normaliseCard, columnName, newestFirst, eventText, fmtLocal, taskGroups, approvalBadge, isActive, showsApproval } from "./model.js";
-import { detailActions, invocation, actionLabel, defaultStep, rerunSteps, canEdit, EDIT_FILES, ACTIONS } from "./actions.js";
+import { normaliseCard, cardAt, columnName, newestFirst, eventText, fmtLocal, taskGroups, approvalBadge, isActive, showsApproval } from "./model.js";
+import { detailActions, invocation, actionLabel, defaultStep, rerunSteps, runGroups, canEdit, EDIT_FILES, ACTIONS } from "./actions.js";
 import { perform, validate, watchEdits, changed } from "./perform.js";
 import { editOf, editNote } from "./edits.js";
+import { settingsRows, choose, canPick } from "./settings.js";
 import { button, tiny, dot, stateChip, approvalChip, progressBar, section, closeButton, note, tone } from "./ui.js";
 
 const SEVERITY_TONE = { critical: "blocked", high: "blocked", medium: "done", low: "muted", info: "dim" };
@@ -18,13 +20,15 @@ export class CardView extends View {
     const pr = props() ?? p ?? {};
     this.change = pr.change ?? "";
     this.board = pr.board ?? { columns: [], require_approval: true };
-    this.card = pr.card ? normaliseCard(pr.card, { on: pr.card.on ?? this.board.on ?? null, path: pr.card.path ?? this.board.path ?? "" }) : null;
+    this.card = pr.card ? normaliseCard(pr.card, { on: cardAt(pr.card, this.board).on, path: pr.card.path ?? this.board.path ?? "" }) : null;
     this.detail = pr.detail ?? null;   // a test harness may hand it in
     this.error = null;
     this.notice = null;
     // A harness may hand in a validation note; else it comes from edits.js.
     this.validation = pr.validation ?? null;
     this.busy = null;
+    this.picking = null;  // { step, key } whose picker is open
+    this.pending = null;  // a pick waiting for the person to confirm: { extra, confirm }
     this.step = this.card ? defaultStep(this.card, this.board) : "";
     this.handle = cx.focus_handle();
     this.handle.focus();
@@ -40,7 +44,7 @@ export class CardView extends View {
   }
 
   load(cx) {
-    const at = { cwd: this.card?.path || this.board.path || "", on: this.card?.on ?? this.board.on ?? null };
+    const at = cardAt(this.card, this.board);
     cx.spawn(async (cx) => {
       let d;
       try { d = await loadDetail(this.change, at); } catch (e) { d = { error: { message: String(e?.message ?? e) } }; }
@@ -49,7 +53,7 @@ export class CardView extends View {
         this.error = null;
         const card = d.cards.find((c) => c.change === this.change);
         if (card) this.card = { ...card, on: at.on, path: d.path || at.cwd };
-        this.board = { ...this.board, columns: d.columns, steps: d.steps, require_approval: d.require_approval, path: d.path };
+        this.board = { ...this.board, ship:d.ship,columns: d.columns, steps: d.steps, require_approval: d.require_approval, path: d.path };
         this.detail = d.detail && d.detail.change === this.change ? d.detail : null;
         if (!this.detail) this.error = `No detail for ${this.change} in what tuckerbox printed.`;
       }
@@ -82,7 +86,7 @@ export class CardView extends View {
     this.busy = action;
     cx.notify();
     cx.spawn(async (cx) => {
-      const r = await perform(inv, { dry: Boolean(this.board.fixtures) });
+      const r = await perform(inv, { dry: Boolean(this.board.fixtures),openURL:(url)=>cx.open_url(url) });
       this.busy = null;
       this.notice = r.message ? { text: r.message, kind: r.ok || r.dry ? "info" : "error" } : null;
       // A pane, tab or view opens beside the board: the dialog would cover it.
@@ -92,7 +96,62 @@ export class CardView extends View {
     });
   }
 
+  // A settings pick: run tuckerbox set at once, or ask first when it would
+  // void the approval (settings-board: Warning before voiding approval).
+  pick(step, key, value, cx) {
+    this.picking = null;
+    const r = choose(this.card, this.detail, step, key, value);
+    if (r.noop) { cx.notify(); return; }
+    if (r.confirm) { this.pending = r; cx.notify(); return; }
+    this.act("set", r.extra, cx);
+  }
+
   // ---- sections ----
+
+  // Each step's effective settings, with their source, and a picker for
+  // each key the allow-list permits; none while a run holds the change.
+  settings(c) {
+    const tm = theme();
+    const rows = settingsRows(c, this.detail);
+    const open = this.picking;
+    return v_flex().gap(4)
+      .when(!canPick(c) && rows.length > 0 && !c.archived, (el) => el.child(div().pb(2).text_size(11).text_color(tm.dim)
+        .child("Settings change only while no run is queued or running: it holds the change.")))
+      .when(c.machines.length > 0, (el) => el.child(h_flex().gap(6).text_size(11.5)
+        .child(div().text_color(tm.dim).child("machines")).child(div().text_color(tm.foreground).child(c.machines.join(", ")))))
+      .children(rows.map((r) => v_flex().id(`settings-${r.step}`).gap(3).px(6).py(4).rounded(6).bg(tm.surface)
+        .child(h_flex().items_center().gap(8).text_size(12)
+          .child(div().font_semibold().text_color(tm.foreground).child(r.step))
+          .when(r.started, (el) => el.child(div().text_size(10.5).text_color(tm.dim).child("as the running step started"))))
+        .child(h_flex().flex_wrap().gap(10).text_size(11.5).children(r.keys.map((k) => {
+          const id = `set-${r.step}-${k.key}`;
+          return h_flex().id(id).items_center().gap(4).px(4).rounded(5)
+            .child(div().text_color(tm.dim).child(k.key))
+            .child(div().text_color(k.setting?.value ? tm.foreground : tm.muted).child(k.text))
+            .child(div().text_size(10.5).text_color(k.source === "change" ? tm.accent : tm.dim).child(k.source))
+            .when(Boolean(k.options), (el) => el.cursor_pointer().hover((s) => s.bg(tm.hover))
+              .on_click((_e, cx) => { this.picking = open?.step === r.step && open?.key === k.key ? null : { step: r.step, key: k.key }; cx.notify(); })
+              .child(div().text_color(tm.dim).child("▾")));
+        })))
+        .when(Boolean(open) && open.step === r.step, (el) => {
+          const k = r.keys.find((x) => x.key === open.key);
+          if (!k?.options) return el;
+          return el.child(h_flex().flex_wrap().items_center().gap(6).pt(2).text_size(11).text_color(tm.dim)
+            .child(`${open.key}:`)
+            .children(k.options.map((o) => tiny(`pick-${r.step}-${k.key}-${o.value ?? "default"}`, o.label,
+              (_e, cx) => this.pick(r.step, k.key, o.value, cx),
+              { primary: o.value === null ? k.source !== "change" : k.source === "change" && k.setting?.value === o.value, disabled: Boolean(this.busy) }))));
+        })));
+  }
+
+  // The question before a pick that voids the approval.
+  confirmBox() {
+    const p = this.pending;
+    return h_flex().items_start().gap(8)
+      .child(div().flex_1().child(note("confirm-set", p.confirm, "error")))
+      .child(button("confirm-set-yes", "Change it", (_e, cx) => { this.pending = null; this.act("set", p.extra, cx); }, { danger: true, disabled: Boolean(this.busy) }))
+      .child(button("confirm-set-no", "Cancel", (_e, cx) => { this.pending = null; cx.notify(); }));
+  }
 
   approvalRow(c) {
     const tm = theme();
@@ -104,6 +163,8 @@ export class CardView extends View {
       .when(Boolean(a.at), (el) => el.child(div().text_color(tm.dim).child(fmtLocal(a.at))))
       .when(a.state !== "none", (el) => el.child(div().text_color(a.committed ? tm.dim : tm.blocked)
         .child(a.committed ? "committed" : "not committed: commit and push before tuckerbox run")))
+      .when(!a.published, (el) => el.child(div().text_color(tm.blocked)
+        .child("not published: it counts on this machine and is published with the next approve, unapprove or board read")))
       .when(a.state === "stale", (el) => el.child(div().text_color(tone(tm, b.tone)).child("the change was edited after approval")));
   }
 
@@ -166,6 +227,7 @@ export class CardView extends View {
         .child(h_flex().items_center().gap(8).text_size(12)
           .child(div().font_semibold().text_color(tm.foreground).child(`Round ${r.round}`))
           .when(Boolean(r.step), (el) => el.child(div().text_color(tm.dim).child(r.step)))
+          .when(Boolean(r.scope), (el) => el.child(div().text_color(tm.dim).child(`tasks ${r.scope}`)))
           .child(div().text_color(bad ? tm.blocked : r.result ? tm.working : tm.dim).child(r.result || "in progress"))
           .child(div().flex_1())
           .when(Boolean(r.ended), (el) => el.child(div().text_size(11).text_color(tm.dim).child(fmtLocal(r.ended)))))
@@ -197,7 +259,12 @@ export class CardView extends View {
     const tm = theme();
     const list = detailActions(c, this.board);
     const steps = rerunSteps(c, this.board);
+    const groups = runGroups(c, this.board, this.detail);
     return v_flex().gap(6)
+      .when(groups.length > 0, (el) => el.child(h_flex().flex_wrap().items_center().gap(6).text_size(11).text_color(tm.dim)
+        .child(this.busy === "group" ? "Run group…  starting" : ACTIONS.group.label)
+        .children(groups.map((g) => tiny(`group-${g.number}`, `${g.number}. ${g.title} (${g.ticked}/${g.total})`,
+          (_e, cx) => this.act("group", { group: g.number }, cx), { disabled: Boolean(this.busy) })))))
       .child(h_flex().flex_wrap().gap(6).items_center().children(list.map((a) => {
         const extra = a === "rerun" || a === "follow" ? { step: a === "follow" ? c.step : this.step } : {};
         return button(`act-${a}`, this.busy === a ? `${actionLabel(a, extra)}…` : actionLabel(a, extra), (_e, cx) => this.act(a, extra, cx),
@@ -223,15 +290,23 @@ export class CardView extends View {
       .child(h_flex().pt(6).items_center().gap(10).text_size(11.5)
         .child(div().px(7).py(2).rounded(5).bg(tm.raised).text_color(tm.muted).child(col))
         .when(Boolean(c.step), (el) => el.child(div().text_color(tm.muted).child(`${c.step}${c.round ? ` · round ${c.round}` : ""}`)))
+        .when(Boolean(c.scope), (el) => el.child(div().px(6).py(1).rounded(5).bg(tm.raised).text_color(tm.muted).child(`tasks ${c.scope.spec}`)))
         .when(Boolean(c.agent), (el) => el.child(div().text_color(tm.dim).child(c.agent)))
         .when(c.tasks.total > 0, (el) => el.child(progressBar(c.tasks, 70)))
         .child(div().flex_1())
         .when(Boolean(c.machine), (el) => el.child(div().text_color(tm.dim).child(c.machine))))
+      .when(Boolean(c.mr), (el)=>el.child(h_flex().items_center().gap(6).text_size(11)
+        .child(div().id(`mr-link-${c.change}`).cursor_pointer().text_color(tm.accent).hover(s=>s.underline())
+          .on_mouse_down("left",(_e,cx)=>cx.stop_propagation())
+          .on_click((_e,cx)=>{cx.stop_propagation();this.act("mr", {}, cx);}).child(`#${c.mr.number}`))
+        .when(Boolean(c.ci),(el)=>el.child(div().px(5).rounded(4).bg(tm.raised).text_color(c.ci.state==="red"?tm.blocked:c.ci.state==="green"?tm.working:tm.dim).child(`CI ${c.ci.state}`)))
+        .when(c.ship_round>0,(el)=>el.child(div().text_color(tm.dim).child(`ship round ${c.ship_round}`)))))
       .when(Boolean(c.reason), (el) => el.child(div().pt(6).text_size(12).text_color(c.state === "blocked" || c.state === "failed" ? tm.blocked : tm.muted).child(c.reason)))
       .when(showsApproval(c), (el) => el.child(div().pt(8).child(this.approvalRow(c))))
       .when(Boolean(this.validationBox(c)), (el) => el.child(div().pt(8).child(this.validationBox(c))))
       .when(Boolean(this.error), (el) => el.child(div().pt(8).child(note("error", this.error, "error"))))
       .when(Boolean(this.notice), (el) => el.child(div().pt(8).child(note("notice", this.notice.text, this.notice.kind))))
+      .when(Boolean(this.pending), (el) => el.child(div().pt(8).child(this.confirmBox())))
       .child(v_flex().id("card-scroll").flex_1().min_h(0).overflow_y_scrollbar().pr(4)
         .when(!d && !this.error, (el) => el.child(div().pt(14).text_size(12).text_color(tm.dim).child("Reading the change…")))
         .when(Boolean(d), (el) => el
@@ -240,6 +315,7 @@ export class CardView extends View {
           .child(section("Tasks", c.tasks.total ? progressBar(c.tasks, 80) : null))
           .when(isActive(c), (el) => el.child(div().pb(4).text_size(11).text_color(tm.dim).child("Ticking waits until the run stops: it holds the change.")))
           .child(d.tasks.length ? this.tasks(c) : div().text_size(12).text_color(tm.dim).child("No tasks."))
+          .when(c.settings.length > 0, (el) => el.child(section("Settings")).child(this.settings(c)))
           .when(c.depends_on.length > 0, (el) => el.child(section("Depends on")).child(this.deps(c)))
           .when(d.rounds.length > 0, (el) => el.child(section("Rounds")).child(this.rounds()))
           .when(canEdit(c), (el) => el.child(section("Edit")).child(this.editRow(c)))

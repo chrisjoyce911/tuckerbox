@@ -2,11 +2,13 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/doctor"
+	"github.com/chrisjoyce911/tuckerbox/internal/forge"
 	"github.com/chrisjoyce911/tuckerbox/internal/herdrmod"
 	"github.com/chrisjoyce911/tuckerbox/internal/version"
 )
@@ -19,7 +21,12 @@ Usage:
 Commands:
   run <change>... | --all   Run OpenSpec changes through the workflow, one
                             background process per change (--foreground:
-                            one change, attached to this terminal)
+                            one change, attached to this terminal;
+                            --tasks <scope>: one change's group 2, task 2.3,
+                            range 2.1-2.4 or next group)
+  autopilot [--once] [--dry-run]
+                            Keep starting approved changes, group by group,
+                            until Ctrl-C (runs keep going when it stops)
   board [--json] [--change <id>]  Show this repository’s change board
   status [--json]           Show every run on this machine
   logs <change> [step]      Show a step's agent output (--follow to watch)
@@ -31,8 +38,17 @@ Commands:
                             spec:<capability> in your editor, then validate
   validate <change> [--json]  Validate a change strictly
   tasks <change> tick|untick <n.m>  Tick or untick one task in tasks.md
+  set <change> <key>=<value> | --unset <key> [--json]
+                            Set or remove one of a change's own step
+                            settings (step.<step>.agent, model, effort,
+                            permissions) or machines, in its sidecar
+                            (not committed)
   approve <change>          Approve a change's text so runs may start it
   unapprove <change>        Withdraw a change's approval
+  priority [--json]         List the active changes in priority order
+  priority <change> <n|up|down|top>
+                            Move a change in the order (written in the
+                            repository checkout, not committed)
   herdr install [--keys [--key <key>]] [--drawer]
                             Install or update the board mod in the Herdr app;
                             --keys binds a key to open and hide it, --drawer
@@ -47,6 +63,8 @@ Commands:
 
 // App holds what commands need from the outside world, so tests can replace it.
 type App struct {
+	// Forge supplies a fake session for foreground shipping tests.
+	Forge          func(context.Context, *config.Config) (forge.Client, func(string) string, error)
 	Stdout, Stderr io.Writer
 	DoctorEnv      doctor.Env
 	DoctorTools    []doctor.Tool
@@ -88,6 +106,12 @@ func (a App) Run(args []string) int {
 		if line := a.herdrDoctorLine(); line != "" {
 			fmt.Fprintln(a.Stdout, line)
 		}
+		if line := a.forgeDoctorLine(); line != "" {
+			fmt.Fprintln(a.Stdout, line)
+		}
+		if line := a.approvalsDoctorLine(); line != "" {
+			fmt.Fprintln(a.Stdout, line)
+		}
 		if !doctor.OK(results) {
 			return 1
 		}
@@ -102,6 +126,8 @@ func (a App) Run(args []string) int {
 			return a.tooMany(cmd)
 		}
 		return a.initConfig()
+	case "autopilot":
+		return a.autopilot(rest)
 	case "run":
 		return a.run(rest)
 	case "engine":
@@ -126,10 +152,14 @@ func (a App) Run(args []string) int {
 		return a.validate(rest)
 	case "tasks":
 		return a.tasks(rest)
+	case "set":
+		return a.set(rest)
 	case "approve":
 		return a.approve(rest)
 	case "unapprove":
 		return a.unapprove(rest)
+	case "priority":
+		return a.priority(rest)
 	case "herdr":
 		return a.herdr(rest)
 	default:

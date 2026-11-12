@@ -11,7 +11,7 @@ const list = (v) => (Array.isArray(v) ? v : []);
 
 // A run is queued or running: a process holds the change's run lock, so edits,
 // ticks and approval changes are refused (change-edits).
-export const ACTIVE_STATES = new Set(["queued", "running"]);
+export const ACTIVE_STATES = new Set(["queued", "running", "shipping"]);
 // States that need the person: the card is flagged and counted in the header.
 export const NEEDS_YOU_STATES = new Set(["blocked", "failed"]);
 
@@ -20,7 +20,31 @@ export function isActive(card) {
 }
 
 export function needsYou(card) {
-  return NEEDS_YOU_STATES.has(card?.state);
+  return NEEDS_YOU_STATES.has(card?.state) || Boolean(card?.needs_you);
+}
+
+// Why a card needs the person: the board's needs_you (add-autopilot), else
+// its state and reason.
+export function needsYouReason(card) {
+  if (card?.needs_you) return card.needs_you;
+  return [card?.state, card?.reason].filter(Boolean).join(": ");
+}
+
+// Toasts for cards that newly need the person between two board reads
+// (add-autopilot: Toast when a card needs you). `seen` is the last read's
+// Map of change -> reason, or null before the first read, which toasts
+// nothing. Returns the toasts and the Map for the next read.
+export function newlyNeeding(seen, board) {
+  const now = new Map();
+  for (const c of board?.cards ?? []) if (needsYou(c) && !c.archived) now.set(c.change, needsYouReason(c));
+  const toasts = [];
+  if (seen) for (const [change, reason] of now) if (seen.get(change) !== reason) toasts.push({ change, reason });
+  return { toasts, seen: now };
+}
+
+// The Herdr notify() call for one toast.
+export function toastCall(t) {
+  return { title: `${t.change} needs you`, body: t.reason, level: "warning", timeout: 8000 };
 }
 
 // One card with every field the mod reads, missing ones filled in. Missing,
@@ -30,6 +54,9 @@ export function normaliseCard(c, src = {}) {
   const a = c?.approval ?? {};
   const t = c?.tasks ?? {};
   return {
+    mr: c?.mr && str(c.mr.link) ? {link:str(c.mr.link),number:num(c.mr.number),state:str(c.mr.state)} : null,
+    ci: c?.ci ? {state:str(c.ci.state),commit:str(c.ci.commit)} : null,
+    ship_round:num(c?.ship_round),max_rounds:num(c?.max_rounds),
     change: str(c?.change),
     title: str(c?.title) || str(c?.change).replace(/-/g, " "),
     column: str(c?.column),
@@ -39,6 +66,8 @@ export function normaliseCard(c, src = {}) {
       by: str(a.by),
       at: str(a.at),
       committed: a.committed !== false,
+      // approval-publish: false while this machine's approve or unapprove isn't on the remote yet.
+      published: a.published !== false,
     },
     state: str(c?.state),
     reason: str(c?.reason),
@@ -53,6 +82,15 @@ export function normaliseCard(c, src = {}) {
     edit_folder: str(c?.edit_folder),
     depends_on: list(c?.depends_on).map((d) => ({ change: str(d?.change), column: str(d?.column) })),
     archived: str(c?.archived),
+    priority: Number.isInteger(c?.priority) && c.priority > 0 ? c.priority : null,
+    position: Number.isInteger(c?.position) && c.position > 0 ? c.position : 0,
+    needs_you: str(c?.needs_you),
+    // The run's task scope (add-task-scope), or null for the whole change.
+    scope: c?.scope && str(c.scope.spec) ? { spec: str(c.scope.spec), tasks: list(c.scope.tasks).map(str) } : null,
+    // Each workflow step's effective settings with their sources
+    // (settings-board); `started` when a running step started with them.
+    settings: list(c?.settings).map(stepSettings),
+    machines: list(c?.machines).map(str).filter(Boolean),
     on: src.on ?? null,
     path: src.path ?? "",
   };
@@ -67,10 +105,13 @@ export function normaliseBoard(doc, src = {}) {
   const s = { on: src.on ?? null, path };
   return {
     version: num(doc.version),
+    ship:str(doc.ship)||"local",
     repo: str(doc.repo) || path,
     path,
     machine: str(doc.machine),
     require_approval: doc.require_approval !== false,
+    // tuckerbox autopilot for the repository on the board's machine.
+    autopilot: { running: doc.autopilot?.running === true, pid: num(doc.autopilot?.pid), started: str(doc.autopilot?.started) },
     steps: list(doc.steps).map(str),
     columns: list(doc.columns).map((c) => ({ id: str(c?.id), kind: str(c?.kind), step: str(c?.step), name: str(c?.name) || str(c?.id) })),
     cards: list(doc.cards).map((c) => normaliseCard(c, s)),
@@ -100,14 +141,37 @@ export function normaliseDetail(d) {
     tasks: list(d?.tasks).map((t) => ({ number: str(t?.number), group: str(t?.group), text: str(t?.text), checked: t?.checked === true })),
     rounds: list(d?.rounds).map((r) => ({
       round: num(r?.round), result: str(r?.result), step: str(r?.step), summary: str(r?.summary),
-      findings: list(r?.findings).map(finding), ended: str(r?.ended),
+      findings: list(r?.findings).map(finding), ended: str(r?.ended), scope: str(r?.scope),
     })),
     history: list(d?.history).map((h) => ({
       at: str(h?.at), event: str(h?.event), step: str(h?.step), round: num(h?.round), agent: str(h?.agent),
       machine: str(h?.machine), result: str(h?.result), to: str(h?.to), summary: str(h?.summary),
       reason: str(h?.reason), findings: list(h?.findings).map(finding),
+      scope: str(h?.scope), old_scope: str(h?.old_scope),
+      commit:str(h?.commit),branch:str(h?.branch),link:str(h?.link),number:num(h?.number),method:str(h?.method),ship_round:num(h?.ship_round),ci:str(h?.ci),jobs:list(h?.jobs).map(str),threads:list(h?.threads).map(str),
     })),
+    // Task groups with ticked and total counts, ship tasks left out (add-task-scope).
+    groups: list(d?.groups).map((g) => ({ number: num(g?.number), title: str(g?.title), ticked: num(g?.ticked), total: num(g?.total) })),
+    choices: normaliseChoices(d?.choices),
   };
+}
+
+const SETTING_SOURCES = ["change", "repo", "machine", "default"];
+const setting = (v) => ({ value: str(v?.value), source: SETTING_SOURCES.includes(v?.source) ? v.source : "default" });
+const stepSettings = (s) => ({
+  step: str(s?.step), agent: setting(s?.agent), model: setting(s?.model), effort: setting(s?.effort),
+  permissions: setting(s?.permissions), started: s?.started === true,
+});
+
+// Card detail's allow-list for the settings pickers (settings-board:
+// Allowed choices in board data). Empty lists: nothing may be picked.
+export function normaliseChoices(c) {
+  const models = {};
+  if (c?.models && typeof c.models === "object" && !Array.isArray(c.models)) {
+    for (const [agent, names] of Object.entries(c.models)) models[agent] = list(names).map(str).filter(Boolean);
+  }
+  const strs = (v) => list(v).map(str).filter(Boolean);
+  return { agents: strs(c?.agents), models, efforts: strs(c?.efforts), permissions: strs(c?.permissions), voids_approval: strs(c?.voids_approval) };
 }
 
 const finding = (f) => ({ severity: str(f?.severity), file: str(f?.file), detail: str(f?.detail) });
@@ -126,7 +190,82 @@ export function group(board) {
     }
     col.cards.push(card);
   }
+  // Sorted columns list their cards in priority order: by position, cards
+  // without one after them in board order (a merged card from another
+  // machine may land in a column it wasn't sorted in).
+  for (const col of cols) {
+    if (!sortedColumn(col.id)) continue;
+    col.cards = col.cards
+      .map((c, i) => ({ c, i }))
+      .sort((a, b) => (a.c.position || Infinity) - (b.c.position || Infinity) || a.i - b.i)
+      .map((x) => x.c);
+  }
   return cols;
+}
+
+// Columns listed in priority order, where a card can be dragged to
+// reorder it (board-data: Priority on the board; herdr-board: Drag to
+// reorder). Ready and Done keep their order, and cards never move between
+// columns.
+export function sortedColumn(id) {
+  return ["proposed", "approved", "in_progress", "queued"].includes(id) || String(id ?? "").startsWith("step:");
+}
+
+// The position `tuckerbox priority <change> <n>` gets when `dragged` is
+// dropped over `over` in its column's list `cards` (in board order).
+// `below` is true when the drop is on the lower half of `over`: below it
+// means above the next card, or below the column's last card. Dropping
+// above card B: B's position if the card came from below B, else one less.
+// Below the last card L: L's position if the card came from above L, else
+// one more. Null when the drop can't reorder (another column, an unsorted
+// column, no positions, or no move). A drop on the dragged card itself, on
+// either half, is no move.
+export function dropPosition(cards, dragged, over, below = false) {
+  if (dragged === over) return null;
+  const list = Array.isArray(cards) ? cards : [];
+  const d = list.find((c) => c.change === dragged);
+  let i = list.findIndex((c) => c.change === over);
+  if (!d || i < 0 || !sortedColumn(d.column) || !d.position) return null;
+  if (below) i += 1;
+  let n;
+  if (i >= list.length) {
+    const last = list[list.length - 1];
+    if (!last.position) return null;
+    n = d.position < last.position ? last.position : last.position + 1;
+  } else {
+    const b = list[i];
+    if (!b.position) return null;
+    n = d.position > b.position ? b.position : b.position - 1;
+  }
+  return n === d.position || n < 1 ? null : n;
+}
+
+// The window rectangle of the element a mouse event is over: its window
+// position less the position within the element, and the element's size.
+export function eventBox(e) {
+  const p = e?.position, l = e?.local_position;
+  if (!p || !l) return null;
+  return { x: p.x - l.x, y: p.y - l.y, w: e.bounds?.width ?? 0, h: e.bounds?.height ?? 0 };
+}
+
+// Whether a window point is inside a rectangle from eventBox.
+export function inBox(box, point) {
+  if (!box || !point) return false;
+  return point.x >= box.x && point.x <= box.x + box.w && point.y >= box.y && point.y <= box.y + box.h;
+}
+
+// The drop target still in force with the pointer at `point`: the target
+// only while the pointer is over its card, else none. A release elsewhere
+// (outside the card, another column, off the board) cancels the drag.
+export function liveDrop(drop, point) {
+  return drop && inBox(drop.box, point) ? drop : null;
+}
+
+// The card a reorder runs for: `tuckerbox priority` writes the checkout on
+// the board's machine (herdr-board: Drag to reorder), so it runs there
+// whatever machine the card's run is on.
+export function priorityCard(card, board) {
+  return { ...card, on: board?.on ?? null, path: board?.path ?? "" };
 }
 
 export function counts(board) {
@@ -154,6 +293,8 @@ export function approvalBadge(approval) {
 // The run's state in words, and its theme color name.
 export function stateLook(card) {
   switch (card?.state) {
+    case "shipping": return {word:"shipping",tone:"working"};
+    case "merged": return {word:"merged",tone:"done"};
     case "running": return { word: "running", tone: "working" };
     case "queued": return { word: "queued", tone: "dim" };
     case "blocked": return { word: "blocked", tone: "blocked" };
@@ -176,17 +317,21 @@ export const EVENT_WORDS = {
   resumed: "Resumed",
   failed: "Failed",
   ready: "Ready",
+  scope_started: "Started again",
+  archived:"Archived",pushed:"Pushed",mr_opened:"Merge request opened",ci_finished:"CI finished",review_findings:"Review findings",review_replied:"Review replied",merged:"Merged",branch_deleted:"Branch deleted",
 };
 
 // One history line in words: "Handed on build → review: summary".
 export function eventText(h) {
   const head = EVENT_WORDS[h.event] ?? h.event;
   const step = h.step ? (h.event === "handoff" && h.to ? ` ${h.step} → ${h.to}` : ` ${h.step}`) : "";
-  const tail = h.event === "step_finished" && h.result ? ` (${h.result})`
+  const tail = h.event === "ci_finished" && h.ci ? ` (${h.ci})` : h.event === "step_finished" && h.result ? ` (${h.result})`
     : h.event === "rejected" && h.findings.length ? ` with ${h.findings.length} finding${h.findings.length === 1 ? "" : "s"}`
       : "";
-  const note = h.summary || h.reason;
-  return `${head}${step}${tail}${note ? `: ${note}` : ""}`;
+  const note = h.summary || h.reason || (h.commit ? h.commit.slice(0, 12) : "");
+  const scope = h.event === "scope_started" ? ` for tasks ${h.scope || "all"} (was ${h.old_scope || "all"})`
+    : h.scope ? ` (tasks ${h.scope})` : "";
+  return `${head}${step}${tail}${scope}${note ? `: ${note}` : ""}`;
 }
 
 // History newest first. Events with the same time keep their reverse file order.
@@ -393,4 +538,87 @@ export function drawerRows(n, repo) {
   if (n?.running) rows.push({ kind: "running", count: n.running, text: "running", tone: "working" });
   if (n?.needs) rows.push({ kind: "needs", count: n.needs, text: n.needs === 1 ? "needs you" : "need you", tone: "blocked" });
   return rows;
+}
+
+// Runs from every machine (herdr-board). The board reads its own repository on
+// the space's machine (`own`, null for this computer), then asks each other
+// connected Herdr machine for the same repository by its key. These are the
+// machines to ask: every one `machines()` lists but `own`. A machine whose
+// layout is `unavailable` (an offline core) is not asked; it is unreachable.
+export function otherMachines(list, own = null) {
+  return (Array.isArray(list) ? list : [])
+    .filter((m) => m && (m.name ?? null) !== (own ?? null))
+    .map((m) => ({ name: m.name ?? null, reachable: m.layout !== "unavailable" }));
+}
+
+// A repository with no remote has its checkout path as its key, and lives on
+// one machine only (design: Matching a repository across machines).
+export function sharedRepo(board) {
+  return Boolean(board && !board.error && board.repo && board.repo !== board.path);
+}
+
+// A card from a machine whose board layout differs (board.columns is also a
+// machine setting) goes in the matching column of the board shown: a step or
+// Queued column becomes In progress, In progress becomes the step's column or Queued.
+export function fitColumn(card, columns) {
+  const ids = new Set((columns ?? []).map((c) => c.id));
+  if (ids.has(card.column)) return card.column;
+  if ((card.column.startsWith("step:") || card.column === "queued") && ids.has("in_progress")) return "in_progress";
+  if (card.column === "in_progress") {
+    // A queued run keeps the step it will run, so queued wins over the step.
+    const queued = card.state === "queued" || card.badge === "queued";
+    if (!queued && card.step && ids.has(`step:${card.step}`)) return `step:${card.step}`;
+    if (ids.has("queued")) return "queued";
+  }
+  return card.column;
+}
+
+// Where a card's commands run: its own machine and checkout. A card's `on` of
+// null means this computer, so the board's machine stands in only when the
+// card names no machine at all (a card handed in without its source).
+export function cardAt(card, board) {
+  const known = card != null && card.on !== undefined;
+  return {
+    cwd: card?.path || board?.path || "",
+    on: known ? card.on : (board?.on ?? null),
+  };
+}
+
+// How much a machine's copy of a card says: a queued or running run beats any
+// other run, which beats no run. Equal copies keep the board's own.
+function weight(card) {
+  if (isActive(card)) return 2;
+  return card.state ? 1 : 0;
+}
+
+// The board shown: the own board's columns and cards, with each other
+// machine's cards merged in by change id. `others` holds { machine, board }
+// with a normalised board or { error }. A machine without a checkout of the
+// repository (repo_not_found) adds nothing; any other failure names the
+// machine in `unreachable` and hides no card. Priority and position are the
+// board machine's: they come from its checkout and its priority order, so a
+// card taken from another machine keeps the own copy's, and a card only
+// another machine has gets none (it can't be dragged).
+export function mergeBoards(own, others = []) {
+  if (!own || own.error) return own;
+  const cards = own.cards.slice();
+  const at = new Map(cards.map((c, i) => [c.change, i]));
+  const unreachable = [];
+  for (const o of others) {
+    const b = o?.board;
+    if (!b || b.error) {
+      if (b?.error?.code === "repo_not_found") continue;
+      unreachable.push({ machine: o?.machine ?? null, message: b?.error?.message || "unreachable" });
+      continue;
+    }
+    if (b.repo !== own.repo) continue;
+    for (const c of b.cards) {
+      const i = at.get(c.change);
+      const mine = i === undefined ? null : own.cards[i] ?? null;
+      const card = { ...c, column: fitColumn(c, own.columns), priority: mine?.priority ?? null, position: mine?.position ?? 0 };
+      if (i === undefined) { at.set(card.change, cards.length); cards.push(card); }
+      else if (weight(card) > weight(cards[i])) cards[i] = card;
+    }
+  }
+  return { ...own, cards, unreachable };
 }

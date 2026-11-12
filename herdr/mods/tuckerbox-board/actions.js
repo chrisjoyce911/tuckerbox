@@ -8,6 +8,7 @@
 import { isActive } from "./model.js";
 
 export const ACTIONS = {
+  mr: {label:"Open merge request ↗"},
   start: { label: "▶ Start", primary: true },
   approve: { label: "Approve", primary: true },
   unapprove: { label: "Unapprove" },
@@ -21,13 +22,21 @@ export const ACTIONS = {
   validate: { label: "Validate" },
   tick: { label: "Tick" },
   untick: { label: "Untick" },
+  priority: { label: "Move" },
+  group: { label: "Run group…" },
+  set: { label: "Set" },
 };
 
 // Files `tuckerbox edit` opens; a spec delta is `spec:<capability>`.
 export const EDIT_FILES = ["proposal", "design", "model", "tasks"];
 
 const TASK_NUMBER = /^\d+\.\d+$/;
+const GROUP_NUMBER = /^\d+$/;
 const CHANGE_ID = /^[a-z0-9][a-z0-9-]*$/;
+const STEP_ID = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+const SET_KEYS = ["agent", "model", "effort", "permissions"];
+// A picked value: never empty, never an option, no spaces or control characters.
+const SET_VALUE = /^[^\s=,-][^\s=,]*$/;
 
 // The tuckerbox command line for an action, as argv (no shell, so nothing is
 // quoted). `extra` carries what the click adds: the step for rerun and follow,
@@ -41,6 +50,9 @@ export function commandLine(action, change, extra = {}) {
   };
   switch (action) {
     case "start": return ["tuckerbox", "run", change];
+    case "group":
+      if (!GROUP_NUMBER.test(String(extra.group ?? ""))) throw new Error("group needs a task group number like 2");
+      return ["tuckerbox", "run", change, "--tasks", String(extra.group)];
     case "approve": return ["tuckerbox", "approve", change];
     case "unapprove": return ["tuckerbox", "unapprove", change];
     case "stop": return ["tuckerbox", "stop", change];
@@ -58,6 +70,23 @@ export function commandLine(action, change, extra = {}) {
     case "untick":
       if (!TASK_NUMBER.test(extra.task ?? "")) throw new Error(`${action} needs a task number like 2.1`);
       return ["tuckerbox", "tasks", change, action, extra.task];
+    case "priority": {
+      // A drag to reorder (herdr-board: Drag to reorder).
+      const n = extra.position;
+      if (!Number.isInteger(n) || n < 1) throw new Error(`priority needs a position from 1, not ${JSON.stringify(n)}`);
+      return ["tuckerbox", "priority", change, String(n)];
+    }
+    case "set": {
+      // A settings picker (settings-board: Settings pickers); value null
+      // is "repository default".
+      if (!STEP_ID.test(extra.step ?? "")) throw new Error(`set needs a step id, not ${JSON.stringify(extra.step)}`);
+      if (!SET_KEYS.includes(extra.key)) throw new Error(`set needs agent, model, effort or permissions, not ${JSON.stringify(extra.key)}`);
+      const key = `step.${extra.step}.${extra.key}`;
+      if (extra.value == null) return ["tuckerbox", "set", change, "--unset", key];
+      if (!SET_VALUE.test(String(extra.value)) || /[\u0000-\u001f]/.test(String(extra.value))) throw new Error(`not a value to set: ${JSON.stringify(extra.value)}`);
+      return ["tuckerbox", "set", change, `${key}=${extra.value}`];
+    }
+    case "mr":
     case "proposal":
     case "worktree":
       return null;
@@ -74,8 +103,9 @@ export function commandLine(action, change, extra = {}) {
 // `on` is the card's Herdr machine (null: this computer), `cwd` its checkout there.
 export function invocation(action, card, extra = {}) {
   const argv = commandLine(action, card?.change, extra);
-  const place = action === "edit" ? "pane" : action === "follow" ? "tab" : argv ? "exec" : "view";
+  const place = action === "mr" ? "browser" : action === "edit" ? "pane" : action === "follow" ? "tab" : argv ? "exec" : "view";
   const out = { action, place, argv, change: card?.change ?? "", on: card?.on ?? null, cwd: card?.path || "" };
+  if(action==="mr"){const link=card?.mr?.link??"";if(!/^https:\/\/[^/?#\s]+(?:[/?#]|$)/.test(link) || link.split("/")[2].includes("@"))throw new Error("merge request needs an HTTPS link");out.url=link;}
   if (action === "follow") out.title = `${card?.change} ${extra.step} log`;
   if (action === "edit") out.title = `edit ${card?.change} ${extra.file}`;
   if (action === "proposal") out.file = card?.edit_folder ? `${card.edit_folder}/openspec/changes/${card.change}/proposal.md` : "";
@@ -88,13 +118,14 @@ export function invocation(action, card, extra = {}) {
 export function detailActions(card, board) {
   if (!card) return [];
   const out = [];
+  if(card.mr?.link)out.push("mr");
   const archived = card.column === "done" || Boolean(card.archived);
   if (archived) return out;
   const active = isActive(card);
   const hasRun = Boolean(card.state);
   const approvalOff = board?.require_approval === false;
   if (!hasRun && (card.column === "approved" || (approvalOff && card.column === "proposed"))) out.push("start");
-  if (card.state === "stopped" || card.state === "blocked") out.push("resume");
+  if (card.state === "stopped" || card.state === "blocked" || (card.state==="ready" && board?.ship==="mr" && card.mr?.state==="open")) out.push("resume");
   if (["stopped", "blocked", "failed", "ready"].includes(card.state) && rerunSteps(card, board).length) out.push("rerun");
   if (active) out.push("stop");
   if (card.step && ["running", "blocked", "stopped", "failed"].includes(card.state)) out.push("follow");
@@ -103,6 +134,20 @@ export function detailActions(card, board) {
   if (card.edit_folder) out.push("proposal");
   if (card.worktree) out.push("worktree");
   return out;
+}
+
+// Run group… (add-task-scope): the task groups a card's detail offers to
+// run, each { number, title, ticked, total }. It is offered where Start is,
+// and on Ready cards whose change still has unticked tasks, and lists only
+// groups with unticked tasks (ship tasks are not counted in `groups`). Empty
+// means no Run group….
+export function runGroups(card, board, detail) {
+  if (!card || !detail) return [];
+  const where = detailActions(card, board).includes("start") || card.state === "ready";
+  if (!where) return [];
+  return (Array.isArray(detail.groups) ? detail.groups : [])
+    .filter((g) => Number.isInteger(g?.number) && Number(g.ticked) < Number(g.total))
+    .map((g) => ({ number: g.number, title: String(g.title ?? ""), ticked: Number(g.ticked), total: Number(g.total) }));
 }
 
 // The one or two buttons on the card itself: what moves it on.

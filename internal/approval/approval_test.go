@@ -176,7 +176,7 @@ func TestApproveKeepsOtherKeysAndComments(t *testing.T) {
 	if !strings.HasPrefix(got, before) {
 		t.Errorf("other lines changed:\n%s", got)
 	}
-	want := "\n[approval]\nhash = \"" + a.Hash + "\"\nby = \"Sam \\\"Q\\\" Example\"\nat = 2026-11-12T09:00:00+10:00\n"
+	want := "\n[approval]\nhash = \"" + a.Hash + "\"\nsettings_hash = \"" + SettingsHash(nil) + "\"\nby = \"Sam \\\"Q\\\" Example\"\nat = 2026-11-12T09:00:00+10:00\n"
 	if !strings.HasSuffix(got, want) {
 		t.Errorf("approval table:\n%s\nwant suffix:\n%s", got, want)
 	}

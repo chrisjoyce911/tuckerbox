@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/approval"
 	"github.com/chrisjoyce911/tuckerbox/internal/testenv"
@@ -16,7 +18,7 @@ func (f *cliFixture) changeDir(id string) string {
 
 func (f *cliFixture) approvalState(dir, id string) approval.State {
 	f.t.Helper()
-	st, err := approval.Judge(approval.DirOf(dir, id))
+	st, err := currentApproval(context.Background(), dir, id)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -30,9 +32,14 @@ func (f *cliFixture) mustApprove(id string) {
 	}
 }
 
+// commit commits what changed in the checkout, if anything: approvals are
+// published on the approvals ref and change no file (approval-publish).
 func (f *cliFixture) commit(msg string) {
 	f.t.Helper()
 	testenv.Git(f.t, f.repo, "add", "-A")
+	if testenv.Git(f.t, f.repo, "status", "--porcelain") == "" {
+		return
+	}
 	testenv.Git(f.t, f.repo, "commit", "-q", "-m", msg)
 }
 
@@ -58,13 +65,17 @@ func TestApproveAndUnapprove(t *testing.T) {
 	if res.code != 0 {
 		t.Fatalf("approve: %d %s", res.code, res.stderr)
 	}
+	// approval-publish: Approve from the board: no file in the checkout
+	// changes; the approval is on the approvals ref.
 	data, _ := os.ReadFile(sidecar)
-	if !strings.HasPrefix(string(data), "# needs users first\ndepends_on = [\"add-users\"]\n") || !strings.Contains(string(data), "[approval]") ||
-		!strings.Contains(string(data), `by = "Test"`) {
-		t.Errorf("tuckerbox.toml:\n%s", data)
+	if string(data) != "# needs users first\ndepends_on = [\"add-users\"]\n" {
+		t.Errorf("tuckerbox.toml changed:\n%s", data)
 	}
-	if !strings.Contains(res.stdout, "not committed") || !strings.Contains(res.stdout, f.repo) {
+	if !strings.Contains(res.stdout, "published on refs/tuckerbox/approvals") || !strings.Contains(res.stdout, f.repo) {
 		t.Errorf("approve output: %s", res.stdout)
+	}
+	if es, err := (approval.Store{Dir: f.repo}).Entries(context.Background()); err != nil || es["add-login"].By != "Test" {
+		t.Errorf("ref entries = %+v, %v", es, err)
 	}
 	if f.approvalState(f.repo, "add-login") != approval.Approved {
 		t.Error("not approved")
@@ -74,7 +85,7 @@ func TestApproveAndUnapprove(t *testing.T) {
 	}
 
 	res = f.tb("unapprove", "add-login")
-	if res.code != 0 || !strings.Contains(res.stdout, "not committed") {
+	if res.code != 0 || !strings.Contains(res.stdout, "withdrew the approval") {
 		t.Fatalf("unapprove: %d %s %s", res.code, res.stdout, res.stderr)
 	}
 	if f.approvalState(f.repo, "add-login") != approval.None {
@@ -137,31 +148,38 @@ func TestApproveDuringRun(t *testing.T) {
 	if res.code != 0 || !strings.Contains(res.stdout, wt) {
 		t.Fatalf("approve after run: %d %s %s", res.code, res.stdout, res.stderr)
 	}
-	if f.approvalState(wt, "add-login") != approval.Approved || f.approvalState(f.repo, "add-login") != approval.None {
-		t.Error("approval not written in the worktree only")
+	if f.approvalState(wt, "add-login") != approval.Approved {
+		t.Error("worktree's text not approved")
+	}
+	if _, err := os.Stat(filepath.Join(wt, "openspec", "changes", "add-login", "tuckerbox.toml")); err == nil {
+		t.Error("approve wrote tuckerbox.toml in the worktree")
 	}
 }
 
-// Scenario: Approval not committed.
-func TestRunGateApprovalNotCommitted(t *testing.T) {
-	f := newCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}, RequireApproval: true})
+// approval-publish: an approval counts at once, with nothing to commit.
+// An old uncommitted [approval] in the checkout's sidecar still doesn't.
+func TestRunGateApprovalPublished(t *testing.T) {
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"add-login", "old"}, RequireApproval: true})
 	res := f.tb("run", "add-login")
 	if res.code == 0 || !strings.Contains(res.stderr, "base branch main has no approval") || strings.Contains(res.stderr, "checkout") {
 		t.Errorf("unapproved run: %d %s", res.code, res.stderr)
 	}
+	f.noWorktree("add-login")
 	f.mustApprove("add-login")
-	res = f.tb("run", "add-login")
+	if out := testenv.Git(t, f.repo, "status", "--porcelain"); out != "" {
+		t.Errorf("approve changed files: %s", out)
+	}
+	if res := f.tb("run", "--foreground", "add-login"); res.code != 0 {
+		t.Fatalf("published approval: %d %s", res.code, res.stderr)
+	}
+	// A sidecar approval written by an older Tuckerbox and not committed.
+	if _, err := approval.Approve(approval.DirOf(f.repo, "old"), "Old", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	res = f.tb("run", "old")
 	if res.code == 0 || !strings.Contains(res.stderr, "base branch main has no approval") ||
 		!strings.Contains(res.stderr, "the checkout "+f.repo+" has an approval") {
-		t.Errorf("uncommitted approval: %d %s", res.code, res.stderr)
-	}
-	f.noWorktree("add-login")
-	if len(f.status().Runs) != 0 {
-		t.Error("run recorded")
-	}
-	f.commit("approve add-login")
-	if res := f.tb("run", "--foreground", "add-login"); res.code != 0 {
-		t.Fatalf("committed approval: %d %s", res.code, res.stderr)
+		t.Errorf("uncommitted sidecar approval: %d %s", res.code, res.stderr)
 	}
 }
 
@@ -247,16 +265,19 @@ func TestCheckRefusesMachineRequireApproval(t *testing.T) {
 // judged on that branch, the one its worktree is made from, not the base.
 func TestRunGateRetainedBranch(t *testing.T) {
 	f := newCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}, RequireApproval: true})
-	testenv.Git(t, f.repo, "branch", "add-login") // made before any approval
+	// The branch has text that differs from what is approved.
+	testenv.Git(t, f.repo, "checkout", "-q", "-b", "add-login")
+	testenv.WriteFile(t, filepath.Join(f.changeDir("add-login"), "design.md"), "# Design\n\nOnly on the branch.\n")
+	f.commit("design on the branch")
+	testenv.Git(t, f.repo, "checkout", "-q", "main")
 	f.mustApprove("add-login")
-	f.commit("approve add-login on main")
 	for _, args := range [][]string{
 		{"run", "--foreground", "add-login"},
 		{"run", "add-login"},
 		{"engine", "--mode", "start", "add-login"}, // the engine refuses by itself
 	} {
 		res := f.tb(args...)
-		if res.code == 0 || !strings.Contains(res.stderr, "its branch add-login has no approval") {
+		if res.code == 0 || !strings.Contains(res.stderr, "approval is stale on its branch add-login") {
 			t.Errorf("%v: %d %s", args, res.code, res.stderr)
 		}
 	}
@@ -266,7 +287,7 @@ func TestRunGateRetainedBranch(t *testing.T) {
 	if len(f.status().Runs) != 0 {
 		t.Error("run recorded")
 	}
-	// With the approval on the branch, it starts from the branch.
+	// With the approved text on the branch, it starts from the branch.
 	testenv.Git(t, f.repo, "branch", "-f", "add-login", "main")
 	if res := f.tb("run", "--foreground", "add-login"); res.code != 0 {
 		t.Fatalf("approved branch: %d %s", res.code, res.stderr)

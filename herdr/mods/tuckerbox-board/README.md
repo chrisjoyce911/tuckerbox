@@ -3,7 +3,7 @@
 A Herdr app mod that shows one repository's OpenSpec changes as a kanban
 board. The columns and cards come from `tuckerbox board --json`. The mod
 stores no task state, writes no files and never moves a card by itself
-(see `openspec/changes/add-herdr-board/specs/herdr-board`).
+(see `openspec/specs/herdr-board`).
 
 ## Files
 
@@ -13,13 +13,13 @@ stores no task state, writes no files and never moves a card by itself
 | `board.js` | The board: header (repository, running and needs-you counts, Dock or Undock and Close), columns, cards |
 | `drawer.js` | The peek drawer: nothing without a Tuckerbox repository, else the repository and its running and needs-you counts; a click toggles the board window |
 | `keys.json` | The toggle key `tuckerbox herdr install --keys` merges into the person's `keys.json` |
-| `card.js` | Card detail: proposal (markdown), tasks with tick boxes, approval, last validation, dependencies, rounds with findings, history (newest first, local time), actions |
+| `card.js` | Card detail: proposal (markdown), tasks with tick boxes, approval, last validation, dependencies, rounds with findings and task scope, history (newest first, local time), step settings with their pickers, actions, and Run group… (where Start is offered, and on Ready cards with unticked tasks) |
 | `model.js` | Data rules with no Herdr imports: reading the document, grouping, counts, times, polling |
 | `actions.js` | Which actions each state offers, and `commandLine()`, the one function that builds every tuckerbox command line |
 | `perform.js` | Runs an action: `exec` of the tuckerbox command on the card's machine, or the Herdr tab, pane or view for it. With the fixtures it only says what it would run |
 | `edits.js` | Edit tracking: notes the editor's pane, validates when it closes, keeps the result in memory |
 | `proposal.js` | `view: "proposal"`: a change's proposal in a pane (Open proposal) |
-| `data.js` | Finds the space's Tuckerbox repository, runs `tuckerbox board --json` there on the space's machine, or reads the fixtures |
+| `data.js` | Finds the space's Tuckerbox repository, runs `tuckerbox board --json` there on the space's machine and `--repo` on the other machines, or reads the fixtures |
 | `ui.js` | Buttons, chips and badges, in theme colors |
 | `fixtures/` | `board.json` and `detail.json`: the board-data contract, by example |
 | `test/` | `node --test test/` (no dependencies), and `check-fixtures.mjs` |
@@ -85,6 +85,20 @@ nothing and there is no Dock; a board that already showed one says so.
 `git rev-parse --show-toplevel` and the config read are kept 30 s (10 s for
 no), so the copies look every second and follow a space switch at once.
 
+**Every machine:** after reading its own repository, the board asks each
+other machine `machines()` lists for the same repository with
+`tuckerbox board --json --repo <repo>` (8 s each, in parallel). There
+`tuckerbox` finds its checkout of that remote through its machine index, so
+a machine sees a repository once it has run one of its changes there.
+Cards merge by change id: a queued or running copy wins, then any copy with
+a run, else the board's own. Each card keeps its machine and checkout, and
+its actions and detail run there. A card from a machine with the other
+column layout goes in the matching column. A machine with no checkout adds
+nothing; one that is offline or fails is named "unreachable" in the header,
+with the error as a tooltip, and the other cards still show. A repository
+with no remote (its key is its path) is read on its own machine only. The
+drawer counts the same merged board.
+
 **Opening, hiding, docking:** `mod.open tuckerbox-board` (the toggle key,
 the drawer's click) opens the window or closes it. Dock (window header) runs
 `pane.split {direction: "right", pane, mod: "tuckerbox-board", props: {folder, machine}}`
@@ -125,6 +139,11 @@ config in this space" and offers no command (herdr-board: Space without a
 Tuckerbox config). Other codes are shown as they are.
 The command still exits non-zero with an error document.
 
+Proposed, Approved, In progress, and in the steps layout Queued and each
+step column, list their cards in priority order; Ready and Done keep their
+order (board-data: Priority on the board). The mod groups cards in the
+document's order, so it sorts nothing itself.
+
 Default `[board] columns = "compact"` shows Proposed, Approved (when required),
 In progress, Ready, Done. In progress combines queued runs and every workflow
 step, including stopped, blocked and failed runs. `columns = "steps"` shows
@@ -161,7 +180,11 @@ machine default. `board.json` demonstrates steps; `detail.json` demonstrates com
 | `machine` | string | The machine the run is on (this one, for a card without a run) |
 | `edit_folder` | string | Where `tuckerbox edit` would edit: the worktree if there is one, else the checkout. Open proposal reads `<edit_folder>/openspec/changes/<change>/proposal.md` |
 | `depends_on` | list | `[{ "change", "column" }]`: each dependency with the column id it is in (`done` when archived, `""` when unknown) |
+| `priority` | number or null | The change's `priority` in the repository checkout on this machine (committed or not), or `null` for none and for archived cards |
+| `position` | number | Its place in priority order (priority, then age, then id), from 1. Absent on archived cards. The board shows it as `#n` |
 | `archived` | string | For Done cards: the archive date (`2026-11-08`). Their approval is `none`, with blank metadata and `committed: true`; no approval or commit checks are needed |
+| `settings` | list | Each workflow step's effective settings, in workflow order: `[{ "step", "agent", "model", "effort", "permissions", "started" }]`, each key `{ "value", "source" }` with `source` one of `change`, `repo`, `machine`, `default` and `value` `""` for the agent's own default (or no permission profile). For a step a run is running, the values it started with (from `run.json`), with `started: true`; otherwise what it would run with now. `[]` for archived cards |
+| `machines` | list of strings | The change's `machines` from its `tuckerbox.toml`, in order; `[]` for none |
 | `error` | string | Optional diagnostic when this card could only be read partially (missing worktree/change folder, malformed metadata, unreadable files or obsolete run step). Other cards remain available. Retained fields may be incomplete; a run with an absent or unknown step stays visible in In progress (compact) or Queued (steps), with badge `queued` |
 
 ### Detail (`--change <id>`)
@@ -174,6 +197,7 @@ machine default. `board.json` demonstrates steps; `detail.json` demonstrates com
 | `tasks` | list | `[{ "number", "group", "text", "checked" }]` in file order: `number` is `2.1`, `group` the `## ` heading above it (`2. Sign in`) |
 | `rounds` | list | `[{ "round", "result", "step", "summary", "findings", "ended" }]`: `result` is the round's last step result (`done`, `rejected`, `blocked`, `failed`, `stopped`) or `""` while it runs; `step` is the step that gave it |
 | `history` | list | The run history, oldest first, see below. The board shows it newest first |
+| `choices` | object | The settings pickers' allow-list, from `[overrides]` in the repository config where `tuckerbox set` edits the change: `{ "agents", "models", "efforts", "permissions", "voids_approval" }`. `models` maps an agent to its allowed models; `voids_approval` lists the step keys whose change voids an approval (`agent`, `permissions`). Every list is empty when the repository has no `[overrides]` |
 
 A finding is `{ "severity", "file", "detail" }`, as agents write it
 (`critical`, `high`, `medium`, `low`, `info`; `file` may be `""`).
@@ -221,9 +245,50 @@ card says it wasn't validated since the edit and the detail offers Validate.
 | Validate | after an edit, if the pane's close can't be seen | `tuckerbox validate <id> --json` |
 | Tick, Untick | no queued or running run | `tuckerbox tasks <id> tick\|untick <n.m>` |
 | Open proposal | the card has an `edit_folder` | A pane with this mod's proposal view, read through `tuckerbox board --json --change` |
+| Reorder | drag a card within a sorted column (not into another) | `tuckerbox priority <id> <n>` |
+| Settings | a step key the allow-list permits, no queued or running run (card detail's Settings) | `tuckerbox set <id> step.<step>.<key>=<value>`; "repository default": `tuckerbox set <id> --unset step.<step>.<key>` |
 | Open worktree | the card has a `worktree` | `space.select` of a space already there, else `space.new` in the worktree on the card's machine |
+
+**Settings:** card detail lists each workflow step's agent, model, effort
+and permission profile with its source. Clicking a key the allow-list
+permits opens its picker: the allowed values (models for the step's
+effective agent) and "repository default". A pick runs `tuckerbox set` and
+shows its output, including the note that nothing was committed. On an
+approved change, a pick of `agent` or `permissions` first says it will void
+the approval and runs only on "Change it"; model and effort never ask. No
+picker is offered while a run is queued or running.
+
+**Reorder:** a press on a card and a move of more than a few pixels starts a
+drag; releasing over a card of the same sorted column drops it above that
+card (upper half) or below it (lower half). `dropPosition()` in `model.js`
+turns that into the position: above card B, B's position if the card came
+from below B, else one less; below the column's last card L, L's position if
+it came from above L, else one more. The board then runs
+`tuckerbox priority <id> <n>` on its own machine, in its own checkout (even
+for a card whose run is on another machine), and shows its error, if any;
+the card moves only when the next read shows it. Releasing anywhere but over
+the target card (outside it, in another column, off the board), or on the
+dragged card itself, moves nothing. Priority and position always come from
+the board's own machine: a card merged in from another machine keeps the own
+copy's, and a change only another machine has gets none and can't be
+dragged. If positions changed between the read and the drop, the card may
+land one place off, and the next read shows where it is.
 
 Commands run with `exec` on the card's Herdr machine, in the document's
 `path` there, with arguments as a list (no shell). A change id must be
-lowercase letters, digits and dashes, and a task number `n.m`, or the
+lowercase letters, digits and dashes, a task number `n.m` and a position a
+whole number from 1, or the
 command isn't built. Archived (Done) cards offer nothing.
+
+## Forge shipping
+
+The board document adds `ship` (`local`, `mr`, `merge`). Cards may add `mr`
+(`link`, `number`, `state`), `ci` (`state`, `commit`), `ship_round` and
+`max_rounds`. The JSON version stays 1. Shipping sits before Ready in either
+layout; waiting and fix steps remain there, along with blocked shipping runs.
+Merged runs appear in Done before the base archive is fetched. The board reads
+these fields from run.json and makes no forge requests.
+
+Open merge request uses the local browser through the GPUI click context's
+`open_url`; Resume is offered on Ready with an open MR in mr mode. No merge
+action is exposed. Shipping is active for edit, task tick and approval gates.

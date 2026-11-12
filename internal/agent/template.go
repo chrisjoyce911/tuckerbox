@@ -15,10 +15,11 @@ import (
 
 // Placeholders a command template may use.
 const (
-	// PhPrompt is a short instruction telling the agent to read the brief.
-	PhPrompt = "{prompt}"
-	// PhBrief is the absolute path of the brief file.
+	// PhBrief is the brief's text. When the command would be too long with
+	// it inline (MaxInlineCommand), see LongBrief.
 	PhBrief = "{brief}"
+	// PhBriefFile is the absolute path of the brief file.
+	PhBriefFile = "{brief_file}"
 	// PhResult is the absolute path the agent writes its result to.
 	PhResult = "{result}"
 	// PhLastMessage is the absolute path of a file, owned by Tuckerbox, where
@@ -38,7 +39,7 @@ const (
 )
 
 var known = map[string]bool{
-	PhPrompt: true, PhBrief: true, PhResult: true, PhLastMessage: true, PhWorkdir: true,
+	PhBrief: true, PhBriefFile: true, PhResult: true, PhLastMessage: true, PhWorkdir: true,
 	PhModel: true, PhEffort: true, PhPermissions: true,
 }
 
@@ -53,9 +54,35 @@ var placeholderRE = regexp.MustCompile(`\{[a-z_]+\}`)
 type Template struct {
 	Name    string
 	Command []string
+	// Long says how the agent gets a brief too long for its command line.
+	// Only the built-ins read standard input; the zero value, for every
+	// other agent, passes an instruction to read the brief file.
+	Long LongBrief
 }
 
+// LongBrief is how an agent gets a brief too long to pass inline.
+type LongBrief int
+
+const (
+	// LongBriefFile replaces {brief} with an instruction to read the brief
+	// file.
+	LongBriefFile LongBrief = iota
+	// LongBriefStdinDrop sends the brief on standard input and leaves the
+	// {brief} argument out (claude -p).
+	LongBriefStdinDrop
+	// LongBriefStdinDash sends the brief on standard input and passes "-"
+	// for the {brief} argument (codex exec -).
+	LongBriefStdinDash
+)
+
+// UsesStdin reports whether the agent reads a long brief on standard input.
+func (l LongBrief) UsesStdin() bool { return l == LongBriefStdinDrop || l == LongBriefStdinDash }
+
 // Builtin returns the built-in agent definitions, keyed by name.
+//
+// Both take the brief's text as their prompt argument. A brief too long for
+// the command line goes on standard input: claude -p with no prompt argument
+// and codex exec - both read their prompt from it.
 //
 // Claude Code needs --verbose for stream-json output in print mode; its
 // final message is the result event at the end of that output. Codex runs
@@ -67,12 +94,12 @@ type Template struct {
 func Builtin() map[string]Template {
 	return map[string]Template{
 		"claude": {Name: "claude", Command: []string{
-			"claude", "-p", PhPrompt,
+			"claude", "-p", PhBrief,
 			"--output-format", "stream-json", "--verbose",
 			"--model", PhModel,
 			"--effort", PhEffort,
 			PhPermissions,
-		}},
+		}, Long: LongBriefStdinDrop},
 		"codex": {Name: "codex", Command: []string{
 			"codex", "--no-daemon", "exec", "--json",
 			"-C", PhWorkdir,
@@ -80,8 +107,8 @@ func Builtin() map[string]Template {
 			"-c", "model_reasoning_effort=" + PhEffort,
 			"-o", PhLastMessage,
 			PhPermissions,
-			"--", PhPrompt,
-		}},
+			"--", PhBrief,
+		}, Long: LongBriefStdinDash},
 	}
 }
 
@@ -148,7 +175,8 @@ func BypassFlags(args []string) []string {
 }
 
 // Validate checks a template: a program, only known placeholders,
-// {permissions} only as a whole argument, and no permission flags.
+// {permissions} only as a whole argument, and no permission flags. Config
+// validation (tuckerbox check) also requires {brief} or {brief_file}.
 func (t Template) Validate() error {
 	name := t.Name
 	if name == "" {
@@ -179,7 +207,12 @@ func (t Template) Validate() error {
 
 // Values fills in a template's placeholders.
 type Values struct {
-	Prompt, Brief, Result, LastMessage, Workdir, Model, Effort string
+	// Brief is the brief's text, BriefFile the brief file's path.
+	Brief, BriefFile                            string
+	Result, LastMessage, Workdir, Model, Effort string
+	// BriefOnStdin expands a whole {brief} argument as the template's Long
+	// says, for a brief sent on standard input: it is left out, or "-".
+	BriefOnStdin bool
 	// Permissions are the flags of the step's machine permission profile,
 	// already resolved. Nil runs the agent with its own defaults.
 	Permissions []string
@@ -191,7 +224,7 @@ func (t Template) Expand(v Values) ([]string, error) {
 		return nil, err
 	}
 	sub := map[string]string{
-		PhPrompt: v.Prompt, PhBrief: v.Brief, PhResult: v.Result, PhLastMessage: v.LastMessage,
+		PhBrief: v.Brief, PhBriefFile: v.BriefFile, PhResult: v.Result, PhLastMessage: v.LastMessage,
 		PhWorkdir: v.Workdir, PhModel: v.Model, PhEffort: v.Effort,
 	}
 	out := make([]string, 0, len(t.Command)+len(v.Permissions))
@@ -202,19 +235,28 @@ func (t Template) Expand(v Values) ([]string, error) {
 			placed = true
 			continue
 		}
+		if a == PhBrief && v.BriefOnStdin && t.Long.UsesStdin() {
+			switch t.Long {
+			case LongBriefStdinDash:
+				out = append(out, "-")
+			case LongBriefStdinDrop:
+				// The flag before it (claude -p) stays.
+			}
+			continue
+		}
 		phs := placeholderRE.FindAllString(a, -1)
 		if len(phs) == 0 {
 			out = append(out, a)
 			continue
 		}
 		empty := false
-		s := a
 		for _, ph := range phs {
 			if sub[ph] == "" {
 				empty = true
 			}
-			s = strings.ReplaceAll(s, ph, sub[ph])
 		}
+		// One pass, so text a value brings in (the brief's) is not expanded.
+		s := placeholderRE.ReplaceAllStringFunc(a, func(ph string) string { return sub[ph] })
 		if empty {
 			// Drop the argument and the flag that introduces it.
 			if n := len(out); n > 1 && isBareFlag(t.Command[i-1]) && out[n-1] == t.Command[i-1] {

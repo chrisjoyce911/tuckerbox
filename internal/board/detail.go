@@ -10,11 +10,12 @@ import (
 	"github.com/chrisjoyce911/tuckerbox/internal/approval"
 	"github.com/chrisjoyce911/tuckerbox/internal/history"
 	"github.com/chrisjoyce911/tuckerbox/internal/runs"
+	"github.com/chrisjoyce911/tuckerbox/internal/scope"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 )
 
 func readDetail(id, folder string, state statedir.Dir, run *runs.Run) (*Detail, error) {
-	d := &Detail{Change: id, Specs: []Spec{}, Tasks: []Task{}, Rounds: []Round{}, History: []Event{}}
+	d := &Detail{Change: id, Specs: []Spec{}, Tasks: []Task{}, Rounds: []Round{}, History: []Event{}, Groups: []Group{}, Choices: noChoices()}
 	var err error
 	d.Proposal, err = readOptional(filepath.Join(folder, "proposal.md"))
 	if err != nil {
@@ -36,6 +37,7 @@ func readDetail(id, folder string, state statedir.Dir, run *runs.Run) (*Detail, 
 		return d, err
 	}
 	d.Tasks = parseTasks(tasks)
+	d.Groups = groups(tasks)
 	var events []history.Event
 	if state != "" {
 		events, err = history.Read(history.File(state))
@@ -44,10 +46,56 @@ func readDetail(id, folder string, state statedir.Dir, run *runs.Run) (*Detail, 
 		}
 	}
 	for _, e := range events {
-		d.History = append(d.History, Event{At: timestamp(e.Time), Event: string(e.Kind), Step: e.Step, Round: e.Round, Agent: e.Agent, Machine: e.Machine, Result: string(e.Status), To: e.To, Summary: e.Summary, Findings: e.Findings, Reason: e.Reason})
+		d.History = append(d.History, Event{At: timestamp(e.Time), Event: string(e.Kind), Step: e.Step, Round: e.Round, Agent: e.Agent, Machine: e.Machine, Result: string(e.Status), To: e.To, Summary: e.Summary, Findings: e.Findings, Reason: e.Reason, Scope: e.Scope, OldScope: e.OldScope, Commit: e.Commit, Branch: e.Branch, Link: e.Link, Number: e.Number, Method: e.Method, ShipRound: e.ShipRound, CI: e.CI, Jobs: e.Jobs, Threads: e.Threads})
 	}
 	d.Rounds = rounds(run, events)
+	roundScopes(d.Rounds, run, events)
 	return d, nil
+}
+
+// groups counts each task group's tasks, leaving out (ship) tasks.
+func groups(tasksMD string) []Group {
+	out := []Group{}
+	for _, g := range scope.Groups(tasksMD) {
+		bg := Group{Number: g.Number, Title: g.Title}
+		for _, t := range g.Tasks {
+			if t.Ship {
+				continue
+			}
+			bg.Total++
+			if t.Checked {
+				bg.Ticked++
+			}
+		}
+		out = append(out, bg)
+	}
+	return out
+}
+
+// roundScopes sets each round's scope: the scope of the started, resumed,
+// rerun or scope_started event before the round's first step. The run's
+// current round has the run's own scope.
+func roundScopes(rounds []Round, run *runs.Run, events []history.Event) {
+	at := map[int]string{}
+	cur := ""
+	for _, e := range events {
+		switch e.Kind {
+		case history.Started, history.Resumed, history.Rerun, history.ScopeStarted:
+			cur = e.Scope
+		case history.StepStarted:
+			if _, ok := at[e.Round]; !ok && e.Round > 0 {
+				at[e.Round] = cur
+			}
+		}
+	}
+	if run != nil && run.Round > 0 {
+		if _, ok := at[run.Round]; !ok {
+			at[run.Round] = run.Scope.SpecOrEmpty()
+		}
+	}
+	for i := range rounds {
+		rounds[i].Scope = at[rounds[i].Round]
+	}
 }
 
 // One round may finish several workflow steps; its last result wins. Retain

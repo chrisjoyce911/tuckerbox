@@ -31,6 +31,12 @@ ship = "local"
 # [board]
 # columns = "compact"
 
+# tuckerbox autopilot: "group" (default) runs each change group by group
+# with --tasks next, "change" runs whole changes; a full pass every interval.
+# [autopilot]
+# scope = "group"
+# interval = "60s"
+
 [workflow]
 # The steps, in run order. Each needs a [steps.<id>] table below.
 steps = ["plan", "build", "review"]
@@ -53,8 +59,31 @@ role = "reviewer"
 on_reject = "build"     # on "rejected", go back to this step (this step or an earlier one)
 max_rounds = 3          # then block the run (default 3; needs on_reject)
 
-# Every [steps.<id>] table must be listed in workflow.steps; one that is not
-# can never run, and tuckerbox check reports it.
+# Every step must be listed in workflow.steps or named as a shipping fix step.
+# Shipping example (set ship = "mr" above; API tokens belong in machine config):
+# [shipping]
+# remote = "origin"
+# fix_ci = "fix_ci"
+# fix_review = "fix_ci"
+# max_rounds = 3
+# merge_method = "merge"
+# archive = true
+# wait_timeout = "2h"
+# [steps.fix_ci]
+# agent = "claude"
+# role = "fixer"
+
+# What a change may pick for its own steps in
+# openspec/changes/<id>/tuckerbox.toml ([steps.<step>] agent, model, effort,
+# permissions). With no [overrides], or a key missing here, a change may not
+# override that key. Repository only: machine config may not set it.
+# permissions lists profile names; machine config still decides what each
+# profile grants and which remotes may use it.
+# [overrides]
+# agents = ["claude", "codex"]
+# models = { claude = ["opus", "sonnet"], codex = ["gpt-5.5"] }
+# efforts = ["medium", "high"]
+# permissions = ["edit", "readonly"]
 
 # Where runs put worktrees and what they call branches. {change} is the change
 # id, {repo} this folder's name. A relative path is relative to this repo.
@@ -64,15 +93,16 @@ max_rounds = 3          # then block the run (default 3; needs on_reject)
 # path = "../{repo}-worktrees/{change}"
 # branch = "{change}"
 
-# A custom agent. The command must pass {brief} and may use {workdir},
-# {model}, {effort} and {lastmessage}. The agent reports by ending with the
+# A custom agent. The command must pass {brief} (the brief's text) or
+# {brief_file} (the brief file's path, for an agent that reads its prompt from
+# a file) and may use {workdir}, {model}, {effort} and {lastmessage}. The agent reports by ending with the
 # result JSON as its final message: Tuckerbox reads it from {lastmessage}, a
 # file the CLI writes the final message to, or else from its standard output. The built-in agents (claude, codex) cannot be
 # redefined here, and permission flags (such as --dangerously-skip-permissions,
 # --permission-mode or --sandbox) may not go in the command: they belong in a
 # permission profile in machine config.
 # [agents.myagent]
-# command = ["myagent", "--prompt-file", "{brief}", "--cwd", "{workdir}"]
+# command = ["myagent", "--prompt-file", "{brief_file}", "--cwd", "{workdir}"]
 `
 
 // ErrRepoConfigExists is returned by [WriteStarter] when the repository

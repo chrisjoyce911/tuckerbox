@@ -118,11 +118,15 @@ A run that becomes `ready` SHALL mark its claim `ready`: it does not expire or c
 - **THEN** `add-login` is not placed, and the claim shows `ready` on `studio`
 
 ### Requirement: Starting the next scope
-`tuckerbox run <change> --tasks <scope>` on a ready run (see `add-task-scope`) SHALL reuse the run's claim on the machine that holds it, same epoch: one lease push turns the `ready` claim `active`, checking the fleet limit in the same compare-and-swap. When the limit is full it SHALL refuse with `fleet limit reached`, leaving the run and its claim ready. Model: `formal/fleet.tla`, `WithinFleetLimit`.
+When `tuckerbox run <change>` starts a ready run again with another scope or none (see `add-task-scope`, `Starting the next scope`), it SHALL reuse the run's claim on the machine that holds it, same epoch: one lease push turns the `ready` claim `active`, checking the fleet limit in the same compare-and-swap. When the limit is full it SHALL refuse with `fleet limit reached`, leaving the run and its claim ready. Model: `formal/fleet.tla`, `WithinFleetLimit`.
 
 #### Scenario: Next group on the same machine
 - **WHEN** `add-login`'s run with scope `1` is ready on `studio`, its claim is `ready`, and the user runs `tuckerbox run add-login --tasks 2` on `studio`
 - **THEN** the claim is `active` again with the same epoch, and the first step starts with scope `2` in the same worktree
+
+#### Scenario: Rest of the change after a scope
+- **WHEN** `add-login`'s run with scope `1` is ready on `studio` and the user runs `tuckerbox run add-login` with no `--tasks` on `studio`
+- **THEN** the claim is reused and made `active` in the same way, and the first step starts with no scope in the same worktree
 
 #### Scenario: Room taken meanwhile
 - **WHEN** `max_runs = 1`, `add-login` is ready on `studio`, `add-users` was claimed on `mini` since, and the user runs `tuckerbox run add-login --tasks 2` on `studio`
@@ -133,7 +137,7 @@ A run that becomes `ready` SHALL mark its claim `ready`: it does not expire or c
 - **THEN** it refuses with `claimed by studio` and changes no claim
 
 ### Requirement: Next scope of other runs
-A next scope of a stopped, blocked or failed run SHALL make its `parked` claim `active` as `resume` does, with no new limit check, since parked claims count already. A run started by dispatch SHALL record that in its run state, and its next scope SHALL take a machine-wide fleet slot before touching the claim; with none free it SHALL refuse with `<machine> is full` and change no claim.
+A new scope, or dropping the scope, of a stopped, blocked or failed run SHALL make its `parked` claim `active` as `resume` does, with no new limit check, since parked claims count already. A run started by dispatch SHALL record that in its run state, and any later scope or whole-change start of it SHALL take a machine-wide fleet slot before touching the claim; with none free it SHALL refuse with `<machine> is full` and change no claim.
 
 #### Scenario: Next scope after a block
 - **WHEN** `add-login`'s run with scope `1` is blocked on `studio` with a parked claim and the user runs `tuckerbox run add-login --tasks 2`

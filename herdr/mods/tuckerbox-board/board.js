@@ -3,8 +3,8 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, props, openOverlay, closeOverlay, spaces, panes, focused, run, notify } from "herdr";
-import { MOD, loadBoard, locate, candidates, fixturesFolder } from "./data.js";
-import { group, counts, columnName, due, isShown, ago, needsYou, candidatesKey, openGate, showsApproval, NO_CONFIG } from "./model.js";
+import { MOD, loadAll, locate, candidates, fixturesFolder } from "./data.js";
+import { group, counts, columnName, due, isShown, ago, needsYou, needsYouReason, newlyNeeding, toastCall, candidatesKey, openGate, showsApproval, NO_CONFIG, sortedColumn, dropPosition, eventBox, liveDrop, priorityCard } from "./model.js";
 import { cardActions, invocation, actionLabel, defaultStep, ACTIONS, dockCall, undockCalls } from "./actions.js";
 import { perform, watchEdits, changed } from "./perform.js";
 import { editOf, editNote } from "./edits.js";
@@ -80,7 +80,7 @@ export class BoardView extends View {
       try {
         // The fixtures need no repository; otherwise find this space's (herdr-board: Which repository).
         at = (await fixturesFolder()) ? { found: true, root: "", cwd: "", on: null, space: null } : await locate(self, c);
-        b = at.found ? await loadBoard(at) : { error: { code: "no_config", message: "" } };
+        b = at.found ? await loadAll(at) : { error: { code: "no_config", message: "" } };
       } catch (e) { b = { error: { code: "failed", message: String(e?.message ?? e) } }; }
       this.loading.delete(key);
       if (key !== this.want) return; // a read for folders no longer shown: dropped
@@ -99,6 +99,12 @@ export class BoardView extends View {
       // Keep the last good board of the same repository on screen when a later read fails.
       if (b.error && b.error.code !== "no_config" && same && this.board && !this.board.error) this.readError = b.error.message;
       else { this.board = b; this.readError = null; }
+      if (!b.error) {
+        // A toast for each card that newly needs you; none at the first read.
+        const n = newlyNeeding(same ? this.needing : null, b);
+        this.needing = n.seen;
+        for (const t of n.toasts) notify(toastCall(t));
+      }
       cx.notify();
     });
   }
@@ -113,7 +119,7 @@ export class BoardView extends View {
     this.busy = `${action}-${card?.change ?? ""}`;
     cx.notify();
     cx.spawn(async (cx) => {
-      const r = await perform(inv, { dry: Boolean(this.board?.fixtures) });
+      const r = await perform(inv, { dry: Boolean(this.board?.fixtures),openURL:(url)=>cx.open_url(url) });
       this.busy = null;
       this.notice = r.message ? { text: r.message, kind: r.ok || r.dry ? "info" : "error", change: card?.change ?? "" } : null;
       if (r.ok) this.last = 0; // read again at once: the card moves when tuckerbox says so
@@ -123,7 +129,7 @@ export class BoardView extends View {
 
   boardProps() {
     const b = this.board ?? {};
-    return { repo: b.repo, path: b.path, require_approval: b.require_approval, columns: b.columns, steps: b.steps, on: b.on, fixtures: Boolean(b.fixtures) };
+    return { ship:b.ship,repo: b.repo, path: b.path, require_approval: b.require_approval, columns: b.columns, steps: b.steps, on: b.on, fixtures: Boolean(b.fixtures) };
   }
 
   // Dock: this window becomes a pane beside the shown space's terminals,
@@ -158,6 +164,37 @@ export class BoardView extends View {
     });
   }
 
+  // A release over a card of the same sorted column runs tuckerbox priority
+  // <change> <n> on the board's machine, in its checkout, whichever machine
+  // the card's run is on; the card moves when the next read shows it. A
+  // release anywhere else cancels the drag.
+  endDrag(e, cx) {
+    const { drag, dragColumn } = this;
+    const drop = liveDrop(this.drop, e?.position);
+    this.press = null; this.drag = null; this.drop = null; this.dragColumn = null;
+    if (!drag) return;
+    this.dragged = true; // the release is not a click on the card
+    cx.notify();
+    if (!drop || !this.board || this.board.error) return;
+    const col = group(this.board).find((c) => c.id === dragColumn);
+    const n = dropPosition(col?.cards ?? [], drag, drop.over, drop.below);
+    const card = col?.cards.find((c) => c.change === drag);
+    if (n && card) this.act("priority", priorityCard(card, this.board), { position: n }, cx);
+  }
+
+  // The pointer moved while dragging: over a card of the dragged card's
+  // column it becomes the target; anywhere else the old target goes.
+  dragMove(e, cx, c) {
+    if (!this.drag) return;
+    if (c && this.dragColumn === c.column) {
+      const below = e.local_position.y > (e.bounds?.height ?? 0) / 2;
+      if (this.drop?.over !== c.change || this.drop?.below !== below) { this.drop = { over: c.change, below, box: eventBox(e) }; cx.notify(); }
+      else this.drop.box = eventBox(e);
+      return;
+    }
+    if (this.drop && !liveDrop(this.drop, e.position)) { this.drop = null; cx.notify(); }
+  }
+
   // ---- drawing ----
 
   card(c) {
@@ -166,27 +203,46 @@ export class BoardView extends View {
     const flag = needsYou(c);
     const acts = cardActions(c, b);
     const step = defaultStep(c, b);
+    const dragging = this.drag === c.change;
+    const target = this.drop?.over === c.change ? this.drop : null;
     return v_flex().id(`card-${c.change}`).w_full().p(10).gap(7).rounded(8).flex_none()
-      .bg(tm.surface).border_1().border_color(flag ? tm.blocked : tm.border)
+      .bg(tm.surface).border_1().border_color(target || dragging ? tm.accent : flag ? tm.blocked : tm.border)
+      .when(dragging, (el) => el.opacity(0.4))
+      .when(Boolean(target), (el) => (target.below ? el.border_b(3) : el.border_t(3)))
       .cursor_pointer().hover((s) => s.border_color(flag ? tm.blocked : tm.accent))
-      .on_click(() => this.openCard(c))
+      // Drag to reorder (herdr-board: Drag to reorder): a press starts it
+      // once the pointer moves; the card under the pointer, and which half of
+      // it, says where it lands.
+      .when(sortedColumn(c.column) && c.position > 0, (el) => el
+        .on_mouse_down("left", (e) => { this.press = { change: c.change, column: c.column, x: e.position.x, y: e.position.y }; })
+        .on_mouse_move((e, cx) => this.dragMove(e, cx, c)))
+      .on_click(() => { if (!this.dragged) this.openCard(c); this.dragged = false; })
       .child(h_flex().items_start().gap(8)
         .child(v_flex().flex_1().min_w(0)
           .child(div().text_size(12.5).font_medium().text_color(tm.foreground).child(c.title))
           .when(c.title !== c.change, (el) => el.child(div().text_size(10.5).text_color(tm.dim).truncate().child(c.change))))
+        .when(c.position > 0, (el) => el.child(div().text_size(10.5).text_color(tm.dim).tooltip(c.priority ? `priority ${c.priority}` : "no priority set").child(`#${c.position}`)))
         .child(stateChip(c) ?? div()))
       .child(h_flex().items_center().gap(6)
         .when(showsApproval(c), (el) => el.child(approvalChip(c.approval, { short: true }))
-          .when(!c.approval.committed && c.approval.state !== "none", (el) => el.child(div().text_size(10.5).text_color(tm.blocked).child("not committed"))))
+          .when(!c.approval.committed && c.approval.state !== "none", (el) => el.child(div().text_size(10.5).text_color(tm.blocked).child("not committed")))
+          .when(!c.approval.published, (el) => el.child(div().text_size(10.5).text_color(tm.blocked).child("not published"))))
         .child(div().flex_1())
         .when(c.tasks.total > 0, (el) => el.child(progressBar(c.tasks, 46))))
-      .when(Boolean(c.badge || c.step || c.agent), (el) => el.child(h_flex().items_center().gap(6).text_size(10.5).text_color(tm.dim)
+      .when(Boolean(c.badge || c.step || c.agent || c.scope), (el) => el.child(h_flex().items_center().gap(6).text_size(10.5).text_color(tm.dim)
         .when(Boolean(c.badge || c.step), (el) => el.child(div().px(5).rounded(4).bg(tm.raised).text_color(tm.muted).child(c.badge || c.step)))
         .when(c.round > 1, (el) => el.child(div().child(`round ${c.round}`)))
+        .when(Boolean(c.scope), (el) => el.child(div().child(`tasks ${c.scope.spec}`)))
         .when(Boolean(c.agent), (el) => el.child(div().child("·")).child(div().child(c.agent)))
         .child(div().flex_1())
         .when(Boolean(c.machine), (el) => el.child(div().truncate().max_w(90).child(c.machine)))))
-      .when(Boolean(c.reason), (el) => el.child(div().text_size(11).text_color(flag ? tm.blocked : tm.dim).child(c.reason)))
+      .when(Boolean(c.mr), (el)=>el.child(h_flex().items_center().gap(6).text_size(11)
+        .child(div().id(`mr-link-${c.change}`).cursor_pointer().text_color(tm.accent).hover(s=>s.underline())
+          .on_mouse_down("left",(_e,cx)=>cx.stop_propagation())
+          .on_click((_e,cx)=>{cx.stop_propagation();this.act("mr", c, {}, cx);}).child(`#${c.mr.number}`))
+        .when(Boolean(c.ci),(el)=>el.child(div().px(5).rounded(4).bg(tm.raised).text_color(c.ci.state==="red"?tm.blocked:c.ci.state==="green"?tm.working:tm.dim).child(`CI ${c.ci.state}`)))
+        .when(c.ship_round>0,(el)=>el.child(div().text_color(tm.dim).child(`ship round ${c.ship_round}`)))))
+      .when(Boolean(c.reason || c.needs_you), (el) => el.child(div().text_size(11).text_color(flag ? tm.blocked : tm.dim).child(c.needs_you && c.state !== "blocked" && c.state !== "failed" ? needsYouReason(c) : c.reason)))
       .when(c.depends_on.length > 0 && !c.archived, (el) => el.child(div().text_size(11).text_color(tm.dim)
         .child(`after ${c.depends_on.map((d) => `${d.change} (${columnName(b, d.column)})`).join(", ")}`)))
       .when(Boolean(c.branch), (el) => el.child(div().text_size(10.5).text_color(tm.dim).truncate().child(`⎇ ${c.branch}`)))
@@ -230,8 +286,14 @@ export class BoardView extends View {
       .when(n.needs > 0, (el) => el.child(h_flex().items_center().gap(5).text_size(11.5).text_color(tm.blocked)
         .child(dot(tm.blocked, 8)).child(`${n.needs} need${n.needs === 1 ? "s" : ""} you`)))
       .when(Boolean(b && !b.require_approval), (el) => el.child(div().text_size(11).text_color(tm.dim).child("approval off")))
+      .when(Boolean(b && !b.fixtures), (el) => el.child(div().text_size(11).text_color(b.autopilot?.running ? tm.working : tm.dim)
+        .tooltip(b.autopilot?.running ? `tuckerbox autopilot, pid ${b.autopilot.pid}` : "tuckerbox autopilot is not running for this repository here")
+        .child(b.autopilot?.running ? "autopilot on" : "autopilot off")))
       .when(Boolean(this.readError), (el) => el.child(div().text_size(11).text_color(tm.blocked).truncate().max_w(260).tooltip(this.readError).child("last read failed")))
       .child(div().flex_1())
+      // Machines that couldn't be asked: named, their cards missing, the others shown.
+      .children((b?.unreachable ?? []).map((u, i) => div().id(`unreachable-${i}`).text_size(11).text_color(tm.blocked)
+        .tooltip(u.message).child(`${u.machine ?? "this computer"} unreachable`)))
       .when(Boolean(b?.machine), (el) => el.child(div().text_size(11).text_color(tm.dim).child(b.machine)))
       // Dock only with a board to show: no Tuckerbox config, no Dock.
       .when(Boolean(overlay && b && !b.fixtures), (el) => el.child(tiny("dock", "Dock ⇥", (_e, cx) => this.dock(cx), { tooltip: "Show the board as a pane beside the terminals" })))
@@ -269,6 +331,14 @@ export class BoardView extends View {
     this.self();
     return v_flex().id("tuckerbox-board").size_full().bg(tm.canvas).text_color(tm.foreground)
       .track_focus(this.handle)
+      .on_mouse_move((e, cx) => {
+        if (this.drag) { this.dragMove(e, cx, null); return; }
+        if (!this.press) return;
+        if (Math.hypot(e.position.x - this.press.x, e.position.y - this.press.y) > 6) {
+          this.drag = this.press.change; this.dragColumn = this.press.column; this.drop = null; cx.notify();
+        }
+      })
+      .on_mouse_up("left", (e, cx) => this.endDrag(e, cx))
       .on_key_down((e, cx) => { if (e.key === "escape" && props()?.overlay) { closeOverlay(props().overlay); cx.stop_propagation(); } })
       .child(this.header())
       .when(Boolean(this.notice), (el) => el.child(h_flex().px(14).pt(8).gap(8).items_center()

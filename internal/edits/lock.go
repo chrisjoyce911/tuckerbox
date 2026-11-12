@@ -65,7 +65,7 @@ func (e *ActiveRunError) Unwrap() error { return runs.ErrLocked }
 // repository checkout (p.State == "") there is no lock to take: fn just
 // runs.
 //
-// tuckerbox edit (while the editor is open), tasks, approve and unapprove
+// tuckerbox edit (while the editor is open), tasks, set, approve and unapprove
 // call it. Its signature is kept stable for them.
 func WithChangeLock(ctx context.Context, p Place, command string, fn func() error) error {
 	if p.State == "" {

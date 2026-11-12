@@ -18,12 +18,12 @@ func (e *Engine) event(ws Workspace, rs *Run, ev history.Event) {
 	if ev.Round == 0 {
 		ev.Round = rs.Round
 	}
+	if ev.Agent == "" && ev.Step != "" && rs.StepSettings != nil && rs.StepSettings.Step == ev.Step {
+		// The agent the step started with, which a change may override.
+		ev.Agent = rs.StepSettings.Settings.Agent.Value
+	}
 	if ev.Agent == "" && ev.Step != "" {
-		for _, s := range e.Config.Steps {
-			if s.ID == ev.Step {
-				ev.Agent = s.Agent
-			}
-		}
+		ev.Agent = e.plannedAgent(ws, rs.Change, ev.Step)
 	}
 	if e.machine == "" {
 		e.machine = history.Machine()
@@ -38,10 +38,11 @@ func (e *Engine) event(ws Workspace, rs *Run, ev history.Event) {
 // resumed or rerun. A run whose previous process died while queued or
 // running (it left no final state) first gets the stopped event it never
 // wrote. Called once the run is saved as queued, then queued itself.
-func (e *Engine) startEvents(ws Workspace, rs *Run, mode Mode, prev Run) {
+func (e *Engine) startEvents(ws Workspace, rs *Run, mode Mode, prev Run, by string) {
 	kind := history.Started
+	sc := rs.Scope.SpecOrEmpty()
 	if prev.Change != "" {
-		if prev.State == Queued || prev.State == Running {
+		if prev.State == Queued || prev.State == Running || prev.State == Shipping {
 			e.event(ws, rs, history.Event{Kind: history.Stopped, Step: prev.Step, Round: prev.Round, Reason: Crashed})
 		}
 		kind = history.Resumed
@@ -51,7 +52,12 @@ func (e *Engine) startEvents(ws Workspace, rs *Run, mode Mode, prev Run) {
 	} else if mode == Rerun {
 		kind = history.Rerun
 	}
-	e.event(ws, rs, history.Event{Kind: kind})
+	ev := history.Event{Kind: kind, Scope: sc}
+	if prev.Change != "" && mode == Start && prev.Scope.SpecOrEmpty() != sc {
+		ev = history.Event{Kind: history.ScopeStarted, Scope: sc, OldScope: prev.Scope.SpecOrEmpty()}
+	}
+	ev.By = by
+	e.event(ws, rs, ev)
 	e.event(ws, rs, history.Event{Kind: history.Queued})
 }
 
@@ -72,6 +78,8 @@ func finishKind(s State) history.Kind {
 		return history.Stopped
 	case Ready:
 		return history.Ready
+	case Merged:
+		return history.Kind("merged")
 	default:
 		return history.Failed
 	}

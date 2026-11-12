@@ -4,9 +4,7 @@ Tuckerbox runs [OpenSpec](https://github.com/Fission-AI/OpenSpec) changes throug
 
 It's a single Go binary for macOS, Linux and Windows. It works on its own, and it fits into [Herdr](https://herdr.dev), where it shows a board of your changes and their agents.
 
-> **Status:** early development. Local runs work: `run`, `status`, `logs`, `stop`, `resume` and `rerun`, as well as `version`, `doctor`, `init` and `check`. Shipping (pushing, MRs) and Herdr come later. The plan is in [`openspec/changes/`](openspec/changes/):
-> - [`add-core-runner`](openspec/changes/add-core-runner/proposal.md): per-repo workflows, local runs, agents, status
-> - [`add-herdr-board`](openspec/changes/add-herdr-board/proposal.md): run history, dependencies, and a kanban board in Herdr
+> **Status:** early development. Local runs, the Herdr board and GitHub/GitLab shipping are available. The active plans and remaining integration work are in [`openspec/changes/`](openspec/changes/).
 
 ## Install
 
@@ -45,9 +43,11 @@ Run changes from inside the repository:
 tuckerbox run fix-login            # one change, in the background
 tuckerbox run --all                # every valid active change
 tuckerbox run --foreground fix-login   # one change, attached to this terminal
+tuckerbox run fix-login --tasks 2  # only task group 2 (or 2.3, 2.1-2.4, next)
 tuckerbox status                   # every run on this machine (--json for dashboards)
 tuckerbox board                    # this repository’s changes, approval and workflow columns
 tuckerbox board --change fix-login --json  # board plus proposal, tasks, rounds and history
+tuckerbox board --json --repo github.com/you/shop  # this machine's checkout of that repository, from anywhere
 tuckerbox logs fix-login --follow  # watch the running step's agent
 tuckerbox stop fix-login           # stop the agent; the run is marked stopped
 tuckerbox resume fix-login         # continue a stopped or blocked run
@@ -65,9 +65,50 @@ tuckerbox validate fix-login         # openspec validate --strict (--json for to
 
 They work in the change's worktree if it has one on this machine, else in the checkout, and refuse while its run is queued or running. They never commit. The editor is `editor` in machine config, else `$VISUAL`, else `$EDITOR`; a GUI editor must wait for the file to close (`code --wait`). `edit` validates strictly when the editor exits.
 
-Each change gets its own worktree (by default `../<repo>-worktrees/<change>`) and branch, made from the remote's default branch after a fetch. Existing worktrees are reused as they are: Tuckerbox never resets, cleans or stashes them. At most `max_parallel` changes run at once; the rest are `queued` and start in the order given. With `ship = "local"`, a run that finishes commits what is left on its branch and becomes `ready`; nothing is pushed. A change must pass `openspec validate` and be committed on the base branch.
+A change must be approved before `tuckerbox run` starts it:
 
-A change can wait for others: list them in `openspec/changes/<change>/tuckerbox.toml` as `depends_on = ["add-users"]`. Its run stays `queued (waiting on add-users (build))`, without taking a slot, until each dependency is `ready` on this machine or archived. `tuckerbox check` reports dependencies that name no active or archived change, and cycles.
+```sh
+tuckerbox approve fix-login     # validates strictly, then publishes the approval
+tuckerbox run fix-login         # on this machine or any other, straight away
+tuckerbox unapprove fix-login   # withdraw it, also published at once
+```
+
+`approve` records a hash of the proposal, design, model, tasks and spec deltas, your git `user.name` and the time as `approvals/<change>.toml` in a commit on `refs/tuckerbox/approvals`, and pushes it to `origin` at once (with `--force-with-lease`, retrying if someone else approved at the same moment). There is nothing to commit: the approval counts on every machine as soon as it is pushed. The ref isn't a branch, so CI doesn't run on it. Offline, the approval counts on this machine, the board marks it `not published`, and the next approve, unapprove or board read publishes it; `tuckerbox doctor` says whether the ref can be pushed. An approval written by an older Tuckerbox as `[approval]` in the change's `tuckerbox.toml` still counts when the ref has nothing for that change. The run judges the hash against the files it will start from: the change's worktree if it has one, else its branch or the base branch after a fetch. Ticking tasks keeps the approval; any other edit to those files makes it stale on every machine, and the change needs approving again. `tuckerbox run --all` skips changes that aren't approved and lists them. The approval also records `settings_hash`, a hash of the change's own `agent` and `permissions` step overrides (see Change settings below): changing either makes the approval stale too, and the refusal names the override. Changing a `model`, `effort` or `machines` keeps the approval, and an approval with no `settings_hash` (from an older Tuckerbox) counts as approving no overrides. Resume and re-run don't check the text again, since a step may rewrite the design, but with approval required they refuse when an `agent` or `permissions` override changed since approval, naming it; approve the change again or set the override back. To turn the gate off for a repository, set it in the repository config (machine config may not):
+
+```toml
+require_approval = false
+```
+
+Each change gets its own worktree (by default `../<repo>-worktrees/<change>`) and branch, made from the remote's default branch after a fetch. Existing worktrees are reused as they are: Tuckerbox never resets, cleans or stashes them. At most `max_parallel` changes run at once; the rest are `queued` and start in admission order (see Priority below), which without priorities is the order requested. With `ship = "local"`, a run that finishes commits what is left on its branch and becomes `ready`; nothing is pushed. A change must pass `openspec validate` and be committed on the base branch.
+
+A run can take part of a change: `--tasks 2` runs task group 2, `--tasks 2.3` one task, `--tasks 2.1-2.4` a range in tasks.md order, and `--tasks next` the first group with an unticked task. The brief tells every step to work on, tick and judge only those tasks, and the run is `ready` only when they are all ticked (else `blocked`, naming them). The scope belongs to the change's one run, in the same worktree and branch: `resume` and `rerun` keep it, and `run --tasks` with another scope on a ready, stopped, blocked or failed run starts it again from the first step (`run` without `--tasks` means the whole change). Approval covers the whole change, not the scope: each new scope passes the run gate again, so ticking tasks keeps it approved but any other edit to the change during a scope must be approved before the next. A task whose text starts with `(ship)`, such as archiving the change, is done by shipping: it is never in a scope and doesn't count toward the change being complete. A task only CI can do starts with `(ci)`, such as `- [ ] 6.2 (ci) Go tests pass on Linux, macOS and Windows CI`; text that says it passes (or is green) on or in CI counts without the marker. With `ship = "mr"` or `"merge"` a CI task doesn't hold a scope or the change back: shipping ticks it, in a commit `Tick <change> task 6.2` pushed to the merge request, once CI is green there (and waits for CI on that commit before merging). In local mode it counts like any other task, and the step brief doesn't tell builders to leave it unticked. If a step archives the change on its branch, the run reads the archived tasks.md, counts the change as complete, and shipping doesn't archive it again.
+
+To keep approved changes moving without starting each run by hand, run autopilot in a terminal or a Herdr pane:
+
+```sh
+tuckerbox autopilot            # until Ctrl-C; --once for one pass, --dry-run to see what it would start
+```
+
+It is not a service: it runs in the foreground for the repository it is started in, one per repository on a machine, and the runs it starts keep going when you stop it. On each pass (every `[autopilot] interval`, 60 s by default, and whenever a run ends) it fetches the base branch and starts approved changes whose dependencies are met while `max_parallel` has room, group by group with `--tasks next` (`[autopilot] scope = "change"` runs whole changes). Approval is the one gate it keeps: it refuses to run with `require_approval = false`, never approves, edits or ticks, and never resumes a blocked or stopped run or re-runs a failed one. A run whose process died is resumed once per crash streak (counted from history since the run's last step result or a person's action). Every start or resume carries the state and time it saw, and the engine does nothing if the run moved on meanwhile. Runs that need you are printed once, flagged on the board (`needs_you`), and toasted by the Herdr board mod; the board header shows whether autopilot is on.
+
+A change can wait for others: list them in `openspec/changes/<change>/tuckerbox.toml` as `depends_on = ["add-users"]`. Its run stays `queued (waiting on add-users (build))`, without taking a slot, until each dependency is `ready` on this machine or archived. A dependency run with a task scope counts only once a run of it is ready with the whole change ticked: `queued (waiting on add-users (ready, tasks 1))`. `tuckerbox check` reports dependencies that name no active or archived change, and cycles.
+
+### Priority
+
+You decide which change goes next by ranking them:
+
+```sh
+tuckerbox priority                 # the active changes in priority order (--json for tools)
+tuckerbox priority add-login top   # move a change to position 1
+tuckerbox priority add-login 3     # to position 3 (past the end means last)
+tuckerbox priority add-login up    # one place up (or down)
+```
+
+The rank is `priority = <n>` in `openspec/changes/<change>/tuckerbox.toml`: lower first, and a change without one comes after every ranked change. People use positions; Tuckerbox picks the numbers, with gaps of 1000, so a move usually rewrites one line of one file, and renumbers the ranked changes only when no gap is left. `tuckerbox check` reports a `priority` that isn't a positive integer. On the board, drag a card within its column to reorder it.
+
+`priority` writes the repository checkout on this machine, never a change's worktree, even while the change is queued or running, and never commits. Queued runs on this machine follow the new order at once; commit and push the files for other machines to see it. `tuckerbox.toml` isn't part of the approval hash, so a priority never makes an approval stale. `priority`, `approve`, `unapprove` and `set` take a short repository-wide lock around each rewrite, so they never lose each other's edits.
+
+When a slot frees, the queued run first in admission order takes it: lowest priority first, where a change counts as urgent as the most urgent active change that depends on it, then the one requested first. Age doesn't count, so with no priorities the order is the order requested. `tuckerbox run --all` requests changes oldest first and starts them in that order. A higher priority never stops a running change; it only decides who takes the next free slot. Edits to `priority` made outside Tuckerbox (an editor, `git pull`) count from the next admission.
 
 Run state is kept in the worktree's git directory (`$(git rev-parse --git-dir)/tuckerbox/`), never in the tree. Next to the current state (`run.json`), each run appends its events (started, steps, hand-offs, rejections with findings, stopped, resumed, ready) to `history.jsonl` there; the format is documented in [`internal/history`](internal/history/history.go). `status` finds runs through a machine index in `$XDG_STATE_HOME/tuckerbox/`, `~/.local/state/tuckerbox/` on macOS and Linux, or `%LocalAppData%\tuckerbox\` on Windows.
 
@@ -81,6 +122,49 @@ args = { claude = ["--permission-mode", "acceptEdits"] }
 ```
 
 A step in the repository then asks for it by name with `permissions = "edit"`.
+
+A change can pick its own agent, model, effort and permission profile per step, in `openspec/changes/<change>/tuckerbox.toml`, within limits the repository sets. The step tables use the same names as repository config, and may hold only those four keys. `machines` lists the machines the change prefers, in order; it has no effect in solo mode:
+
+```toml
+# openspec/changes/add-login/tuckerbox.toml
+machines = ["studio", "mini"]
+
+[steps.build]
+agent = "codex"
+model = "gpt-5.5"
+effort = "high"
+
+[steps.review]
+permissions = "readonly"
+```
+
+The repository decides what a change may pick with `[overrides]` in `.tuckerbox/config.toml` (machine config may not set it, so every machine allows the same). Nothing is allowed by default: with no `[overrides]`, or a key missing from it, a change may not override that key. Models are listed per agent, because a model name only means something to one CLI. `permissions` lists profile names only: the machine's `[permissions.<name>]` still decides the flags and which remotes may use it, so a change can't grant itself anything.
+
+```toml
+[overrides]
+agents = ["claude", "codex"]
+models = { claude = ["opus", "sonnet"], codex = ["gpt-5.5"] }
+efforts = ["medium", "high"]
+permissions = ["edit", "readonly"]
+```
+
+`tuckerbox check` reports, for each active change, a step the repository doesn't define in `[steps]`, a key other than the four (agent arguments and flags belong in a machine profile), a value the allow-list doesn't hold (with the allowed values; a model is judged against the step's agent after the change's own `agent`), and a profile this machine doesn't define or grant for the step's agent.
+
+Each step runs with, per key, the change's value, else the repository step's, else the machine step's, else the agent's default. When a change picks another agent for a step, a model or effort the config set for the old agent is dropped: the new agent gets the change's value or its own default. `run`, `resume` and `rerun` check the overrides again against the `[overrides]` allow-list, reading both the change's settings and `.tuckerbox/config.toml` from the files the run starts from (the worktree, else the commit a new worktree is made at), not the checkout you run from, and refuse before making a worktree or changing the run, so narrowing `[overrides]` stops changes that relied on it. A run reads the change's settings and the allow-list in its worktree as each step starts, and records what the step started with, and where each value came from (`change`, `repo`, `machine` or `default`), in `run.json` and the step's `step_started` history event; a profile is recorded by name, never its flags.
+
+`tuckerbox set` changes one of these settings without opening the file:
+
+```sh
+tuckerbox set add-login step.build.agent=codex
+tuckerbox set add-login step.review.effort=high
+tuckerbox set add-login machines=studio,mini      # comma-separated, in order
+tuckerbox set add-login --unset step.build.model  # back to the repository's value
+tuckerbox set add-login --json step.build.model=gpt-5.5   # result as JSON, for the board
+```
+
+Keys are `step.<step>.agent`, `step.<step>.model`, `step.<step>.effort`, `step.<step>.permissions` and `machines`. A step value is checked against `[overrides]` first, in the `.tuckerbox/config.toml` next to the sidecar it writes, and refused with the allowed values; a profile this machine doesn't grant is only a warning, because the change may run elsewhere. `--unset` removes one key, and a `[steps.<step>]` table left empty; removing a key that isn't set changes nothing. `set` rewrites only that key's line, keeping comments and every other key and table (`depends_on`, `priority`, `[approval]`), and refuses a file laid out in a way it can't rewrite line by line (such as dotted keys) rather than mangle it.
+
+Like `tasks`, `set` writes where edits happen: the change's worktree if it has one on this machine, else the repository checkout. It holds the change's run lock while it writes, so it refuses while a run of the change is queued or running, and says which step is running; a stopped or blocked run picks the new value up from the next step it starts. Setting an `agent` or `permissions` override makes an approval stale, so with approval required `run`, `resume` and `rerun` refuse until the change is approved again; `model`, `effort` and `machines` keep it. It never commits: the value counts on other machines, and for a run that makes a new worktree, only once the sidecar is committed and pushed.
 
 The board defaults to Proposed, Approved (when approval is required), In progress,
 Ready and Done. In-progress cards carry their step or `queued` as a badge.
@@ -96,10 +180,94 @@ Agents report by ending with a small JSON result as their final message; Tuckerb
 
 ```toml
 [agents.myagent]
-command = ["myagent", "--prompt-file", "{brief}", "--last-message", "{lastmessage}"]
+command = ["myagent", "--prompt-file", "{brief_file}", "--last-message", "{lastmessage}"]
 ```
 
+`{brief}` is the brief's text and `{brief_file}` the brief file's path; a custom agent passes one of them. Agents get the brief in their command, so they need no read outside their worktree. When the command would be longer than 24,000 characters as a Windows command line (on every platform), Claude and Codex read the brief on standard input instead, and a custom agent's `{brief}` becomes an instruction to read the brief file. Logs and run state show the brief as `<brief: N chars, <file>>`.
+
 `doctor` exits non-zero only when a required tool (`git` or `openspec`) is missing. Agent CLIs are optional. It does not yet check whether an agent is signed in, and says `sign-in not checked`.
+
+## Forge configuration
+
+The repository chooses the shipping mode:
+`local` commits locally, `mr` stops at a green merge request for a person to
+merge, and `merge` merges the exact green head when forge protection allows.
+
+```toml
+# Repository .tuckerbox/config.toml
+ship = "mr"
+
+[workflow]
+steps = ["build", "review"]
+[steps.build]
+agent = "claude"
+role = "builder"
+[steps.review]
+agent = "codex"
+role = "reviewer"
+
+[shipping]
+remote = "origin"
+fix_ci = "fix_ci"
+fix_review = "fix_ci"
+max_rounds = 3
+merge_method = "merge"  # merge, squash or rebase; GitLab uses project strategy
+archive = true
+labels = []
+review_from = []
+wait_timeout = "2h"
+
+[steps.fix_ci]
+agent = "claude"
+role = "fixer"
+
+# For self-hosted forges, name the kind (github or gitlab):
+# [forge]
+# kind = "gitlab"
+# api_url = "https://git.example.org/api/v4"
+```
+
+API URLs must use HTTPS on the push remote's host. SSH aliases resolve through
+local `ssh -G` configuration. GitHub.com and GitLab.com are detected automatically;
+other hosts require a kind in repository `[forge]` or machine `[forges]` config.
+Authenticated API requests refuse redirects. GitHub's signed log downloads use
+separate HTTPS requests without credentials or cookies.
+
+```toml
+# Machine config only; never commit tokens or token sources to a repository.
+machine = "studio"
+[forges."git.example.org"]
+kind = "gitlab"
+token_env = "WORK_GITLAB_TOKEN"
+borrow_cli_token = false
+```
+
+Tokens come first from the named variable, then `GH_TOKEN` / `GITHUB_TOKEN`
+on github.com or `GITLAB_TOKEN` on gitlab.com only. Setting `borrow_cli_token = true`
+allows the host-specific stored token from `gh` or `glab` to be read with a
+five-second timeout. Borrowing is off by default; no login or refresh is run.
+Tokens are masked in forge text and are never added to agent environments.
+Git pushes retain git's own credentials. `tuckerbox doctor` reports the forge,
+project, token source and API read/push permissions in `mr` and `merge` repositories.
+A completed shipping run archives the change in its branch before pushing. It
+uses explicit leases for every push and pins every merge to the green head.
+Failed CI jobs and unresolved review threads from writers or named bots go to
+the configured fix steps, with bounded rounds. Logs are masked, stripped of
+colour codes and limited to the last 200 lines, 32 KiB per job and 128 KiB per
+round. Replies name the fix commit and leave resolving threads to people.
+
+`shipping` means archiving, pushing, waiting or fixing; waiting uses no parallel
+slot. `merged` is final and keeps the local worktree. In `mr` mode, `ready` keeps
+the open request link; `tuckerbox resume <change>` watches it again without
+restarting the workflow. Status JSON keeps version 1 and adds `mr`, `ci` and
+`ship_round`. The board adds Shipping before Ready, shows the MR link and CI
+badge, and offers Open merge request and Resume on ready MR cards. It offers
+no merge button. Compact layout places Shipping after In progress; steps
+layout places it after the last workflow step.
+
+GitHub tokens need repository contents and pull-request write access, plus checks
+and Actions read access. GitLab tokens need `api` scope and project Developer
+access or greater; branch protection can still restrict pushes and merges.
 
 ## Develop
 

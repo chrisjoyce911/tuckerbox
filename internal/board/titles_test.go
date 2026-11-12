@@ -74,13 +74,13 @@ func TestChangeAddedWithoutATitleIsNamed(t *testing.T) {
 	}
 }
 
-// Scenario: Herdr board change.
+// Scenario: Herdr board change (archived since; its title still shows on its Done card).
 func TestHerdrBoardChangeTitle(t *testing.T) {
-	dir, err := filepath.Abs(filepath.Join(repoChanges, "add-herdr-board"))
+	dir, err := filepath.Abs(filepath.Join(repoChanges, "archive", "2026-11-12-add-herdr-board"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := readCard(context.Background(), "add-herdr-board", dir, "", false)
+	c, err := readCard(context.Background(), "add-herdr-board", dir, "", true, refView{})
 	if err != nil {
 		t.Fatal(err)
 	}

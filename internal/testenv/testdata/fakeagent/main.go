@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -40,6 +41,10 @@ type action struct {
 	// Message reports the result as the final message on stdout instead of
 	// writing the result file, as a sandboxed agent does.
 	Message bool `json:"message"`
+	// Tick ticks these task numbers in the change's tasks.md.
+	Tick []string `json:"tick"`
+	// Edit appends a line to this file in the change folder.
+	Edit string `json:"edit"`
 }
 
 func main() {
@@ -82,6 +87,25 @@ func main() {
 		p := filepath.Join(wd, filepath.FromSlash(a.Touch))
 		must(os.MkdirAll(filepath.Dir(p), 0o755))
 		must(os.WriteFile(p, []byte(step+" round "+roundS+"\n"), 0o644))
+	}
+	if len(a.Tick) > 0 || a.Edit != "" {
+		wd, _ := os.Getwd()
+		dir := filepath.Join(wd, "openspec", "changes", change)
+		if len(a.Tick) > 0 {
+			p := filepath.Join(dir, "tasks.md")
+			data, err := os.ReadFile(p)
+			must(err)
+			text := string(data)
+			for _, n := range a.Tick {
+				text = strings.Replace(text, "- [ ] "+n+" ", "- [x] "+n+" ", 1)
+			}
+			must(os.WriteFile(p, []byte(text), 0o644))
+		}
+		if a.Edit != "" {
+			p := filepath.Join(dir, filepath.FromSlash(a.Edit))
+			data, _ := os.ReadFile(p)
+			must(os.WriteFile(p, append(data, []byte("\nEdited by "+step+".\n")...), 0o644))
+		}
 	}
 	status := a.Status
 	if status == "" {

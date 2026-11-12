@@ -32,6 +32,20 @@ test("renders the In progress column and the step or queued badge on its cards",
     assert.ok(words.includes("In progress"));
     assert.ok(words.includes(badge));
     if (badge === "queued") assert.ok(!words.includes("build"));
+    // Its position in priority order (board-data: Priority on the board).
+    assert.ok(words.includes("#2"));
+  }
+});
+
+// approval-publish: Card after publishing: "not published" shows only while
+// this machine's approval isn't on the remote.
+test("shows not published until the approval is published", () => {
+  for (const [published, shown] of [[false, true], [true, false], [undefined, false]]) {
+    const approval = { ...detail.cards[0].approval, state: "approved", published };
+    const b = normaliseBoard({ ...detail, cards: [{ ...detail.cards[0], approval, state: "", step: "", badge: "" }] });
+    const card = b.cards[0];
+    const drawn = view(b).column(group(b).find((col) => col.cards.some((c) => c.change === card.change)));
+    assert.equal(text(drawn).includes("not published"), shown, `published ${published}`);
   }
 });
 

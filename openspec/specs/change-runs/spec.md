@@ -53,7 +53,7 @@ With `ship = "local"`, a run that finishes its last step SHALL leave the work co
 - **THEN** the branch holds the commits, the worktree is kept, and the run's state is `ready`
 
 ### Requirement: Parallel limit
-Tuckerbox SHALL run at most `max_parallel` changes at once per repository on one machine. It SHALL queue further changes and start them in the order requested as slots free up. At most one run per change SHALL be active on a machine at any time. This holds even when several `tuckerbox` processes start runs at once. Model: `formal/runs.tla`, invariants `OneRunPerChange` and `WithinLimit`.
+Tuckerbox SHALL run at most `max_parallel` changes at once per repository on one machine. It SHALL queue further changes and start them in admission order (see change-priority) as slots free up. At most one run per change SHALL be active on a machine at any time. This holds even when several `tuckerbox` processes start runs at once. Model: `formal/runs.tla`, invariants `OneRunPerChange` and `WithinLimit`.
 
 #### Scenario: More changes than slots
 - **WHEN** `max_parallel = 2` and the user runs `tuckerbox run --all` with four valid changes
@@ -63,9 +63,47 @@ Tuckerbox SHALL run at most `max_parallel` changes at once per repository on one
 - **WHEN** a change already has an active run and the user starts it again
 - **THEN** Tuckerbox refuses and points to the active run
 
+#### Scenario: Unranked changes keep request order
+- **WHEN** `max_parallel = 1`, no change has a priority, and the user starts A, then B, then C
+- **THEN** B starts before C
+
 ### Requirement: Stop, resume and re-run
 `tuckerbox stop <change>` SHALL end the active step's agent and mark the run `stopped`. `tuckerbox resume <change>` SHALL continue a `stopped` or `blocked` run from its current step. `tuckerbox rerun <change> <step>` SHALL start again from the named step. None of these SHALL alter files in the worktree.
 
 #### Scenario: Resume after a stop
 - **WHEN** a run was stopped during its review step and the user runs `tuckerbox resume`
 - **THEN** the review step starts again in the same worktree
+
+### Requirement: Run gate
+With `require_approval = true`, `tuckerbox run` SHALL refuse a change whose approval state is `none` or `stale`, say which, and create no worktree or run. It SHALL judge the change's files as the run will use them: in its worktree if it has one, else at the commit a new worktree would be made from, which is the change's branch if that branch exists and otherwise the base branch. `--all` SHALL skip such changes and list them.
+
+#### Scenario: Stale approval
+- **WHEN** the user runs `tuckerbox run add-login` after its design was edited since approval
+- **THEN** it refuses, says the approval is stale, and creates no worktree
+
+#### Scenario: Approval not committed
+- **WHEN** the user approved `add-login` in the repository checkout but has not committed and pushed it, and the change has no worktree
+- **THEN** `tuckerbox run add-login` refuses, says the base branch has no approval for the change, and notes the uncommitted one in the checkout
+
+#### Scenario: Change branch without a worktree
+- **WHEN** branch `add-login` exists without a worktree and has no approval, and the approval is committed only on the base branch
+- **THEN** `tuckerbox run add-login` refuses, says its branch has no approval, and creates no worktree
+
+#### Scenario: Run all with unapproved changes
+- **WHEN** three changes are valid, two are approved and `tuckerbox run --all` is run
+- **THEN** the two approved changes start or queue and the third is listed as skipped, not approved
+
+#### Scenario: Approval not required
+- **WHEN** the repository config sets `require_approval = false`
+- **THEN** `tuckerbox run` starts a valid change that has no approval
+
+### Requirement: Gate at the start
+A new worktree SHALL be made at the commit the run gate judged. The run SHALL judge the change's files again once it holds the change's run lock, before it changes any run state, so an `unapprove` or edit between the first check and the start is never missed. Model: `formal/runs.tla`, `OneRunPerChange`.
+
+#### Scenario: Unapproved after the check
+- **WHEN** `tuckerbox run add-login` has checked an approved worktree and `tuckerbox unapprove add-login` runs before the run takes the change's lock
+- **THEN** the run refuses once it holds the lock, starts no agent and leaves the run state as it was
+
+#### Scenario: Base moves after the check
+- **WHEN** `tuckerbox run add-login` has checked an approved commit on the base branch and the base branch then moves to an edited design
+- **THEN** the new worktree is made at the commit that was checked

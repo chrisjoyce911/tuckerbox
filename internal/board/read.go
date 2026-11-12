@@ -16,10 +16,12 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/chrisjoyce911/tuckerbox/internal/approval"
+	"github.com/chrisjoyce911/tuckerbox/internal/autopilot"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/deps"
 	"github.com/chrisjoyce911/tuckerbox/internal/edits"
 	"github.com/chrisjoyce911/tuckerbox/internal/history"
+	"github.com/chrisjoyce911/tuckerbox/internal/priority"
 	"github.com/chrisjoyce911/tuckerbox/internal/runs"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 )
@@ -62,7 +64,11 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 	if err != nil {
 		return nil, err
 	}
-	doc := &Document{Version: Version, Repo: key, Path: repo.Root, Machine: history.Machine(), RequireApproval: cfg.RequireApproval, Columns: columns(cfg), Cards: []Card{}}
+	refs := refApprovals(ctx, repo.Root)
+	doc := &Document{Version: Version, Ship: string(cfg.Ship), Repo: key, Path: repo.Root, Machine: history.Machine(), RequireApproval: cfg.RequireApproval, Columns: columns(cfg), Cards: []Card{}}
+	if m := autopilot.ReadMarker(repo.Common); m != nil {
+		doc.Autopilot = Autopilot{Running: true, Pid: m.Pid, Started: timestamp(m.Started)}
+	}
 	doc.Steps = make([]string, 0, len(cfg.Steps))
 	for _, step := range cfg.Steps {
 		doc.Steps = append(doc.Steps, step.ID)
@@ -72,7 +78,15 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 	places := map[string]edits.Place{}
 	for _, id := range ids {
 		p, r, placeErr := locate(repo, cfg.Worktree, worktrees, id)
-		c, err := readCard(ctx, id, p.ChangeDir(), doc.Machine, false)
+		folder := p.ChangeDir()
+		if r != nil && r.ShippingStarted {
+			previous := folder
+			folder = shippingFolder(p.Dir, id, folder)
+			if previous != folder && errors.Is(placeErr, fs.ErrNotExist) {
+				placeErr = nil
+			}
+		}
+		c, err := readCard(ctx, id, folder, doc.Machine, false, refs)
 		c.addError(placeErr)
 		c.addError(err)
 		c.EditFolder = p.Dir
@@ -86,6 +100,8 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 			states[id] = r
 			c.State, c.Reason, c.Step, c.Round = string(r.State), r.Reason, r.Step, r.Round
 			c.Since, c.Branch, c.Worktree = timestamp(r.Since), r.Branch, r.Worktree
+			c.Scope = r.Scope
+			c.NeedsYou = needsYou(r, c.Approval.State, p.ChangeDir(), cfg.Autopilot.Scope)
 			if step, ok := cfg.Step(r.Step); ok {
 				c.Agent = step.Agent
 			}
@@ -94,8 +110,14 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 				c.Column = "queued"
 			case runs.Ready:
 				c.Column = "ready"
+			case runs.Shipping:
+				c.Column = "shipping"
+			case runs.Merged:
+				c.Column = "done"
 			default:
-				if _, ok := cfg.Step(r.Step); ok {
+				if r.ShippingStarted {
+					c.Column = "shipping"
+				} else if _, ok := cfg.Step(r.Step); ok {
 					c.Column = "step:" + r.Step
 				} else {
 					c.Column = "queued"
@@ -107,15 +129,23 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 				if c.Column == "queued" {
 					c.Badge = "queued"
 				}
-				if cfg.BoardColumns != config.BoardSteps {
+				if cfg.BoardColumns != config.BoardSteps && !r.ShippingStarted && r.State != runs.Merged {
 					c.Column = "in_progress"
 				}
 			}
 		}
+		c.Settings, c.Machines = cardSettings(cfg, folder, r)
+		for _, s := range c.Settings {
+			if s.Started {
+				c.Agent = s.Agent.Value // what the running step started with
+			}
+		}
+		addShipping(&c, r, cfg)
 		places[id] = p
-		folders[id] = p.ChangeDir()
+		folders[id] = folder
 		doc.Cards = append(doc.Cards, c)
 	}
+	setPriorities(doc.Cards, repo.Checkout())
 	archives, err := archiveFolders(repo.Root)
 	if err != nil {
 		return nil, err
@@ -132,9 +162,18 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 		if _, ok := folders[a.id]; ok {
 			continue
 		}
-		c, err := readCard(ctx, a.id, a.folder, doc.Machine, true)
+		c, err := readCard(ctx, a.id, a.folder, doc.Machine, true, refView{})
 		c.addError(err)
 		c.Column, c.Archived = "done", a.date
+		if p, r, err := locate(repo, cfg.Worktree, worktrees, a.id); err == nil && r != nil {
+			states[a.id] = r
+			places[a.id] = p
+			addShipping(&c, r, cfg)
+			c.Column = "done"
+			if r.State != runs.Merged {
+				c.Badge = ""
+			}
+		}
 		folders[a.id] = a.folder
 		doc.Cards = append(doc.Cards, c)
 	}
@@ -153,6 +192,12 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 			return nil, &Error{"unknown_change", "no board card for change " + change}
 		}
 		doc.Detail, err = readDetail(change, folder, places[change].State, states[change])
+		if err == nil {
+			doc.Detail.Choices = noChoices()
+			if p, ok := places[change]; ok && !archivedCard(doc.Cards, change) {
+				doc.Detail.Choices, err = readChoices(p.Dir)
+			}
+		}
 		if err != nil {
 			for i := range doc.Cards {
 				if doc.Cards[i].Change == change {
@@ -162,6 +207,69 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 		}
 	}
 	return doc, nil
+}
+
+// archivedCard reports whether change's card is an archived one.
+func archivedCard(cards []Card, change string) bool {
+	for _, c := range cards {
+		if c.Change == change {
+			return c.Archived != ""
+		}
+	}
+	return false
+}
+
+// sortedColumn reports whether a column lists its cards in priority order:
+// Proposed, Approved, In progress, Queued and each step column. Ready and
+// Done keep their order.
+func sortedColumn(id string) bool {
+	switch id {
+	case "proposed", "approved", "in_progress", "queued":
+		return true
+	}
+	return strings.HasPrefix(id, "step:")
+}
+
+// setPriorities gives the active cards their priority and position, read
+// from the repository checkout on this machine, and puts the cards of the
+// sorted columns in priority order, each in the places those cards held.
+func setPriorities(cards []Card, checkout string) {
+	cs, err := priority.Load(checkout)
+	if err != nil {
+		return
+	}
+	vals := map[string]int64{}
+	for _, c := range cs {
+		if c.Ranked() {
+			vals[c.ID] = c.Priority
+		}
+	}
+	pos := priority.Positions(cs)
+	var slots []int
+	for i := range cards {
+		c := &cards[i]
+		c.Position = pos[c.Change]
+		if v, ok := vals[c.Change]; ok {
+			c.Priority = &v
+		}
+		if sortedColumn(c.Column) {
+			slots = append(slots, i)
+		}
+	}
+	sorted := make([]Card, len(slots))
+	for k, i := range slots {
+		sorted[k] = cards[i]
+	}
+	sort.SliceStable(sorted, func(a, b int) bool {
+		pa, pb := sorted[a].Position, sorted[b].Position
+		if pa == 0 || pb == 0 {
+			return pb == 0 && pa != 0 // a card without a position goes last
+		}
+		return pa < pb
+	})
+	for k, i := range slots {
+		cards[i] = sorted[k]
+	}
 }
 
 func columns(cfg *config.Config) []Column {
@@ -178,11 +286,14 @@ func columns(cfg *config.Config) []Column {
 	} else {
 		out = append(out, Column{ID: "in_progress", Kind: "in_progress", Name: "In progress"})
 	}
+	if cfg.Ship == config.ShipMR || cfg.Ship == config.ShipMerge {
+		out = append(out, Column{ID: "shipping", Kind: "shipping", Name: "Shipping"})
+	}
 	return append(out, Column{ID: "ready", Kind: "ready", Name: "Ready"}, Column{ID: "done", Kind: "done", Name: "Done"})
 }
 
-func readCard(ctx context.Context, id, folder, machine string, archived bool) (Card, error) {
-	c := Card{Change: id, Title: strings.ReplaceAll(id, "-", " "), Machine: machine, DependsOn: []Dependency{}, Approval: Approval{State: "none", Committed: archived}}
+func readCard(ctx context.Context, id, folder, machine string, archived bool, refs refView) (Card, error) {
+	c := Card{Change: id, Title: strings.ReplaceAll(id, "-", " "), Machine: machine, DependsOn: []Dependency{}, Approval: Approval{State: "none", Committed: archived, Published: true}, Settings: []StepSettings{}, Machines: []string{}}
 	var sidecar struct {
 		Title     string   `toml:"title"`
 		DependsOn []string `toml:"depends_on"`
@@ -217,11 +328,15 @@ func readCard(ctx context.Context, id, folder, machine string, archived bool) (C
 	if archived {
 		return c, nil
 	}
-	st, err := approval.Judge(approval.Dir(folder))
+	var entry *approval.Entry
+	if e, ok := refs.entries[id]; ok {
+		entry = &e
+	}
+	st, err := approval.JudgeWith(approval.Dir(folder), entry)
 	if err != nil {
 		return c, err
 	}
-	c.Approval = Approval{State: string(st.State), Committed: true}
+	c.Approval = Approval{State: string(st.State), Committed: true, Published: !refs.unpublished[id]}
 	if st.Approval != nil {
 		c.Approval.By, c.Approval.At = st.Approval.By, timestamp(st.Approval.At)
 	}
@@ -389,4 +504,22 @@ func (c *Card) addError(err error) {
 		c.Error += "; "
 	}
 	c.Error += err.Error()
+}
+
+// refView is what a board read knows of the approvals ref.
+type refView struct {
+	entries     map[string]approval.Entry
+	unpublished map[string]bool
+}
+
+// refApprovals reads the approvals ref (approval-publish), fetching it from
+// the remote at most once a minute and publishing this machine's
+// unpublished approvals. A ref that can't be read leaves the sidecars.
+func refApprovals(ctx context.Context, root string) refView {
+	s := approval.Store{Dir: root}
+	_ = s.Sync(ctx, time.Minute)
+	var v refView
+	v.entries, _ = s.Entries(ctx)
+	v.unpublished, _ = s.Unpublished(ctx)
+	return v
 }

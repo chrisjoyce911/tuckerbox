@@ -53,6 +53,9 @@ func build(out, pkg string) error {
 // Build builds the fake agent and openspec stub, and tuckerbox when
 // withTuckerbox is set. Call it from TestMain and Remove the result after.
 func Build(withTuckerbox bool) (*Tools, error) {
+	for k, v := range NoNetwork {
+		os.Setenv(k, v)
+	}
 	dir, err := os.MkdirTemp("", "tuckerbox-testenv")
 	if err != nil {
 		return nil, err
@@ -73,6 +76,19 @@ func Build(withTuckerbox bool) (*Tools, error) {
 		}
 	}
 	return t, nil
+}
+
+// NoNetwork is the environment every test git call runs with, set by Build
+// (for the whole test process and what it starts), Setup and Git: git may
+// use local repositories only (GIT_ALLOW_PROTOCOL=file), and never
+// prompts for credentials or host keys.
+var NoNetwork = map[string]string{
+	"GIT_ALLOW_PROTOCOL":  "file",
+	"GIT_TERMINAL_PROMPT": "0",
+	"GIT_ASKPASS":         "echo",
+	"SSH_ASKPASS":         "echo",
+	"GCM_INTERACTIVE":     "never",
+	"GIT_SSH_COMMAND":     "ssh -o BatchMode=yes",
 }
 
 // Remove deletes the built programs.
@@ -101,6 +117,9 @@ func (tl *Tools) Setup(t *testing.T) *Env {
 		Record:    filepath.Join(home, "record.txt"),
 	}
 	t.Setenv("PATH", tl.Bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	for k, v := range NoNetwork {
+		t.Setenv(k, v)
+	}
 	t.Setenv("XDG_STATE_HOME", e.StateHome)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
 	t.Setenv("FAKEAGENT_PLAN", e.Plan)
@@ -119,6 +138,12 @@ type Action struct {
 	Exit       int       `json:"exit,omitempty"`
 	StaleFirst bool      `json:"stale_first,omitempty"`
 	Message    bool      `json:"message,omitempty"`
+	// Tick ticks these task numbers in the change's tasks.md in the
+	// worktree before reporting.
+	Tick []string `json:"tick,omitempty"`
+	// Edit appends a line to this file (relative to the change folder in
+	// the worktree) before reporting.
+	Edit string `json:"edit,omitempty"`
 }
 
 // Finding is a fake agent finding.
@@ -181,6 +206,10 @@ type RepoOptions struct {
 func Git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = os.Environ()
+	for k, v := range NoNetwork {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)

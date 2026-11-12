@@ -9,6 +9,8 @@ import (
 
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/deps"
+	"github.com/chrisjoyce911/tuckerbox/internal/priority"
+	"github.com/chrisjoyce911/tuckerbox/internal/settings"
 )
 
 func (a App) configEnv() (config.Env, func() (string, error)) {
@@ -55,17 +57,39 @@ func (a App) check() int {
 	if depErr != nil {
 		fmt.Fprintln(a.Stderr, "tuckerbox check: dependencies:", depErr)
 	}
+	prioProblems, prioErr := priority.Check(opts.RepoRoot)
+	if prioErr != nil {
+		fmt.Fprintln(a.Stderr, "tuckerbox check: priority:", prioErr)
+		depErr = errors.Join(depErr, prioErr)
+	}
 	var problems config.Problems
 	if err != nil && !errors.As(err, &problems) {
 		fmt.Fprintln(a.Stderr, "tuckerbox check:", err)
 		return 1
 	}
-	if n := len(problems) + len(depProblems); n > 0 {
+	// A config with problems may be incomplete: check the changes'
+	// settings against it only when it is valid.
+	settingsCfg := cfg
+	if len(problems) > 0 {
+		settingsCfg = nil
+	}
+	setProblems, setErr := settings.CheckAll(opts.RepoRoot, settingsCfg)
+	if setErr != nil {
+		fmt.Fprintln(a.Stderr, "tuckerbox check: change settings:", setErr)
+		depErr = errors.Join(depErr, setErr)
+	}
+	if n := len(problems) + len(depProblems) + len(prioProblems) + len(setProblems); n > 0 {
 		for _, p := range problems {
 			p.File = displayPath(opts.RepoRoot, p.File)
 			fmt.Fprintln(a.Stderr, p)
 		}
 		for _, p := range depProblems {
+			fmt.Fprintln(a.Stderr, p)
+		}
+		for _, p := range prioProblems {
+			fmt.Fprintln(a.Stderr, p)
+		}
+		for _, p := range setProblems {
 			fmt.Fprintln(a.Stderr, p)
 		}
 		noun := "problems"
@@ -89,6 +113,7 @@ func (a App) check() int {
 	}
 	fmt.Fprintf(a.Stdout, "config ok: %s (machine config: %s)\n", displayPath(opts.RepoRoot, cfg.RepoPath), machine)
 	fmt.Fprintf(a.Stdout, "workflow: %s; max_parallel %d; ship %s\n", strings.Join(ids, " -> "), cfg.MaxParallel, cfg.Ship)
+	approvalConflicts(a, opts.RepoRoot)
 	return 0
 }
 

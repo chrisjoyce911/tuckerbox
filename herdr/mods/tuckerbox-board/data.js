@@ -1,8 +1,8 @@
 // Reading the board: `tuckerbox board --json` on the space's machine, or, with
 // the dev flag, the fixtures next to this file. The board reads nothing else
 // (design: the mod calls the CLI, never the files).
-import { exec, readTextFile, appHome, props, spaces, panes, focused } from "herdr";
-import { parseBoard, normaliseBoard, dirFromStack, repoCandidates, pickRepo, mainWorktreeOf } from "./model.js";
+import { exec, readTextFile, appHome, props, spaces, panes, focused, machines } from "herdr";
+import { parseBoard, normaliseBoard, dirFromStack, repoCandidates, pickRepo, otherMachines, sharedRepo, mergeBoards, mainWorktreeOf } from "./model.js";
 
 export const MOD = "tuckerbox-board";
 
@@ -82,9 +82,9 @@ export async function locate(self = null, c = candidates(self)) {
   return pickRepo(c, found);
 }
 
-async function tuckerbox(args, { cwd, on }) {
+async function tuckerbox(args, { cwd, on }, timeout = 20000) {
   try {
-    const r = await exec("tuckerbox", args, { cwd: cwd || undefined, on, timeout: 20000 });
+    const r = await exec("tuckerbox", args, { cwd: cwd || undefined, on, timeout });
     return parseBoard(r.stdout ?? "", r.stderr ?? "", r.code ?? 0, { on });
   } catch (e) {
     const msg = String(e?.message ?? e);
@@ -103,4 +103,26 @@ export async function loadDetail(change, at) {
   const fx = await fixturesFolder();
   if (fx) return readFixture(fx, "detail.json");
   return tuckerbox(["board", "--json", "--change", change], at);
+}
+
+// The board from every connected machine (herdr-board: Runs from every
+// machine): the space's machine's board, then each other machine's checkout of
+// the same repository, found by its key (`tuckerbox board --json --repo`), merged
+// by change id. Each card keeps its machine (`on`) and checkout (`path`), so its
+// actions run there. A machine that can't be asked is named, not fatal.
+// Another machine gets less time, so one slow machine can't hold up the board long.
+const OTHER_MS = 8000;
+
+export async function loadAll(at) {
+  const own = await loadBoard(at);
+  if (own.error || own.fixtures || !sharedRepo(own)) return own;
+  let list = [];
+  try { list = otherMachines(machines(), at.on ?? null); } catch { list = []; }
+  const others = await Promise.all(list.map(async (m) => ({
+    machine: m.name,
+    board: m.reachable
+      ? await tuckerbox(["board", "--json", "--repo", own.repo], { cwd: "", on: m.name }, OTHER_MS)
+      : { error: { code: "unreachable", message: "offline" } },
+  })));
+  return mergeBoards(own, others);
 }

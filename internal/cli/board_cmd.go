@@ -12,10 +12,10 @@ import (
 
 func (a App) board(args []string) int {
 	var asJSON bool
-	var change string
-	pos, err := parseArgs(args, map[string]*bool{"json": &asJSON}, map[string]*string{"change": &change})
+	var change, repoKey string
+	pos, err := parseArgs(args, map[string]*bool{"json": &asJSON}, map[string]*string{"change": &change, "repo": &repoKey})
 	if err != nil || len(pos) != 0 {
-		return a.usageErr("board", "usage: tuckerbox board [--json] [--change <id>]")
+		return a.usageErr("board", "usage: tuckerbox board [--json] [--change <id>] [--repo <key>]")
 	}
 	if change != "" {
 		if err := statedir.CheckID("change", change); err != nil {
@@ -27,7 +27,17 @@ func (a App) board(args []string) int {
 	if err != nil {
 		return a.errf("board", "%v", err)
 	}
-	doc, err := board.Read(context.Background(), dir, change, env)
+	ctx := context.Background()
+	if repoKey != "" {
+		// Another machine's board names the repository by its key; read
+		// this machine's checkout of it.
+		home, _ := a.stateHome()
+		dir, err = board.Find(ctx, repoKey, dir, home, env)
+	}
+	var doc *board.Document
+	if err == nil {
+		doc, err = board.Read(ctx, dir, change, env)
+	}
 	if err != nil {
 		if asJSON {
 			code := "board_error"

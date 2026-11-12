@@ -38,6 +38,8 @@ type cliFixture struct {
 	t    *testing.T
 	env  *testenv.Env
 	repo string
+	// bare is the local shipping remote, when a test has one.
+	bare string
 }
 
 // newCLI makes a scratch repository and an isolated environment. At the

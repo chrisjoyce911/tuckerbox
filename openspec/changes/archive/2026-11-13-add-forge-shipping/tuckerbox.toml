@@ -1,0 +1,8 @@
+title = "Forge shipping"
+depends_on = ["add-herdr-board", "add-task-scope"]
+priority = 3000
+
+[approval]
+hash = "sha256:b5e04fd13888e864983a45fc6011ff87164eb9abb18893d877a4eac66dd00de2"
+by = "Chris Joyce"
+at = 2026-11-12T19:07:39+10:00

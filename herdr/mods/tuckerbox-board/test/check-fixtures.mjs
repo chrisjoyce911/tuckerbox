@@ -86,10 +86,21 @@ export default class Main extends View {
     want: ["add login page", "PROPOSAL", "TASKS", "2.1", "Check the password against the users table", "DEPENDS ON", "add-users",
       "ROUNDS", "Round 1", "rejected", "The form uses GET, so the password ends up in the access log.", "Round 3",
       "HISTORY", "Blocked review: review limit reached", "Handed on build → review", "approved", "by Sam Example",
-      "committed", "Resume", "Re-run review", "Follow review log ↗", "Open worktree", "EDIT", "login spec"],
+      "committed", "Resume", "Re-run review", "Follow review log ↗", "Open worktree", "EDIT", "login spec",
+      "SETTINGS", "studio, mini", "gpt-5.5", "agent default", "set-build-agent", "▾"],
     // Started is the oldest event: newest first puts Blocked before it.
     order: ["Blocked review: review limit reached", "Run started"],
   },
+};
+
+// settings-board, No pickers while running: the same card, running its
+// review step, shows its settings with no picker.
+views["card-running"] = {
+  ...views.card,
+  main: views.card.main.replace("card: b.cards[0]", 'card: { ...b.cards[0], state: "running", column: "in_progress" }'),
+  want: ["SETTINGS", "studio, mini", "gpt-5.5", "Settings change only while no run is queued or running"],
+  absent: ["▾"],
+  order: undefined,
 };
 
 views.compact = {

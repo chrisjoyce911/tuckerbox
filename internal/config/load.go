@@ -1,8 +1,11 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"github.com/chrisjoyce911/tuckerbox/internal/forge"
+	"github.com/chrisjoyce911/tuckerbox/internal/gitremote"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -63,6 +66,8 @@ type Options struct {
 	// Remote is the repository's remote URL (any form git accepts), or ""
 	// if it has none. Permission profiles are matched against it.
 	Remote string
+	// PushURL returns the effective push URL of the selected shipping remote.
+	PushURL func(remote string) (string, error)
 }
 
 // Load reads the machine and repository config, merges them with repository
@@ -109,6 +114,27 @@ func Load(opts Options) (*Config, error) {
 	cfg, problems := resolve(opts.RepoRoot, opts.Remote, machine, repo)
 	cfg.RepoPath = repoPath
 	cfg.MachinePath = machinePath
+	if len(problems) == 0 && cfg.Ship != ShipLocal {
+		remote := opts.Remote
+		var lookupErr error
+		if opts.PushURL != nil {
+			remote, lookupErr = opts.PushURL(cfg.Shipping.Remote)
+		}
+		var target forge.Target
+		var detectErr error
+		if lookupErr == nil {
+			key := gitremote.Key(context.Background(), remote)
+			host, _, _ := strings.Cut(key, "/")
+			target, detectErr = forge.DetectKey(key, cfg.Forge, cfg.Forges[host].Kind)
+		} else {
+			detectErr = missingRemoteError(cfg.Shipping.Remote, lookupErr)
+		}
+		if detectErr != nil {
+			problems = append(problems, Problem{File: repoPath, Key: "forge", Message: detectErr.Error()})
+		} else {
+			cfg.ForgeTarget = target
+		}
+	}
 	if len(problems) > 0 {
 		return cfg, problems
 	}
@@ -133,9 +159,13 @@ func (f *file) problem(key, format string, args ...any) {
 // decoded from either file so that a repository setting them gets a clear
 // message rather than "unknown key".
 type rawFile struct {
-	MaxParallel *int    `toml:"max_parallel"`
-	Ship        *string `toml:"ship"`
-	Editor      *string `toml:"editor"`
+	Machine     *string              `toml:"machine"`
+	Shipping    rawShipping          `toml:"shipping"`
+	Forge       rawForge             `toml:"forge"`
+	Forges      map[string]ForgeHost `toml:"forges"`
+	MaxParallel *int                 `toml:"max_parallel"`
+	Ship        *string              `toml:"ship"`
+	Editor      *string              `toml:"editor"`
 	// RequireApproval is repository-only; it is decoded from machine
 	// config too, so that setting it there gets a clear message.
 	RequireApproval *bool                 `toml:"require_approval"`
@@ -145,6 +175,22 @@ type rawFile struct {
 	Permissions     map[string]rawProfile `toml:"permissions"`
 	Board           rawBoard              `toml:"board"`
 	Worktree        rawWorktree           `toml:"worktree"`
+	Autopilot       rawAutopilot          `toml:"autopilot"`
+	// Overrides is repository-only; it is decoded from machine config
+	// too, so that setting it there gets a clear message.
+	Overrides *rawOverrides `toml:"overrides"`
+}
+
+type rawOverrides struct {
+	Agents      []string            `toml:"agents"`
+	Models      map[string][]string `toml:"models"`
+	Efforts     []string            `toml:"efforts"`
+	Permissions []string            `toml:"permissions"`
+}
+
+type rawAutopilot struct {
+	Scope    *string `toml:"scope"`
+	Interval *string `toml:"interval"`
 }
 
 type rawBoard struct {
@@ -182,6 +228,10 @@ type rawWorktree struct {
 	Branch *string `toml:"branch"`
 }
 
+// IsArgKey reports whether a key name carries agent arguments or
+// permission settings, which only a machine permission profile may grant.
+func IsArgKey(name string) bool { return slices.Contains(rawArgKeys, name) }
+
 // rawArgKeys are key names that carry agent arguments or permission
 // settings. Only a machine permission profile may grant those.
 var rawArgKeys = []string{
@@ -211,6 +261,7 @@ func parse(path, data string, repo bool) *file {
 		return f
 	}
 	f.defined = md.IsDefined
+	shippingPolicy(f)
 
 	undecoded := map[string]bool{}
 	for _, k := range md.Undecoded() {
@@ -222,6 +273,8 @@ func parse(path, data string, repo bool) *file {
 		}
 		name := k[len(k)-1]
 		switch {
+		case name == "token" || name == "token_env" || name == "borrow_cli_token":
+			f.problem(k.String(), "tokens and token sources belong in machine config ([forges.<host>])")
 		case slices.Contains(rawArgKeys, name):
 			if repo {
 				f.problem(k.String(), "agent arguments and permission settings are not allowed in repository config; they belong in a permission profile in machine config")
@@ -242,9 +295,15 @@ func parse(path, data string, repo bool) *file {
 			f.problem("editor", "editor is machine-only; set it in machine config")
 			f.raw.Editor = nil
 		}
-	} else if md.IsDefined("require_approval") {
-		f.problem("require_approval", "require_approval belongs in repository config (.tuckerbox/config.toml), so every machine applies the same gate")
-		f.raw.RequireApproval = nil
+	} else {
+		if md.IsDefined("require_approval") {
+			f.problem("require_approval", "require_approval belongs in repository config (.tuckerbox/config.toml), so every machine applies the same gate")
+			f.raw.RequireApproval = nil
+		}
+		if md.IsDefined("overrides") {
+			f.problem("overrides", "[overrides] belongs in repository config (.tuckerbox/config.toml), so every machine allows the same change overrides")
+			f.raw.Overrides = nil
+		}
 	}
 	return f
 }

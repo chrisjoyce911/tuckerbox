@@ -41,6 +41,9 @@ type historyEvent struct {
 	Findings []agent.Finding `json:"findings,omitempty"`
 	ExitCode *int            `json:"exit_code,omitempty"`
 	Reason   string          `json:"reason,omitempty"`
+	Scope    string          `json:"scope,omitempty"`
+	OldScope string          `json:"old_scope,omitempty"`
+	By       string          `json:"by,omitempty"`
 }
 
 // history: tuckerbox history <change> [--json]
@@ -72,6 +75,7 @@ func (a App) history(args []string) int {
 				Time: rfc3339(e.Time), Kind: e.Kind, Step: e.Step, Round: e.Round, Agent: e.Agent,
 				Machine: e.Machine, To: e.To, Status: e.Status, Summary: e.Summary,
 				Findings: e.Findings, ExitCode: e.ExitCode, Reason: e.Reason,
+				Scope: e.Scope, OldScope: e.OldScope, By: e.By,
 			})
 		}
 		return a.writeJSON(map[string]any{"version": HistoryVersion, "change": change, "events": out})
@@ -186,7 +190,20 @@ func historyDetail(e history.Event, prev *history.Event) string {
 	if e.Reason != "" {
 		parts = append(parts, oneLine(e.Reason))
 	}
+	switch {
+	case e.Kind == history.ScopeStarted:
+		parts = append(parts, "tasks "+allIfEmpty(e.OldScope)+" -> "+allIfEmpty(e.Scope))
+	case e.Scope != "":
+		parts = append(parts, "tasks "+e.Scope)
+	}
 	return strings.Join(parts, ": ")
+}
+
+func allIfEmpty(s string) string {
+	if s == "" {
+		return "all"
+	}
+	return s
 }
 
 func dash(s string) string {

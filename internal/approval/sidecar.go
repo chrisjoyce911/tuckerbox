@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,9 +22,16 @@ const SidecarName = "tuckerbox.toml"
 
 // Approval is the [approval] table of a change's tuckerbox.toml.
 type Approval struct {
-	Hash string    `toml:"hash"`
-	By   string    `toml:"by"`
-	At   time.Time `toml:"at"`
+	Hash string `toml:"hash"`
+	// SettingsHash is the hash of the change's agent and permissions
+	// overrides when it was approved (see [SettingsHash]). Empty, as in an
+	// approval from before settings were hashed, means no overrides.
+	SettingsHash string `toml:"settings_hash"`
+	// Settings are the approved overrides the settings hash is over, so a
+	// refusal can name the one that changed. Empty when there were none.
+	Settings []string  `toml:"settings"`
+	By       string    `toml:"by"`
+	At       time.Time `toml:"at"`
 }
 
 // State is a change's approval state.
@@ -32,7 +40,8 @@ type State string
 const (
 	// Approved: the stored hash matches the change's files.
 	Approved State = "approved"
-	// Stale: the change has an approval that no longer matches its files.
+	// Stale: the change has an approval that no longer matches its files:
+	// its text, or its agent and permissions overrides.
 	Stale State = "stale"
 	// None: the change has no approval.
 	None State = "none"
@@ -45,6 +54,16 @@ type Status struct {
 	Approval *Approval
 	// Hash is the hash of the change's files now.
 	Hash string
+	// SettingsHash is the hash of the change's agent and permissions
+	// overrides now.
+	SettingsHash string
+	// TextStale: the approval's text hash no longer matches.
+	TextStale bool
+	// SettingsChanged names the overrides ("step.<id>.<key>") that
+	// changed since approval: set when the settings hash no longer matches.
+	SettingsChanged []string
+	// FromRef: judged from the approvals ref, not the sidecar.
+	FromRef bool
 }
 
 // ParseSidecar returns the approval in a tuckerbox.toml's contents, or nil
@@ -76,31 +95,39 @@ func Judge(files Files) (Status, error) {
 	data, err := files.Read(SidecarName)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
+		st.SettingsHash = SettingsHash(nil)
 		return st, nil
 	case err != nil:
 		return st, err
 	}
+	lines, err := SettingsLines(data)
+	if err != nil {
+		return st, err
+	}
+	st.SettingsHash = SettingsHash(lines)
 	a, err := ParseSidecar(data)
 	if err != nil || a == nil {
 		return st, err
 	}
 	st.Approval = a
-	st.State = Stale
-	if a.Hash == hash {
-		st.State = Approved
-	}
+	judgeSettings(&st, a.Hash, a.SettingsHash, a.Settings, lines)
 	return st, nil
 }
 
-// Approve writes an [approval] table with the hash of d's files, by and at
-// to d's tuckerbox.toml, keeping every other line of the file, and returns
-// the approval written. It replaces an earlier approval.
+// Approve writes an [approval] table with the hash of d's files, the hash
+// of its agent and permissions overrides, by and at to d's tuckerbox.toml,
+// keeping every other line of the file, and returns the approval written.
+// It replaces an earlier approval.
 func Approve(d Dir, by string, at time.Time) (Approval, error) {
 	hash, err := Hash(d)
 	if err != nil {
 		return Approval{}, err
 	}
-	a := Approval{Hash: hash, By: by, At: at.Truncate(time.Second)}
+	lines, shash, err := Settings(d)
+	if err != nil {
+		return Approval{}, err
+	}
+	a := Approval{Hash: hash, SettingsHash: shash, Settings: lines, By: by, At: at.Truncate(time.Second)}
 	old, err := os.ReadFile(d.SidecarPath())
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return a, err
@@ -109,7 +136,7 @@ func Approve(d Dir, by string, at time.Time) (Approval, error) {
 	if err != nil {
 		return a, err
 	}
-	return a, writeAtomic(d.SidecarPath(), data)
+	return a, WriteSidecar(d.SidecarPath(), data)
 }
 
 // Unapprove removes the [approval] table from d's tuckerbox.toml, keeping
@@ -130,7 +157,7 @@ func Unapprove(d Dir) (bool, error) {
 	if len(bytes.TrimSpace(data)) == 0 {
 		return true, os.Remove(d.SidecarPath())
 	}
-	return true, writeAtomic(d.SidecarPath(), data)
+	return true, WriteSidecar(d.SidecarPath(), data)
 }
 
 // SetApproval returns a tuckerbox.toml's contents with its [approval]
@@ -145,12 +172,19 @@ func SetApproval(data []byte, a Approval) ([]byte, error) {
 	if bytes.Contains(data, []byte("\r\n")) {
 		eol = "\r\n"
 	}
-	table := strings.Join([]string{
-		"[approval]",
-		"hash = " + tomlString(a.Hash),
-		"by = " + tomlString(a.By),
-		"at = " + a.At.Format(time.RFC3339),
-	}, eol) + eol
+	keys := []string{"[approval]", "hash = " + tomlString(a.Hash)}
+	if a.SettingsHash != "" {
+		keys = append(keys, "settings_hash = "+tomlString(a.SettingsHash))
+	}
+	if len(a.Settings) > 0 {
+		vs := make([]string, len(a.Settings))
+		for i, l := range a.Settings {
+			vs[i] = tomlString(l)
+		}
+		keys = append(keys, "settings = ["+strings.Join(vs, ", ")+"]")
+	}
+	keys = append(keys, "by = "+tomlString(a.By), "at = "+a.At.Format(time.RFC3339))
+	table := strings.Join(keys, eol) + eol
 	lines := splitLines(data)
 	start, end, found := findTable(lines)
 	var out []byte
@@ -239,7 +273,8 @@ func checkRewrite(data []byte, want *Approval) error {
 		return nil
 	}
 	got, err := ParseSidecar(data)
-	if err != nil || got == nil || got.Hash != want.Hash || got.By != want.By || !got.At.Equal(want.At) {
+	if err != nil || got == nil || got.Hash != want.Hash || got.SettingsHash != want.SettingsHash ||
+		!slices.Equal(got.Settings, want.Settings) || got.By != want.By || !got.At.Equal(want.At) {
 		return fmt.Errorf("%s: cannot rewrite the [approval] table safely; edit it by hand", SidecarName)
 	}
 	return nil
@@ -348,8 +383,14 @@ func tomlString(s string) string {
 
 func leftPad(h string) string { return strings.Repeat("0", 4-len(h)) + h }
 
-// writeAtomic replaces path with data through a temporary file beside it.
-func writeAtomic(path string, data []byte) error {
+// writeAtomic replaces path with data through a temporary file beside it
+// (the approvals ref's local copy uses it too).
+func writeAtomic(path string, data []byte) error { return WriteSidecar(path, data) }
+
+// WriteSidecar replaces the tuckerbox.toml at path with data through a
+// temporary file beside it and a rename, so readers see the old file or the
+// new one, never part of it.
+func WriteSidecar(path string, data []byte) error {
 	f, err := os.CreateTemp(filepath.Dir(path), "."+SidecarName+".*")
 	if err != nil {
 		return err

@@ -348,12 +348,26 @@ func assertShape(t *testing.T, d *Document, fixture string) {
 	want, got := map[string]string{}, map[string]string{}
 	shape(original, "", want)
 	shape(actual, "", got)
-	optional := map[string]bool{".cards[].archived": true, ".cards[].error": true, ".columns[].step": true}
-	for _, k := range []string{"result", "to", "summary", "findings", "reason"} {
+	// priority is a number or null, and position is absent on archived cards.
+	optional := map[string]bool{".cards[].archived": true, ".cards[].error": true, ".columns[].step": true,
+		".cards[].priority": true, ".cards[].position": true,
+		".cards[].scope": true, ".cards[].scope.spec": true, ".cards[].scope.tasks": true, ".cards[].scope.tasks[]": true,
+		".cards[].needs_you": true, ".autopilot.pid": true, ".autopilot.started": true}
+	for _, k := range []string{"mr", "mr.link", "mr.number", "mr.state", "ci", "ci.state", "ci.commit", "ship_round", "max_rounds"} {
+		optional[".cards[]."+k] = true
+	}
+	for _, k := range []string{"result", "to", "summary", "findings", "reason", "scope", "old_scope", "commit", "branch", "link", "number", "method", "ship_round", "ci", "jobs", "threads"} {
 		optional[".detail.history[]."+k] = true
 	}
+	// A card may have no machines and a step no recorded settings; the
+	// allow-list's entries depend on the repository.
+	optional[".cards[].machines[]"] = true
+	optional[".cards[].settings[].started"] = true
+	for _, k := range []string{"agents[]", "efforts[]", "permissions[]", "voids_approval[]"} {
+		optional[".detail.choices."+k] = true
+	}
 	for k, v := range want {
-		if optional[k] || strings.HasPrefix(k, ".detail.history[].findings[]") {
+		if optional[k] || strings.HasPrefix(k, ".detail.history[].findings[]") || strings.HasPrefix(k, ".detail.choices.models.") {
 			continue
 		}
 		if got[k] != v {
@@ -361,7 +375,7 @@ func assertShape(t *testing.T, d *Document, fixture string) {
 		}
 	}
 	for k, v := range got {
-		if !optional[k] && want[k] != v {
+		if !optional[k] && !strings.HasPrefix(k, ".detail.choices.models.") && want[k] != v {
 			t.Errorf("unexpected shape %s: %s", k, v)
 		}
 	}
@@ -504,5 +518,126 @@ func TestStagedApprovalDiffersFromWorkingCopy(t *testing.T) {
 	testenv.WriteFile(t, dir.SidecarPath(), string(original))
 	if ok, err := committed(context.Background(), string(dir)); err != nil || ok {
 		t.Fatal(ok, err)
+	}
+}
+
+// Scenario: Board order. Two Approved cards, A at 2000 and B at 1000: B is
+// listed before A, with positions in priority order; the priorities come
+// from the checkout. Ready keeps its order.
+func TestBoardOrder(t *testing.T) {
+	testTools.Setup(t)
+	root := testTools.NewRepo(t, testenv.RepoOptions{Changes: []string{"a", "b", "c"}, RequireApproval: true})
+	for _, id := range []string{"a", "b"} {
+		if _, err := approval.Approve(approval.DirOf(root, id), "T", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for id, v := range map[string]string{"a": "2000", "b": "1000"} {
+		p := approval.DirOf(root, id).SidecarPath()
+		data, _ := os.ReadFile(p)
+		testenv.WriteFile(t, p, "priority = "+v+"\n"+string(data))
+	}
+	d := read(t, root, "")
+	var approved []string
+	for _, c := range d.Cards {
+		if c.Column == "approved" {
+			approved = append(approved, c.Change)
+		}
+	}
+	if strings.Join(approved, ",") != "b,a" {
+		t.Errorf("approved column %v", approved)
+	}
+	a, b, c := card(t, d, "a"), card(t, d, "b"), card(t, d, "c")
+	if b.Position != 1 || a.Position != 2 || c.Position != 3 || *b.Priority != 1000 || *a.Priority != 2000 || c.Priority != nil {
+		t.Errorf("positions a %d b %d c %d", a.Position, b.Position, c.Position)
+	}
+	data, _ := json.Marshal(c)
+	if !strings.Contains(string(data), `"priority":null`) || !strings.Contains(string(data), `"position":3`) {
+		t.Errorf("card json %s", data)
+	}
+}
+
+func TestSetPrioritiesKeepsUnsortedColumns(t *testing.T) {
+	cards := []Card{
+		{Change: "r2", Column: "ready"}, {Change: "p2", Column: "proposed"}, {Change: "r1", Column: "ready"},
+		{Change: "p1", Column: "proposed"}, {Change: "s", Column: "step:build"}, {Change: "x", Column: "proposed"},
+	}
+	root := t.TempDir()
+	for id, v := range map[string]string{"p1": "1", "p2": "2", "s": "3", "r1": "4", "r2": "5"} {
+		testenv.WriteFile(t, filepath.Join(root, "openspec", "changes", id, "tuckerbox.toml"), "priority = "+v+"\n")
+	}
+	setPriorities(cards, root)
+	var got []string
+	for _, c := range cards {
+		got = append(got, c.Change)
+	}
+	// Sorted cards fill the sorted slots in priority order (x has no folder,
+	// so no position, and goes last); ready cards stay where they were.
+	if strings.Join(got, ",") != "r2,p1,r1,p2,s,x" {
+		t.Errorf("cards %v", got)
+	}
+}
+
+// approval-publish: the board reads approvals from the approvals ref, and
+// an entry there wins over the sidecar.
+func TestBoardReadsApprovalsRef(t *testing.T) {
+	ctx := context.Background()
+	testTools.Setup(t)
+	root := testTools.NewRepo(t, testenv.RepoOptions{Changes: []string{"add-login", "add-users"}, RequireApproval: true})
+	dir := approval.DirOf(root, "add-login")
+	hash, err := approval.Hash(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := approval.Store{Dir: root}
+	if err := s.Record(ctx, "add-login", approval.Entry{State: approval.EntryApproved, Hash: hash, By: "Owner", At: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := approval.Approve(approval.DirOf(root, "add-users"), "Old", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Record(ctx, "add-users", approval.Entry{State: approval.EntryWithdrawn, By: "Owner", At: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	doc := read(t, root, "")
+	got := map[string]Approval{}
+	for _, c := range doc.Cards {
+		got[c.Change] = c.Approval
+	}
+	if got["add-login"].State != "approved" || got["add-login"].By != "Owner" {
+		t.Errorf("add-login approval = %+v", got["add-login"])
+	}
+	if got["add-users"].State != "none" {
+		t.Errorf("add-users after withdrawal = %+v", got["add-users"])
+	}
+}
+
+// approval-publish: Card after publishing: published is false while this
+// machine's approval isn't on the remote, and true once a board read could
+// publish it.
+func TestBoardPublishedState(t *testing.T) {
+	ctx := context.Background()
+	testTools.Setup(t)
+	root := testTools.NewRepo(t, testenv.RepoOptions{Changes: []string{"add-login"}, RequireApproval: true})
+	bare := filepath.Join(t.TempDir(), "origin.git")
+	testenv.Git(t, filepath.Dir(bare), "init", "-q", "--bare", "-b", "main", bare)
+	testenv.Git(t, root, "remote", "add", "origin", filepath.Join(t.TempDir(), "gone.git"))
+	hash, err := approval.Hash(approval.DirOf(root, "add-login"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = approval.Store{Dir: root}.Record(ctx, "add-login", approval.Entry{State: approval.EntryApproved, Hash: hash, By: "Owner", At: time.Now()})
+	if !errors.Is(err, approval.ErrOffline) {
+		t.Fatalf("Record = %v, want offline", err)
+	}
+	if a := card(t, read(t, root, ""), "add-login").Approval; a.State != "approved" || a.Published {
+		t.Fatalf("offline card approval = %+v", a)
+	}
+	testenv.Git(t, root, "remote", "set-url", "origin", bare)
+	if a := card(t, read(t, root, ""), "add-login").Approval; a.State != "approved" || !a.Published {
+		t.Fatalf("after publishing: %+v", a)
+	}
+	if es, _ := (approval.Store{Dir: bare}).Entries(ctx); es["add-login"].Hash != hash {
+		t.Fatalf("remote entries = %+v", es)
 	}
 }

@@ -120,6 +120,11 @@ func Remote(env Env, root string) string {
 	return strings.TrimSpace(out)
 }
 
+// TestForgeURLEnv, when set, is the forge URL shipping identifies the
+// repository by, in place of the shipping remote's push URL. For tests
+// only: the remote stays a local repository.
+const TestForgeURLEnv = "TUCKERBOX_TEST_FORGE_URL"
+
 // Discover returns the [Options] for the checkout that contains dir: its
 // root, its remote and the machine config path.
 func Discover(env Env, dir string) (Options, error) {
@@ -131,5 +136,14 @@ func Discover(env Env, dir string) (Options, error) {
 	if err != nil {
 		return Options{}, err
 	}
-	return Options{RepoRoot: root, MachinePath: machine, Remote: Remote(env, root)}, nil
+	return Options{RepoRoot: root, MachinePath: machine, Remote: Remote(env, root), PushURL: func(remote string) (string, error) {
+		// Tests give the forge identity here, so the remote itself can
+		// be a local bare repository that every push goes to. It is
+		// never used for a git operation.
+		if u := env.Getenv(TestForgeURLEnv); u != "" {
+			return u, nil
+		}
+		out, err := env.Git(root, "remote", "get-url", "--push", "--", remote)
+		return strings.TrimSpace(out), err
+	}}, nil
 }
