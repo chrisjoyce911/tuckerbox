@@ -248,6 +248,12 @@ func Read(root, id string) (Sidecar, []Problem, error) {
 // agent), and a permission profile must be usable on this machine, as for
 // a repository step. Problems have Key set and File and Change empty.
 func Check(cfg *config.Config, sc Sidecar) []Problem {
+	return check(cfg, sc, true)
+}
+
+// check is [Check]; with machine false it leaves out whether this machine
+// grants a permission profile.
+func check(cfg *config.Config, sc Sidecar, machine bool) []Problem {
 	var ps []Problem
 	add := func(key, format string, args ...any) {
 		ps = append(ps, Problem{Key: key, Message: fmt.Sprintf(format, args...)})
@@ -277,7 +283,7 @@ func Check(cfg *config.Config, sc Sidecar) []Problem {
 				add(key+"."+k, "%s", msg)
 				continue
 			}
-			if k == KeyPermissions {
+			if k == KeyPermissions && machine {
 				if msg := cfg.ProfileProblem(v, agent); msg != "" {
 					add(key+"."+k, "%s", msg)
 				}
@@ -285,7 +291,7 @@ func Check(cfg *config.Config, sc Sidecar) []Problem {
 		}
 		// The repository's profile is kept when the change picks another
 		// agent; it must grant that agent flags, as for a repository step.
-		if o.Agent != "" && o.Permissions == "" && step.Permissions != "" {
+		if machine && o.Agent != "" && o.Permissions == "" && step.Permissions != "" {
 			if msg := cfg.ProfileProblem(step.Permissions, agent); msg != "" {
 				add(key+"."+KeyAgent, "%s (the step's profile from %s config)", msg, step.From.Permissions)
 			}

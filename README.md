@@ -98,7 +98,7 @@ tuckerbox priority add-login up    # one place up (or down)
 
 The rank is `priority = <n>` in `openspec/changes/<change>/tuckerbox.toml`: lower first, and a change without one comes after every ranked change. People use positions; Tuckerbox picks the numbers, with gaps of 1000, so a move usually rewrites one line of one file, and renumbers the ranked changes only when no gap is left. `tuckerbox check` reports a `priority` that isn't a positive integer. On the board, drag a card within its column to reorder it.
 
-`priority` writes the repository checkout on this machine, never a change's worktree, even while the change is queued or running, and never commits. Queued runs on this machine follow the new order at once; commit and push the files for other machines to see it. `tuckerbox.toml` isn't part of the approval hash, so a priority never makes an approval stale. `priority`, `approve` and `unapprove` take a short repository-wide lock around each rewrite, so they never lose each other's edits.
+`priority` writes the repository checkout on this machine, never a change's worktree, even while the change is queued or running, and never commits. Queued runs on this machine follow the new order at once; commit and push the files for other machines to see it. `tuckerbox.toml` isn't part of the approval hash, so a priority never makes an approval stale. `priority`, `approve`, `unapprove` and `set` take a short repository-wide lock around each rewrite, so they never lose each other's edits.
 
 When a slot frees, the queued run first in admission order takes it: lowest priority first, where a change counts as urgent as the most urgent active change that depends on it, then the one requested first. Age doesn't count, so with no priorities the order is the order requested. `tuckerbox run --all` requests changes oldest first and starts them in that order. A higher priority never stops a running change; it only decides who takes the next free slot. Edits to `priority` made outside Tuckerbox (an editor, `git pull`) count from the next admission.
 
@@ -143,6 +143,20 @@ permissions = ["edit", "readonly"]
 `tuckerbox check` reports, for each active change, a step the repository doesn't define in `[steps]`, a key other than the four (agent arguments and flags belong in a machine profile), a value the allow-list doesn't hold (with the allowed values; a model is judged against the step's agent after the change's own `agent`), and a profile this machine doesn't define or grant for the step's agent.
 
 Each step runs with, per key, the change's value, else the repository step's, else the machine step's, else the agent's default. When a change picks another agent for a step, a model or effort the config set for the old agent is dropped: the new agent gets the change's value or its own default. `run`, `resume` and `rerun` check the overrides again against the `[overrides]` allow-list, reading both the change's settings and `.tuckerbox/config.toml` from the files the run starts from (the worktree, else the commit a new worktree is made at), not the checkout you run from, and refuse before making a worktree or changing the run, so narrowing `[overrides]` stops changes that relied on it. A run reads the change's settings and the allow-list in its worktree as each step starts, and records what the step started with, and where each value came from (`change`, `repo`, `machine` or `default`), in `run.json` and the step's `step_started` history event; a profile is recorded by name, never its flags.
+
+`tuckerbox set` changes one of these settings without opening the file:
+
+```sh
+tuckerbox set add-login step.build.agent=codex
+tuckerbox set add-login step.review.effort=high
+tuckerbox set add-login machines=studio,mini      # comma-separated, in order
+tuckerbox set add-login --unset step.build.model  # back to the repository's value
+tuckerbox set add-login --json step.build.model=gpt-5.5   # result as JSON, for the board
+```
+
+Keys are `step.<step>.agent`, `step.<step>.model`, `step.<step>.effort`, `step.<step>.permissions` and `machines`. A step value is checked against `[overrides]` first, in the `.tuckerbox/config.toml` next to the sidecar it writes, and refused with the allowed values; a profile this machine doesn't grant is only a warning, because the change may run elsewhere. `--unset` removes one key, and a `[steps.<step>]` table left empty; removing a key that isn't set changes nothing. `set` rewrites only that key's line, keeping comments and every other key and table (`depends_on`, `priority`, `[approval]`), and refuses a file laid out in a way it can't rewrite line by line (such as dotted keys) rather than mangle it.
+
+Like `tasks`, `set` writes where edits happen: the change's worktree if it has one on this machine, else the repository checkout. It holds the change's run lock while it writes, so it refuses while a run of the change is queued or running, and says which step is running; a stopped or blocked run picks the new value up from the next step it starts. It never commits: the value counts on other machines, and for a run that makes a new worktree, only once the sidecar is committed and pushed.
 
 The board defaults to Proposed, Approved (when approval is required), In progress,
 Ready and Done. In-progress cards carry their step or `queued` as a badge.
