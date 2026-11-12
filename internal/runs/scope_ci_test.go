@@ -115,3 +115,33 @@ func TestArchivedInBranchShipsWithoutArchivingAgain(t *testing.T) {
 		t.Errorf("archived tasks.md:\n%s", text)
 	}
 }
+
+// Scenario: CI task in local mode: the step brief doesn't say to leave CI
+// tasks unticked, so a builder that ticks them makes the run ready and
+// complete. Shipping to a forge, the brief does say so.
+func TestCIBriefFollowsTheShipMode(t *testing.T) {
+	const line = "are ticked when shipping finds CI green on the merge request"
+	f := setup(t, testenv.RepoOptions{Changes: []string{"add-login"}})
+	f.withTasks(ciScopeTasks, "add-login")
+	f.cfg.Ship = config.ShipLocal
+	f.env.SetPlan(t, map[string]testenv.Action{"build": tick("1.1", "1.2", "1.3")})
+	r := f.run(Request{Change: "add-login", Scope: "1"})
+	if r.State != Ready || !r.Complete || r.Reason != "" {
+		t.Fatalf("local: %s complete %v %q", r.State, r.Complete, r.Reason)
+	}
+	for _, step := range []string{"build", "review"} {
+		if brief := readFile(t, f.state("add-login").Brief(step, 1)); strings.Contains(brief, line) {
+			t.Errorf("local %s brief says not to tick CI tasks", step)
+		}
+	}
+
+	g, e, _ := shippingSetup(t, config.ShipMR, false, "add-login")
+	g.withTasks(ciScopeTasks, "add-login")
+	testenv.Git(t, g.dir, "push", "-q", "origin", "main")
+	if r, err := e.Run(context.Background(), Request{Change: "add-login", Scope: "1"}); err != nil || r.State != Ready {
+		t.Fatalf("mr: %v %+v", err, r)
+	}
+	if brief := readFile(t, g.state("add-login").Brief("build", 1)); !strings.Contains(brief, line) {
+		t.Error("mr build brief doesn't say not to tick CI tasks")
+	}
+}
