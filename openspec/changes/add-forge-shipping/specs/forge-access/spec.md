@@ -52,7 +52,7 @@ With `borrow_cli_token = true` for a host, and no token found before it, Tuckerb
 
 #### Scenario: Borrowing off
 - **WHEN** `borrow_cli_token` is not set and no variable is set
-- **THEN** Tuckerbox does not run `gh` or `glab`, and `doctor` says a `gh` token exists and how to allow it
+- **THEN** Tuckerbox does not run `gh` or `glab`, and `doctor` identifies an installed `gh` as a possible token source and says how to allow reading it, without checking its credential store
 
 ### Requirement: Tokens are never shown or passed on
 Tuckerbox SHALL NOT print, log or record a token, in output, logs, briefs, history or run state, and SHALL mask it if it appears in text it saves, such as a CI log. It SHALL NOT add a token it read to an agent's environment. `git push` SHALL use git's own credentials, not the API token.
@@ -71,3 +71,18 @@ Tuckerbox SHALL NOT print, log or record a token, in output, logs, briefs, histo
 #### Scenario: Token rejected
 - **WHEN** the forge answers 401 to the token from `GITHUB_TOKEN`
 - **THEN** `doctor` says the `GITHUB_TOKEN` token was rejected for `github.com`
+
+### Requirement: HTTPS and redirect isolation
+Forge API URLs SHALL use HTTPS with no embedded credentials. Authenticated API requests SHALL NOT follow redirects, including same-host redirects. GitHub job logs MAY use the API's signed HTTPS download URL through a separate request without authorization headers or cookies; that download SHALL NOT follow further redirects. Response text and errors SHALL be masked before being exposed to callers.
+
+#### Scenario: API redirects elsewhere
+- **WHEN** the forge API returns a redirect to another host
+- **THEN** no request follows it and no token reaches that host
+
+#### Scenario: Signed GitHub job log
+- **WHEN** GitHub's job-log API redirects to a signed HTTPS download URL
+- **THEN** Tuckerbox downloads it without API credentials or cookies, masks the log, and refuses any further redirect
+
+#### Scenario: Insecure API URL
+- **WHEN** repository config sets an HTTP API URL
+- **THEN** validation refuses it before any request

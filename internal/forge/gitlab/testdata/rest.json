@@ -1,0 +1,7 @@
+[
+ {"method":"GET","path":"/projects/team%2Ftools%2Fapp","response":{"default_branch":"main","permissions":{"project_access":null,"group_access":{"access_level":30}}}},
+ {"method":"GET","path":"/projects/team%2Ftools%2Fapp/merge_requests?state=opened&source_branch=add-login&per_page=100","response":[]},
+ {"method":"POST","path":"/projects/team%2Ftools%2Fapp/merge_requests","request":{"title":"add login","description":"change=add-login","source_branch":"add-login","target_branch":"main","labels":"automation","remove_source_branch":false},"response":{"iid":12,"web_url":"https://gitlab.com/team/tools/app/-/merge_requests/12","state":"opened","sha":"abc123","target_branch":"main"}},
+ {"method":"GET","path":"/projects/team%2Ftools%2Fapp/merge_requests/12","response":{"iid":12,"state":"opened","sha":"abc123","detailed_merge_status":"mergeable"}},
+ {"method":"PUT","path":"/projects/team%2Ftools%2Fapp/merge_requests/12/merge","request":{"sha":"abc123","squash":true,"should_remove_source_branch":false},"response":{"iid":12,"state":"merged","sha":"abc123"}}
+]

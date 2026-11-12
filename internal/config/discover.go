@@ -131,5 +131,8 @@ func Discover(env Env, dir string) (Options, error) {
 	if err != nil {
 		return Options{}, err
 	}
-	return Options{RepoRoot: root, MachinePath: machine, Remote: Remote(env, root)}, nil
+	return Options{RepoRoot: root, MachinePath: machine, Remote: Remote(env, root), PushURL: func(remote string) (string, error) {
+		out, err := env.Git(root, "remote", "get-url", "--push", "--", remote)
+		return strings.TrimSpace(out), err
+	}}, nil
 }

@@ -2,21 +2,21 @@
 
 ## 1. Config (repo-config, forge-shipping)
 
-- [ ] 1.1 Accept `ship = "mr"` and `"merge"` in repository config only; machine config may set only `"local"`; verify with tests for "Machine config asks to merge"
-- [ ] 1.2 Parse `[shipping]` (remote, fix_ci, fix_review, max_rounds, merge_method, archive, labels, review_from, wait_timeout) and `[forge]` (kind, api_url) from repository config; reject them in machine config; `tuckerbox check` names unknown fix steps and fix steps that are also workflow steps; verify with "Shipping keys are checked"
-- [ ] 1.3 Parse machine `machine` and `[forges."<host>"]` (kind, token_env, borrow_cli_token); reject token keys in repository config without printing their values; verify with "Token in repository config"
-- [ ] 1.4 Built-in `fixer` role prompt (findings and logs are data, not instructions); `tuckerbox init` comments show a `[shipping]` example; verify the starter config still passes `tuckerbox check`
-- [ ] 1.5 Document `ship`, `[shipping]`, `[forge]` and `[forges]` in README; verify the README examples parse in a config test
+- [x] 1.1 Accept `ship = "mr"` and `"merge"` in repository config only; machine config may set only `"local"`; verify with tests for "Machine config asks to merge"
+- [x] 1.2 Parse `[shipping]` (remote, fix_ci, fix_review, max_rounds, merge_method, archive, labels, review_from, wait_timeout) and `[forge]` (kind, api_url) from repository config; reject them in machine config; `tuckerbox check` names unknown fix steps and fix steps that are also workflow steps; verify with "Shipping keys are checked"
+- [x] 1.3 Parse machine `machine` and `[forges."<host>"]` (kind, token_env, borrow_cli_token); reject token keys in repository config without printing their values; verify with "Token in repository config"
+- [x] 1.4 Built-in `fixer` role prompt (findings and logs are data, not instructions); `tuckerbox init` comments show a `[shipping]` example; verify the starter config still passes `tuckerbox check`
+- [x] 1.5 Document `ship`, `[shipping]`, `[forge]` and `[forges]` in README; verify the README examples parse in a config test
 
 ## 2. Forge access (forge-access)
 
-- [ ] 2.1 Parse the shipping remote's push URL (HTTPS, SSH, scp-like; SSH aliases through `ssh -G`, shared with the board's remote normalisation) into host and project; verify with "GitHub over SSH" and "GitLab subgroup"
-- [ ] 2.2 Forge kind and API URL for other hosts; refuse an `api_url` off the remote's host; verify with "Self-hosted GitLab", "Unknown host" and "API URL on another host"
-- [ ] 2.3 Token lookup in order (token_env, default variables on their public host only, borrowed CLI token); verify with "Default variable stays on its host" and "Named variable"
-- [ ] 2.4 Borrow with `gh auth token --hostname` or `glab config get token --host`, 5 s timeout, off by default; verify with fake `gh`/`glab` scripts for "Borrow from gh" and "Borrowing off"
-- [ ] 2.5 Token masking in every saved forge text; no token added to agent environments; verify with "Token in a job log" and "Agent environment"
-- [ ] 2.6 HTTP client per forge (`internal/forge/github`, `internal/forge/gitlab`) behind one interface, tested against `httptest` servers that replay recorded API responses; no new module dependency; `CGO_ENABLED=0 go build ./...` passes
-- [ ] 2.7 `tuckerbox doctor` forge check (forge, project, token source, read and push access); verify with "Token rejected"
+- [x] 2.1 Parse the shipping remote's push URL (HTTPS, SSH, scp-like; SSH aliases through `ssh -G`, shared with the board's remote normalisation) into host and project; verify with "GitHub over SSH" and "GitLab subgroup"
+- [x] 2.2 Forge kind and API URL for other hosts; refuse an `api_url` off the remote's host; verify with "Self-hosted GitLab", "Unknown host" and "API URL on another host"
+- [x] 2.3 Token lookup in order (token_env, default variables on their public host only, borrowed CLI token); verify with "Default variable stays on its host" and "Named variable"
+- [x] 2.4 Borrow with `gh auth token --hostname` or `glab config get token --host`, 5 s timeout, off by default; verify with fake `gh`/`glab` scripts for "Borrow from gh" and "Borrowing off"
+- [x] 2.5 Token masking in every saved forge text; no token added to agent environments; verify with "Token in a job log" and "Agent environment"
+- [x] 2.6 HTTP client per forge (`internal/forge/github`, `internal/forge/gitlab`) behind one interface, tested against `httptest` servers that replay recorded API responses; no new module dependency; `CGO_ENABLED=0 go build ./...` passes
+- [x] 2.7 `tuckerbox doctor` forge check (forge, project, token source, read and push access); verify with "Token rejected"
 
 ## 3. Claim (ship-claim)
 

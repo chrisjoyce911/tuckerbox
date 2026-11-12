@@ -62,11 +62,16 @@ With `ship = "merge"`, a shipping run SHALL merge when every check on the head c
 - **THEN** Tuckerbox does not merge, the run stays `shipping` with reason `waiting for approval`, and polling continues
 
 ### Requirement: Merge method
-`[shipping] merge_method` SHALL be `merge`, `squash` or `rebase`, `merge` by default. It SHALL only be used in `merge` mode. A method the forge project does not allow SHALL block the run with the forge's message.
+`[shipping] merge_method` SHALL be `merge`, `squash` or `rebase`, `merge` by default. It SHALL only be used in `merge` mode. A method the forge project does not allow SHALL block the run with the forge's message. GitLab selects its merge strategy at project level; `rebase` SHALL block with an explanation because its merge endpoint cannot select that strategy while preserving the checked head.
 
 #### Scenario: Squash
 - **WHEN** `merge_method = "squash"` and the merge request is ready to merge
 - **THEN** Tuckerbox asks the forge for a squash merge
+
+
+#### Scenario: GitLab rebase method
+- **WHEN** `merge_method = "rebase"` is requested on GitLab
+- **THEN** the run blocks explaining the project-level merge strategy, without rebasing or sending an unpinned merge
 
 ### Requirement: Branch behind the base
 When the forge reports the branch must be updated before merging, a run in `merge` mode SHALL merge the base branch into the change's branch with `git merge`, push it, and poll CI again. It SHALL NOT rebase. A merge conflict SHALL block the run with the conflicting files.

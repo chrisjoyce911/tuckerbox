@@ -1,0 +1,9 @@
+[
+ {"method":"GET","path":"/repos/sam/app","response":{"default_branch":"main","permissions":{"push":true}}},
+ {"method":"GET","path":"/repos/sam/app/pulls?state=open&head=sam%3Aadd-login&per_page=100&page=1","response":[]},
+ {"method":"POST","path":"/repos/sam/app/pulls","request":{"title":"add login","body":"change=add-login","head":"add-login","base":"main","draft":false},"response":{"number":12,"html_url":"https://github.com/sam/app/pull/12","state":"open","title":"add login","body":"change=add-login","head":{"sha":"abc123"},"base":{"ref":"main"}}},
+ {"method":"POST","path":"/repos/sam/app/issues/12/labels","request":{"labels":["automation"]},"response":[]},
+ {"method":"GET","path":"/repos/sam/app/pulls/12","response":{"number":12,"html_url":"https://github.com/sam/app/pull/12","state":"open","mergeable_state":"clean","head":{"sha":"abc123"},"base":{"ref":"main"}}},
+ {"method":"PUT","path":"/repos/sam/app/pulls/12/merge","request":{"sha":"abc123","merge_method":"squash"},"response":{"merged":true}},
+ {"method":"GET","path":"/repos/sam/app/pulls/12","response":{"number":12,"state":"closed","merged":true,"head":{"sha":"abc123"}}}
+]

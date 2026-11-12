@@ -1,0 +1,11 @@
+[
+ {"method":"GET","path":"/projects/team%2Ftools%2Fapp/pipelines?sha=abc123&order_by=id&sort=desc&per_page=1","response":[{"id":10,"sha":"abc123","status":"success"}]},
+ {"method":"GET","path":"/projects/team%2Ftools%2Fapp/pipelines/10/jobs?include_retried=false&per_page=100&page=1","headers":{"X-Next-Page":"2"},"response":[{"id":1,"name":"test","status":"success"},{"id":2,"name":"optional","status":"failed","allow_failure":true}]},
+ {"method":"GET","path":"/projects/team%2Ftools%2Fapp/pipelines/10/jobs?include_retried=false&per_page=100&page=2","response":[{"id":3,"name":"lint","status":"success"}]},
+ {"method":"GET","path":"/projects/team%2Ftools%2Fapp/pipelines?sha=newhead&order_by=id&sort=desc&per_page=1","response":[{"id":11,"sha":"newhead","status":"running"}]},
+ {"method":"GET","path":"/projects/team%2Ftools%2Fapp/pipelines/11/jobs?include_retried=false&per_page=100&page=1","response":[{"id":4,"name":"test","status":"running"}]},
+ {"method":"GET","path":"/projects/team%2Ftools%2Fapp/pipelines?sha=badhead&order_by=id&sort=desc&per_page=1","response":[{"id":12,"sha":"badhead","status":"failed"}]},
+ {"method":"GET","path":"/projects/team%2Ftools%2Fapp/pipelines/12/jobs?include_retried=false&per_page=100&page=1","response":[{"id":5,"name":"test","status":"failed","web_url":"https://gitlab.com/team/tools/app/-/jobs/5"}]},
+ {"method":"GET","path":"/projects/team%2Ftools%2Fapp/jobs/5/trace","text":"test failed\n"},
+ {"method":"GET","path":"/projects/team%2Ftools%2Fapp/pipelines?sha=noci&order_by=id&sort=desc&per_page=1","response":[]}
+]

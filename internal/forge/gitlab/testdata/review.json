@@ -1,0 +1,85 @@
+[
+  {
+    "method": "GET",
+    "path": "/projects/team%2Ftools%2Fapp/merge_requests/12/discussions?per_page=100&page=1",
+    "headers": {
+      "X-Next-Page": "2"
+    },
+    "response": [
+      {
+        "id": "thread1",
+        "notes": [
+          {
+            "id": 1,
+            "body": "please fix",
+            "resolvable": true,
+            "resolved": false,
+            "author": {
+              "id": 5,
+              "username": "sam"
+            },
+            "position": {
+              "new_path": "internal/app/login.go",
+              "new_line": 12
+            }
+          },
+          {
+            "id": 2,
+            "body": "system event",
+            "system": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/projects/team%2Ftools%2Fapp/members/all/5",
+    "response": {
+      "access_level": 30
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/projects/team%2Ftools%2Fapp/merge_requests/12/discussions?per_page=100&page=2",
+    "response": [
+      {
+        "id": "thread2",
+        "notes": [
+          {
+            "id": 3,
+            "body": "external",
+            "resolvable": true,
+            "resolved": false,
+            "author": {
+              "id": 6,
+              "username": "stranger"
+            },
+            "position": {
+              "new_path": "other.go",
+              "new_line": 1
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/projects/team%2Ftools%2Fapp/members/all/6",
+    "status": 404,
+    "response": {
+      "message": "not found"
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/projects/team%2Ftools%2Fapp/merge_requests/12/discussions/thread1/notes",
+    "request": {
+      "body": "Fixed in def456: validation added"
+    },
+    "response": {
+      "id": 4
+    }
+  }
+]

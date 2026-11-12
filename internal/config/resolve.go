@@ -67,11 +67,9 @@ func resolve(root, remote string, m, r *file) (*Config, Problems) {
 	}
 	if v, from, ok := pick(rr.Ship, mr.Ship, r.path, m.path); ok {
 		switch ShipMode(v) {
-		case ShipLocal:
-		case "mr", "merge":
-			add(from, "ship", "%q is not supported yet; only \"local\" is", v)
+		case ShipLocal, ShipMR, ShipMerge:
 		default:
-			add(from, "ship", "unknown ship mode %q; use \"local\"", v)
+			add(from, "ship", "unknown ship mode %q; use local, mr or merge", v)
 		}
 		cfg.Ship = ShipMode(v)
 	} else {
@@ -117,6 +115,8 @@ func resolve(root, remote string, m, r *file) (*Config, Problems) {
 			}
 		}
 	}
+
+	resolveShipping(cfg, m, r, add)
 
 	// Agents: machine first, then repository additions.
 	for _, name := range slices.Sorted(maps.Keys(mr.Agents)) {
@@ -184,13 +184,15 @@ func resolve(root, remote string, m, r *file) (*Config, Problems) {
 		}
 		index[id] = i
 	}
+	resolveFixSteps(cfg, root, m, r, index, knownAgent, add)
+
 	// Step tables the workflow never reaches.
 	for _, f := range []*file{r, m} {
 		if f == m && orderFrom != m.path {
 			continue // machine steps are defaults; a repo workflow may use only some
 		}
 		for _, id := range slices.Sorted(maps.Keys(f.raw.Steps)) {
-			if _, ok := index[id]; !ok {
+			if _, ok := index[id]; !ok && id != cfg.Shipping.FixCI && id != cfg.Shipping.FixReview {
 				add(f.path, "steps."+id, "step is not in workflow.steps, so no run reaches it")
 			}
 		}
