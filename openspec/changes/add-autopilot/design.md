@@ -10,9 +10,13 @@
   `runs.Crashed` (the lock is free while the state says queued or running).
 - `add-herdr-board`: the run gate, dependencies, the board and its "needs
   you" count.
-- `add-task-scope` (merged as a proposal): `--tasks next`, and a scoped run
-  is ready only when its scope is ticked.
-- `add-priority` (proposed): the admission order.
+- `add-task-scope`: `--tasks next`; a scoped run is ready only when its
+  scope is ticked; `complete` recorded with `ready`; `(ship)` tasks;
+  partial runs don't ship; incomplete whole-change runs block in `mr` and
+  `merge` mode (the last three from `fix-task-scope`).
+- `add-priority`: the admission order.
+- `add-operating-modes`: `mode` (`solo`, `fleet`, `team`) and
+  `tuckerbox dispatch`.
 - `add-forge-shipping` (proposed): `mr` and `merge` modes, archive in the
   merge request, the ship claim (`formal/ship.tla`).
 - The rules: config in the repository, grants and tokens on the machine,
@@ -31,8 +35,10 @@
 - **A system service.** No launchd, systemd or Windows service. The owner
   runs `tuckerbox autopilot` in a terminal or a Herdr pane, and stops it
   with Ctrl-C.
-- **Several machines.** Autopilot looks after the runs of one machine.
-  Deciding which machine runs which change is `add-operating-modes`.
+- **Placement across machines.** In `solo` mode autopilot looks after one
+  machine. In `fleet` mode each pass calls `tuckerbox dispatch`
+  (`add-operating-modes`), which owns placement and the fleet claim.
+  `team` mode, with several people, is refused for now.
 - **Fixing blocked runs.** A blocked review, a failed step or a lost ship
   claim waits for a person. Autopilot doesn't retry them.
 - **Preemption.** A higher-priority change waits for a free slot.
@@ -80,19 +86,33 @@ the slot locks still bound how many run (`formal/runs.tla`, `WithinLimit`).
 ### Starting and resuming are conditional
 A pass reads a run's state, decides, and then starts or resumes it. A
 person or the run itself can act in between:
-- the owner unapproves the change (already caught: the run gate is judged
-  again under the change lock)
+- the owner unapproves the change
 - a person starts the change by hand, it blocks, and autopilot's start
   would then restart a blocked run
 - a person resumes a crashed run and stops it, and autopilot's resume would
   then resume a run the person stopped
+- a person resumes a crashed run, it crashes again, and autopilot's resume
+  belongs to the earlier crash
 
 So every request autopilot makes carries the state and `since` time it saw
 in `run.json`. Once the engine holds the change lock, it goes ahead only if
-both still match. Otherwise it changes nothing, and the next pass looks
-again. `since` changes on every transition, so a run that left the seen
-state and came back is also refused. `formal/autopilot.tla` checks this
-design. The broken variant, which acts on the earlier read, is rejected.
+both still match and the approval rule holds. Otherwise it changes nothing,
+and the next pass looks again.
+
+**The approval rule:**
+- a start (or next group) needs `approved`: the run gate, as for
+  `tuckerbox run`
+- a crash resume needs `approved` or `stale`, not `none`
+
+A crash resume follows `tuckerbox resume`, which isn't gated
+(`add-herdr-board`): a run's own plan or build step may have made the
+approval stale, and that must not strand every crashed run. But `none`
+means a person withdrew approval while the run was down, and autopilot
+must not override that.
+
+`formal/autopilot.tla` checks the design, with one broken variant per
+check: no state check, state without `since`, approval judged on what was
+seen instead of under the lock, and a crash budget counted per round.
 
 ### Group by group
 With `scope = "group"`, autopilot always starts with `--tasks next`.
@@ -104,16 +124,23 @@ its own, on one branch. A one-group change behaves like a whole change.
 `scope = "change"` keeps whole-change runs for repositories whose changes
 are small.
 
-### Partial runs don't ship
-In `mr` or `merge` mode, `add-forge-shipping` ships a run when its last step
-reports `done`, and the first thing shipping does is archive the change.
-A run for group 1 of 3 must not do that. So the forge path checks tasks.md
-first: if any task is unticked, the run becomes `ready` and doesn't ship.
-This holds for every run, by hand or by autopilot.
+### Partial and incomplete runs
+`add-task-scope` (with `fix-task-scope`) owns when a change is complete and
+what happens if it isn't: a partial scoped run is `ready` and doesn't ship;
+an unscoped run that isn't complete is `blocked` in `mr` and `merge` mode;
+`(ship)` tasks such as "Archive this change" don't count and are ticked in
+the archive commit. Autopilot relies on those rules and adds none of its
+own. So with `scope = "change"`, an incomplete change becomes `blocked` in
+`mr` and `merge` mode, autopilot reports it, and no pass restarts it.
 
-The rule belongs in `forge-shipping`, which isn't archived. It stays in
-`autopilot` until both are archived, then moves there. Whichever of
-`add-forge-shipping` and this change is built second wires it in.
+In `local` mode an incomplete whole-change run stays `ready` (today's
+rule), and starting it again with no scope is refused, since it is the same
+scope. So autopilot never asks for that start:
+- in group mode it continues the run with `--tasks next`, a new scope
+- in change mode it reports once that a person must finish or re-run the
+  change, and the card needs you
+
+It reads `complete` from `run.json`, so this costs no extra reads.
 
 ### Shipping and the end of a change
 Autopilot doesn't drive shipping. The last group's run ships by itself:
@@ -122,16 +149,32 @@ merge. Once merged, the archive is on the base branch. The next pass's
 fetch sees the change gone from the active list, and dependents become
 startable (`Dependencies when shipping`: only archived on the base counts).
 
-With `ship = "mr"`, a change stops at a green merge request for people to
-merge. That is this repository's rule (the owner merges), so here autopilot
-fills the review queue rather than the main branch.
+This repository ships with `ship = "merge"`. `AGENTS.md` says a pull
+request merges when CI is green and an independent review by a different
+agent model has no open findings, and that approval is the owner's only
+routine gate. Forge shipping merges when the forge reports the merge
+request mergeable, so the cross-model review must be a forge rule: branch
+protection that requires an approving review, which the reviewing agent's
+account gives. Until that rule exists, the repository uses `ship = "mr"`
+and the coordinating agent merges. With `ship = "mr"`, autopilot fills the
+review queue; with `merge`, the main branch.
 
 ### Crashed runs
 A run whose process died (reboot, kill) is the one case autopilot resumes.
-It resumes it once per step and round. Its `resumed` event carries
-`by: autopilot`. If history shows the same step and round crashed again
-after such a resume, autopilot leaves the run and reports it. So a run that
-crashes its machine every time doesn't loop.
+The engine raises the round on every resume, so a stale result is never
+accepted. So the budget can't be counted per step and round: each resume
+would start a fresh count, and a run that kills its machine would loop.
+
+The budget is a **crash streak**, read from history:
+- autopilot's `resumed` events carry `by: autopilot`
+- the streak is the number of those since the run's last `step_finished`,
+  or its last `started`, `resumed`, `rerun` or `scope_started` by a person
+- autopilot resumes a crashed run only while the streak is 0, so once per
+  streak
+
+Progress (a step reporting a result) or a person's action starts a new
+streak. Since the count is in history, an autopilot restart doesn't reset
+it.
 
 ### Restarts
 Autopilot holds:
@@ -170,15 +213,15 @@ stays repository-only, as before.
 
 ## Risks / Trade-offs
 
-- **Two autopilots on two machines** for one repository would both start
-  the same change. The ship claim (`formal/ship.tla`) lets only one ship,
-  and the other blocks with `claimed by …`. Correct, but the agent time is
-  wasted. Until `add-operating-modes`, the owner runs one autopilot per
-  repository.
+- **Two autopilots on two machines in solo mode** would both start the
+  same change. The ship claim (`formal/ship.tla`) lets only one ship, and
+  the other blocks with `claimed by …`. Correct, but the agent time is
+  wasted. Use `fleet` mode for several machines: its claim is taken before
+  any work.
 - **A tight loop of failures** costs agent time. Each failure stops that
   change until a person acts, so the cost is one run per change.
 - **Polling the forge and git.** One `git fetch` per pass (60 s). Shipping
   runs poll the forge themselves, with backoff.
-- **The owner merges the queue faster than they read it.** Approval is the
-  only gate, so it has to be read with care. Group-by-group runs keep each
-  review small.
+- **Approval is the only human gate.** With `merge` mode nothing else
+  stops a change, so approval has to be read with care. Group-by-group
+  runs keep each agent review small.

@@ -95,5 +95,11 @@ against that race.
   requests, replies on review threads and, in `merge` mode, merges.
 - The Herdr board mod gains the Shipping column and the merge request and
   CI fields.
-- This repository keeps `ship = "local"` until this change is built; its
-  rule then is `ship = "mr"`, since the owner merges.
+- This repository keeps `ship = "local"` until this change is built. Its
+  rule then is `ship = "merge"`: `AGENTS.md` lets the coordinating agent
+  merge once CI is green and a cross-model review has no open findings,
+  and approval is the owner's only routine gate. Merge mode merges when
+  the forge says the merge request is mergeable, so the cross-model review
+  must be a forge rule (branch protection requiring an approving review).
+  Until that rule is set, the repository uses `ship = "mr"` and the
+  coordinating agent merges.

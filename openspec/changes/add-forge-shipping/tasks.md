@@ -72,5 +72,5 @@
 ## Workflow follow-up
 
 - Depends on `add-herdr-board` being archived first.
-- Once built, move this repository to `ship = "mr"` with a `fix_ci` step (the owner merges).
+- Once built, move this repository to `ship = "merge"` with a `fix_ci` step, after branch protection requires an approving review (the cross-model review in `AGENTS.md`); use `ship = "mr"` until then.
 - Archive this change after the implementation is accepted.

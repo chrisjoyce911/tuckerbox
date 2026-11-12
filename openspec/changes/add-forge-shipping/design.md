@@ -250,7 +250,7 @@ Cards gain `mr` and `ci` fields and the ship round, and the mod shows a link and
 
 - Nothing changes for repositories with `ship = "local"`, the default.
 - A repository opts in by setting `ship = "mr"` or `"merge"`, adding `[shipping]` and a fix step, and each machine that ships it needs a token: `tuckerbox doctor` shows what is missing.
-- This repository moves to `ship = "mr"` once the change is built, since its owner merges pull requests.
+- This repository moves to `ship = "merge"` once the change is built (`AGENTS.md`: the coordinating agent merges after green CI and a cross-model review; approval is the owner's only routine gate). That needs branch protection that requires an approving review, so merge mode waits for the cross-model review. Until it is set, `ship = "mr"`, and the coordinating agent merges.
 - Rollback: set `ship = "local"`. Open merge requests and branches stay on the forge for people to finish.
 
 ## Open Questions

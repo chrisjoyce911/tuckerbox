@@ -1,2 +1,2 @@
 title = "Autopilot"
-depends_on = ["add-task-scope", "add-priority", "add-forge-shipping"]
+depends_on = ["add-task-scope", "add-priority", "add-forge-shipping", "add-operating-modes"]
