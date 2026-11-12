@@ -136,6 +136,8 @@
 - [ ] 5.27 Test "Protection can't be read"
 - [ ] 5.28 Open claimed merge requests for the board, at most once a minute, kept in the state directory, with their age when the forge is down
 - [ ] 5.29 Test "Board read twice"
+- [ ] 5.30 (from fix-approval-publish 4.1) In team mode `approve` and `unapprove` write `tuckerbox.toml` as before and the approval gate ignores `refs/tuckerbox/approvals`
+- [ ] 5.31 (from fix-approval-publish 4.2) Test "Ref entry in a team repository"
 
 ## 6. Board (modes-board)
 

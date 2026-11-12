@@ -10,7 +10,9 @@
 // The hash (see [Hash]) covers proposal.md, design.md, model.md, tasks.md and
 // every specs/**/spec.md, with line endings read as LF and task checkboxes
 // read as unchecked, so ticking a task keeps an approval. tuckerbox.toml is
-// not hashed: it holds the hash.
+// not hashed: it holds the hash. A second hash, the settings hash (see
+// [SettingsHash]), covers the change's own agent and permissions overrides
+// in tuckerbox.toml; an approval is stale when either no longer matches.
 package approval
 
 import (

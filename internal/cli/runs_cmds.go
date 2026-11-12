@@ -137,10 +137,16 @@ func (a App) run(args []string) int {
 				continue
 			}
 			rev, err := gate.check(ctx, id)
+			if err == nil {
+				err = gate.overrides(ctx, id)
+			}
 			if err != nil {
 				var na *notApprovedError
+				var oe *runs.OverridesError
 				if errors.As(err, &na) {
 					fmt.Fprintf(a.Stdout, "%s: skipped, not approved (%s)\n", id, na.State)
+				} else if errors.As(err, &oe) {
+					fmt.Fprintf(a.Stdout, "%s: skipped, step overrides not allowed\n", id)
 				}
 				fmt.Fprintf(a.Stderr, "tuckerbox run: skipping %s: %v\n", id, err)
 				continue
@@ -174,6 +180,9 @@ func (a App) run(args []string) int {
 				continue
 			}
 			rev, err := gate.check(ctx, id)
+			if err == nil {
+				err = gate.overrides(ctx, id)
+			}
 			if err != nil {
 				a.errf("run", "%v", err)
 				bad = true
@@ -413,6 +422,9 @@ func (a App) newEngine(repo runs.Repo, cfg *config.Config, log io.Writer) (*runs
 	}
 	if cfg.RequireApproval {
 		e.Gate = approvalGate(repo)
+		e.SettingsGate = func(ctx context.Context, change, worktree string) error {
+			return settingsGate(ctx, repo.Root, change, worktree)
+		}
 		e.ResumeGate = func(ctx context.Context, change, worktree string) error {
 			// The approvals ref wins over the sidecar, as in the run gate.
 			entry, err := refEntry(ctx, repo.Root, change)
@@ -668,11 +680,21 @@ func (a App) restart(cmd string, fg bool, change string, req runs.Request) int {
 		return a.errf(cmd, "%v", runs.LockedError(change, l.Run.Worktree, l.State))
 	}
 	req.Worktree = l.Run.Worktree
-	if fg {
-		repo, cfg, ok := a.loadRepo(cmd, l.Run.Repo)
-		if !ok {
-			return 1
+	repo, cfg, ok := a.loadRepo(cmd, l.Run.Repo)
+	if !ok {
+		return 1
+	}
+	// A clear refusal before any process starts; the engine checks again
+	// under the change lock.
+	if err := runs.CheckOverrides(context.Background(), cfg, repo.Root, change, runs.StartPoint{Worktree: req.Worktree}); err != nil {
+		return a.errf(cmd, "%v", err)
+	}
+	if cfg.RequireApproval {
+		if err := settingsGate(context.Background(), repo.Root, change, req.Worktree); err != nil {
+			return a.errf(cmd, "%v", err)
 		}
+	}
+	if fg {
 		return a.foreground(repo, cfg, req)
 	}
 	args := []string{"--mode", cmd, "--worktree", req.Worktree}

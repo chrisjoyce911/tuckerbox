@@ -19,12 +19,15 @@ type Document struct {
 	Machine string `json:"machine"`
 	// OS is the operating system Tuckerbox runs on there (Go's GOOS):
 	// the board picks how to run a command on that machine by it.
-	OS              string   `json:"os"`
-	RequireApproval bool     `json:"require_approval"`
-	Steps           []string `json:"steps"`
-	Columns         []Column `json:"columns"`
-	Cards           []Card   `json:"cards"`
-	Detail          *Detail  `json:"detail,omitempty"`
+	OS              string `json:"os"`
+	RequireApproval bool   `json:"require_approval"`
+	// Autopilot says whether tuckerbox autopilot runs for the repository
+	// on this machine (add-autopilot).
+	Autopilot Autopilot `json:"autopilot"`
+	Steps     []string  `json:"steps"`
+	Columns   []Column  `json:"columns"`
+	Cards     []Card    `json:"cards"`
+	Detail    *Detail   `json:"detail,omitempty"`
 }
 type Column struct {
 	ID   string `json:"id"`
@@ -75,7 +78,7 @@ type Card struct {
 	Archived   string       `json:"archived,omitempty"`
 	// Priority is the change's stored priority in the repository checkout
 	// on this machine, or null; Position is its place in priority order,
-	// from 1. Both only for active changes (change-priority: Priority on
+	// from 1. Both only for active changes (board-data: Priority on
 	// the board).
 	Priority *int64 `json:"priority"`
 	Position int    `json:"position,omitempty"`
@@ -90,6 +93,56 @@ type Card struct {
 	// person, kind "waiting" and the agent's last message
 	// (blocked-answers: The question of a blocked run).
 	Question *runs.QuestionView `json:"question,omitempty"`
+	// Settings is what each workflow step runs with, in workflow order,
+	// with the source of each value (settings-board: Effective settings on
+	// cards). A running step shows what it started with. Empty for
+	// archived cards.
+	Settings []StepSettings `json:"settings"`
+	// Machines is the change's machines list from its tuckerbox.toml.
+	Machines []string `json:"machines"`
+	// NeedsYou says why the card needs a person; absent when it doesn't.
+	NeedsYou string `json:"needs_you,omitempty"`
+}
+
+// StepSettings is one workflow step's effective settings on a card.
+type StepSettings struct {
+	Step        string  `json:"step"`
+	Agent       Setting `json:"agent"`
+	Model       Setting `json:"model"`
+	Effort      Setting `json:"effort"`
+	Permissions Setting `json:"permissions"`
+	// Started is true when these are the values the run's current step
+	// started with, recorded in run.json, rather than what the step
+	// would run with now.
+	Started bool `json:"started,omitempty"`
+}
+
+// Setting is one effective value and where it came from: "change",
+// "repo", "machine" or "default". Value is "" when the agent's own
+// default applies (or, for permissions, no profile).
+type Setting struct {
+	Value  string `json:"value"`
+	Source string `json:"source"`
+}
+
+// Choices is what card detail may offer a change's settings pickers: the
+// repository's [overrides] allow-list, and the step keys whose change
+// voids an approval. All empty when the repository has no [overrides].
+type Choices struct {
+	Agents []string `json:"agents"`
+	// Models lists the allowed models per agent name.
+	Models        map[string][]string `json:"models"`
+	Efforts       []string            `json:"efforts"`
+	Permissions   []string            `json:"permissions"`
+	VoidsApproval []string            `json:"voids_approval"`
+}
+
+// Autopilot is tuckerbox autopilot for the board's repository on this
+// machine: running only while its lock is held.
+type Autopilot struct {
+	Running bool   `json:"running"`
+	Pid     int    `json:"pid,omitempty"`
+	Started string `json:"started,omitempty"`
 }
 type Detail struct {
 	Change   string  `json:"change"`
@@ -103,6 +156,8 @@ type Detail struct {
 	// Ticks are the current run's task_ticked and task_unticked events,
 	// newest first.
 	Ticks []Tick `json:"ticks"`
+	// Choices is the allow-list for the change's settings pickers.
+	Choices Choices `json:"choices"`
 }
 
 // Group is a task group in card detail. Ticked and Total count its tasks

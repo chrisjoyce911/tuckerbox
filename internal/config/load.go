@@ -179,6 +179,16 @@ type rawFile struct {
 	Board           rawBoard              `toml:"board"`
 	Worktree        rawWorktree           `toml:"worktree"`
 	Autopilot       rawAutopilot          `toml:"autopilot"`
+	// Overrides is repository-only; it is decoded from machine config
+	// too, so that setting it there gets a clear message.
+	Overrides *rawOverrides `toml:"overrides"`
+}
+
+type rawOverrides struct {
+	Agents      []string            `toml:"agents"`
+	Models      map[string][]string `toml:"models"`
+	Efforts     []string            `toml:"efforts"`
+	Permissions []string            `toml:"permissions"`
 }
 
 type rawAutopilot struct {
@@ -221,6 +231,10 @@ type rawWorktree struct {
 	Path   *string `toml:"path"`
 	Branch *string `toml:"branch"`
 }
+
+// IsArgKey reports whether a key name carries agent arguments or
+// permission settings, which only a machine permission profile may grant.
+func IsArgKey(name string) bool { return slices.Contains(rawArgKeys, name) }
 
 // rawArgKeys are key names that carry agent arguments or permission
 // settings. Only a machine permission profile may grant those.
@@ -289,9 +303,15 @@ func parse(path, data string, repo bool) *file {
 			f.problem("agent_backend", "agent_backend belongs in machine config: whether herdr-core is installed and running is a fact about the machine")
 			f.raw.AgentBackend = nil
 		}
-	} else if md.IsDefined("require_approval") {
-		f.problem("require_approval", "require_approval belongs in repository config (.tuckerbox/config.toml), so every machine applies the same gate")
-		f.raw.RequireApproval = nil
+	} else {
+		if md.IsDefined("require_approval") {
+			f.problem("require_approval", "require_approval belongs in repository config (.tuckerbox/config.toml), so every machine applies the same gate")
+			f.raw.RequireApproval = nil
+		}
+		if md.IsDefined("overrides") {
+			f.problem("overrides", "[overrides] belongs in repository config (.tuckerbox/config.toml), so every machine allows the same change overrides")
+			f.raw.Overrides = nil
+		}
 	}
 	return f
 }

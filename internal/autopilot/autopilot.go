@@ -96,8 +96,9 @@ type Pilot struct {
 	// Start asks the engine for req in the background, as tuckerbox run
 	// does. A *runs.ChangedError (or any error) means nothing was started.
 	Start func(ctx context.Context, req Request) error
-	// Order puts the active changes in admission order. Nil keeps them
-	// sorted by id.
+	// Order puts the active changes in admission order (add-priority's
+	// priority.Admission in tuckerbox autopilot). Nil keeps them sorted
+	// by id.
 	Order func(ctx context.Context, ids []string) ([]string, error)
 	// BeginPass, when set, is called at the start of each pass (the CLI
 	// reads the approvals ref there once, not once per change).
@@ -249,7 +250,7 @@ func (p *Pilot) decide(ctx context.Context, id, base, rev string, active map[str
 		return nil, "", err
 	}
 	if st != approval.Approved {
-		return nil, fmt.Sprintf("needs approving again before its next group (approval is %s)", st), nil
+		return nil, fmt.Sprintf("needs approval again before %s (approval is %s)", nextGroup(l), st), nil
 	}
 	return &Request{Change: id, Mode: runs.Start, Tasks: scope.Next, Expect: runs.Expect{State: r.State, Since: r.Since}}, "", nil
 }
@@ -354,4 +355,15 @@ func (p *Pilot) report(now map[string]string) {
 		}
 	}
 	p.reported = now
+}
+
+// nextGroup names the group --tasks next would run, for messages.
+func nextGroup(l runs.LocalRun) string {
+	tasks, err := runs.ReadTasks(runs.TasksFile(l.Worktree, l.Run.Change))
+	if err == nil {
+		if sc, err := scope.Resolve(scope.Next, tasks); err == nil {
+			return "group " + sc.Spec
+		}
+	}
+	return "its next group"
 }

@@ -27,6 +27,7 @@ export const ACTIONS = {
   untick: { label: "Untick" },
   priority: { label: "Move" },
   group: { label: "Run group…" },
+  set: { label: "Set" },
 };
 
 // Files `tuckerbox edit` opens; a spec delta is `spec:<capability>`.
@@ -35,6 +36,10 @@ export const EDIT_FILES = ["proposal", "design", "model", "tasks"];
 const TASK_NUMBER = /^\d+\.\d+$/;
 const GROUP_NUMBER = /^\d+$/;
 const CHANGE_ID = /^[a-z0-9][a-z0-9-]*$/;
+const STEP_ID = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+const SET_KEYS = ["agent", "model", "effort", "permissions"];
+// A picked value: never empty, never an option, no spaces or control characters.
+const SET_VALUE = /^[^\s=,-][^\s=,]*$/;
 
 // The tuckerbox command line for an action, as argv (no shell, so nothing is
 // quoted). `extra` carries what the click adds: the step for rerun and follow,
@@ -69,7 +74,7 @@ export function commandLine(action, change, extra = {}) {
       if (!TASK_NUMBER.test(extra.task ?? "")) throw new Error(`${action} needs a task number like 2.1`);
       return ["tuckerbox", "tasks", change, action, extra.task];
     case "priority": {
-      // A drag to reorder (change-priority: Drag to reorder).
+      // A drag to reorder (herdr-board: Drag to reorder).
       const n = extra.position;
       if (!Number.isInteger(n) || n < 1) throw new Error(`priority needs a position from 1, not ${JSON.stringify(n)}`);
       return ["tuckerbox", "priority", change, String(n)];
@@ -78,6 +83,16 @@ export function commandLine(action, change, extra = {}) {
     // newlines are safe; see answerText and stdinCall.
     case "answer": answerText(extra.text); return ["tuckerbox", "answer", change, "-"];
     case "answer_resume": answerText(extra.text); return ["tuckerbox", "answer", change, "--resume", "-"];
+    case "set": {
+      // A settings picker (settings-board: Settings pickers); value null
+      // is "repository default".
+      if (!STEP_ID.test(extra.step ?? "")) throw new Error(`set needs a step id, not ${JSON.stringify(extra.step)}`);
+      if (!SET_KEYS.includes(extra.key)) throw new Error(`set needs agent, model, effort or permissions, not ${JSON.stringify(extra.key)}`);
+      const key = `step.${extra.step}.${extra.key}`;
+      if (extra.value == null) return ["tuckerbox", "set", change, "--unset", key];
+      if (!SET_VALUE.test(String(extra.value)) || /[\u0000-\u001f]/.test(String(extra.value))) throw new Error(`not a value to set: ${JSON.stringify(extra.value)}`);
+      return ["tuckerbox", "set", change, `${key}=${extra.value}`];
+    }
     case "mr":
     case "proposal":
     case "worktree":

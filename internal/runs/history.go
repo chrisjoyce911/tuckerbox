@@ -18,12 +18,12 @@ func (e *Engine) event(ws Workspace, rs *Run, ev history.Event) {
 	if ev.Round == 0 {
 		ev.Round = rs.Round
 	}
+	if ev.Agent == "" && ev.Step != "" && rs.StepSettings != nil && rs.StepSettings.Step == ev.Step {
+		// The agent the step started with, which a change may override.
+		ev.Agent = rs.StepSettings.Settings.Agent.Value
+	}
 	if ev.Agent == "" && ev.Step != "" {
-		for _, s := range e.Config.Steps {
-			if s.ID == ev.Step {
-				ev.Agent = s.Agent
-			}
-		}
+		ev.Agent = e.plannedAgent(ws, rs.Change, ev.Step)
 	}
 	if e.machine == "" {
 		e.machine = history.Machine()

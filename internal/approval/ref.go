@@ -48,10 +48,15 @@ const (
 
 // Entry is one change's file on the approvals ref.
 type Entry struct {
-	State string    `toml:"state" json:"state"`
-	Hash  string    `toml:"hash,omitempty" json:"hash,omitempty"`
-	By    string    `toml:"by" json:"by"`
-	At    time.Time `toml:"at" json:"at"`
+	State string `toml:"state" json:"state"`
+	Hash  string `toml:"hash,omitempty" json:"hash,omitempty"`
+	// SettingsHash and Settings are the approved agent and permissions
+	// overrides (see [Approval]); a withdrawal has neither. An entry
+	// without a settings hash approved no overrides.
+	SettingsHash string    `toml:"settings_hash,omitempty" json:"settings_hash,omitempty"`
+	Settings     []string  `toml:"settings,omitempty" json:"settings,omitempty"`
+	By           string    `toml:"by" json:"by"`
+	At           time.Time `toml:"at" json:"at"`
 }
 
 // ErrOffline: the remote could not be reached; the operation stays on the
@@ -452,15 +457,16 @@ func JudgeWith(files Files, e *Entry) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	st := Status{State: None, Hash: hash, FromRef: true}
+	lines, shash, err := Settings(files)
+	if err != nil {
+		return Status{}, err
+	}
+	st := Status{State: None, Hash: hash, SettingsHash: shash, FromRef: true}
 	if e.State != EntryApproved {
 		return st, nil
 	}
-	st.Approval = &Approval{Hash: e.Hash, By: e.By, At: e.At}
-	st.State = Stale
-	if e.Hash == hash {
-		st.State = Approved
-	}
+	st.Approval = &Approval{Hash: e.Hash, SettingsHash: e.SettingsHash, Settings: e.Settings, By: e.By, At: e.At}
+	judgeSettings(&st, e.Hash, e.SettingsHash, e.Settings, lines)
 	return st, nil
 }
 

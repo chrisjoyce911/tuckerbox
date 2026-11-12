@@ -5,6 +5,7 @@
   "machine": "studio",
   "os": "darwin",
   "require_approval": true,
+  "autopilot": { "running": true, "pid": 4242, "started": "2026-11-12T08:00:00+10:00" },
   "steps": [
     "plan",
     "build",
@@ -85,7 +86,67 @@
       "machine": "studio",
       "edit_folder": "/work/shop",
       "depends_on": [],
-      "error": "tasks.md is unreadable; task progress may be incomplete"
+      "error": "tasks.md is unreadable; task progress may be incomplete",
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "high",
+            "source": "repo"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          }
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "",
+            "source": "default"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": []
     },
     {
       "change": "refund-flow",
@@ -115,7 +176,67 @@
       "worktree": "",
       "machine": "studio",
       "edit_folder": "/work/shop",
-      "depends_on": []
+      "depends_on": [],
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "high",
+            "source": "repo"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          }
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "",
+            "source": "default"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": []
     },
     {
       "change": "add-wishlist",
@@ -145,7 +266,67 @@
       "worktree": "",
       "machine": "studio",
       "edit_folder": "/work/shop",
-      "depends_on": []
+      "depends_on": [],
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "high",
+            "source": "repo"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          }
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "",
+            "source": "default"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": []
     },
     {
       "change": "checkout-v2",
@@ -198,7 +379,67 @@
         "last_activity": "",
         "agent_state": "",
         "backend": "headless"
-      }
+      },
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "high",
+            "source": "repo"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          }
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "",
+            "source": "default"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": []
     },
     {
       "change": "fix-tax-rounding",
@@ -246,7 +487,67 @@
         "last_activity": "2026-11-12T09:14:02+10:00",
         "agent_state": "working",
         "backend": "headless"
-      }
+      },
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "high",
+            "source": "repo"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          }
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "",
+            "source": "default"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": []
     },
     {
       "change": "add-users",
@@ -305,7 +606,70 @@
           "name": "tb-8a41d2c09be37f15",
           "machine": "studio"
         }
-      }
+      },
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "codex",
+            "source": "change"
+          },
+          "model": {
+            "value": "",
+            "source": "default"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          },
+          "started": true
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "",
+            "source": "default"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": [
+        "studio"
+      ]
     },
     {
       "change": "image-cdn",
@@ -335,7 +699,67 @@
       "worktree": "/work/shop-worktrees/image-cdn",
       "machine": "studio",
       "edit_folder": "/work/shop-worktrees/image-cdn",
-      "depends_on": []
+      "depends_on": [],
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "high",
+            "source": "repo"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          }
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "",
+            "source": "default"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": []
     },
     {
       "change": "add-login-page",
@@ -356,6 +780,7 @@
       },
       "state": "blocked",
       "reason": "review limit reached",
+      "needs_you": "blocked: review limit reached",
       "badge": "review",
       "step": "review",
       "agent": "codex",
@@ -370,6 +795,69 @@
           "change": "add-users",
           "column": "step:build"
         }
+      ],
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "codex",
+            "source": "change"
+          },
+          "model": {
+            "value": "gpt-5.5",
+            "source": "change"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          }
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "gpt-5.5",
+            "source": "change"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": [
+        "studio",
+        "mini"
       ]
     },
     {
@@ -421,7 +909,67 @@
         "last_activity": "2026-11-11T17:44:10+10:00",
         "agent_state": "",
         "backend": "headless"
-      }
+      },
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "high",
+            "source": "repo"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          }
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "",
+            "source": "default"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": []
     },
     {
       "change": "cart-badge",
@@ -469,7 +1017,67 @@
         "commit": "abc123"
       },
       "ship_round": 2,
-      "max_rounds": 3
+      "max_rounds": 3,
+      "settings": [
+        {
+          "step": "plan",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "",
+            "source": "default"
+          }
+        },
+        {
+          "step": "build",
+          "agent": {
+            "value": "claude",
+            "source": "repo"
+          },
+          "model": {
+            "value": "opus",
+            "source": "repo"
+          },
+          "effort": {
+            "value": "high",
+            "source": "repo"
+          },
+          "permissions": {
+            "value": "edit",
+            "source": "machine"
+          }
+        },
+        {
+          "step": "review",
+          "agent": {
+            "value": "codex",
+            "source": "repo"
+          },
+          "model": {
+            "value": "",
+            "source": "default"
+          },
+          "effort": {
+            "value": "",
+            "source": "default"
+          },
+          "permissions": {
+            "value": "readonly",
+            "source": "machine"
+          }
+        }
+      ],
+      "machines": []
     },
     {
       "change": "add-sitemap",
@@ -499,7 +1107,9 @@
       "machine": "studio",
       "edit_folder": "",
       "depends_on": [],
-      "archived": "2026-11-08"
+      "archived": "2026-11-08",
+      "settings": [],
+      "machines": []
     }
   ],
   "ship": "local"

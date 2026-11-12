@@ -120,3 +120,10 @@ A board card with a scoped run SHALL include its `scope`, and each round in card
 #### Scenario: Groups in card detail
 - **WHEN** a dashboard asks for the detail of a change whose group 1 has 3 of 3 tasks ticked and group 2 has 0 of 2
 - **THEN** the detail lists group 1 with 3 of 3 and group 2 with 0 of 2, each with its title
+
+### Requirement: Priority on the board
+Each active card SHALL include its `priority` value, or none, and its `position` in priority order. The Proposed, Approved and In progress columns, and in the steps layout Queued and each step column, SHALL list cards in priority order. Ready and Done SHALL keep their order. Positions SHALL come from the board's own machine.
+
+#### Scenario: Board order
+- **WHEN** two Approved cards, A with priority 2000 and B with 1000, are read
+- **THEN** B is listed before A, with positions in priority order

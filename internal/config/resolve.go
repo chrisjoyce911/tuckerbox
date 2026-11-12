@@ -212,6 +212,7 @@ func resolve(root, remote string, m, r *file) (*Config, Problems) {
 		index[id] = i
 	}
 	resolveFixSteps(cfg, root, m, r, index, knownAgent, add)
+	cfg.Overrides = resolveOverrides(r, add)
 
 	// Step tables the workflow never reaches.
 	for _, f := range []*file{r, m} {
@@ -243,6 +244,20 @@ func nilIfUndefined(f *file, v []string) *[]string {
 	return &v
 }
 
+// source says which file set a string step key: the repository's if r
+// is set to a non-empty value, else the machine's, else neither ("").
+func source(r, m *string) Source {
+	switch {
+	case r != nil && *r != "":
+		return SourceRepo
+	case r != nil:
+		return ""
+	case m != nil && *m != "":
+		return SourceMachine
+	}
+	return ""
+}
+
 type addFunc func(file, key, format string, args ...any)
 
 func resolveStep(cfg *Config, root, id string, i int, index map[string]int, ms, rs rawStep, mf, rf, orderFrom string, knownAgent func(string) bool, add addFunc) Step {
@@ -271,21 +286,17 @@ func resolveStep(cfg *Config, root, id string, i int, index map[string]int, ms, 
 
 	s.Model, _, _ = pick(rs.Model, ms.Model, rf, mf)
 	s.Effort, _, _ = pick(rs.Effort, ms.Effort, rf, mf)
+	s.From = StepSources{
+		Agent:       source(rs.Agent, ms.Agent),
+		Model:       source(rs.Model, ms.Model),
+		Effort:      source(rs.Effort, ms.Effort),
+		Permissions: source(rs.Permissions, ms.Permissions),
+	}
 
 	if prof, from, ok := pick(rs.Permissions, ms.Permissions, rf, mf); ok && prof != "" {
 		s.Permissions = prof
-		p, defined := cfg.Permissions[prof]
-		switch {
-		case !defined:
-			add(from, key+".permissions", "permission profile %q is not defined in machine config; only machine config may define permission profiles", prof)
-		case !remoteAllowed(p.AllowedRemotes, cfg.Remote):
-			shown := cfg.Remote
-			if shown == "" {
-				shown = "(none)"
-			}
-			add(from, key+".permissions", "permission profile %q does not allow this repository's remote %s; add it to permissions.%s.allowed_remotes in machine config", prof, shown, prof)
-		case agent != "" && p.Args[agent] == nil:
-			add(from, key+".permissions", "permission profile %q grants no flags for agent %q; add permissions.%s.args.%s in machine config", prof, agent, prof, agent)
+		if msg := cfg.ProfileProblem(prof, agent); msg != "" {
+			add(from, key+".permissions", "%s", msg)
 		}
 	}
 
@@ -402,4 +413,75 @@ func firstNonEmpty(ss ...string) string {
 		}
 	}
 	return ""
+}
+
+// resolveOverrides reads the repository's [overrides] allow-list. Names
+// must be non-empty and listed once; profile names must be valid names. A
+// listed profile need not exist on this machine: a change that picks it is
+// refused where it is missing, as a repository step would be.
+func resolveOverrides(r *file, add addFunc) *Overrides {
+	raw := r.raw.Overrides
+	if raw == nil {
+		return nil
+	}
+	list := func(key string, vs []string, isName bool) []string {
+		seen := map[string]bool{}
+		var out []string
+		for _, v := range vs {
+			switch {
+			case strings.TrimSpace(v) == "":
+				add(r.path, key, "empty value; list the names a change may choose")
+			case isName && !nameRE.MatchString(v):
+				add(r.path, key, "invalid name %q", v)
+			case seen[v]:
+				add(r.path, key, "%q is listed twice", v)
+			default:
+				seen[v] = true
+				out = append(out, v)
+			}
+		}
+		return out
+	}
+	o := &Overrides{
+		Agents:      list("overrides.agents", raw.Agents, true),
+		Efforts:     list("overrides.efforts", raw.Efforts, false),
+		Permissions: list("overrides.permissions", raw.Permissions, true),
+	}
+	if len(raw.Models) > 0 {
+		o.Models = map[string][]string{}
+		for _, agent := range slices.Sorted(maps.Keys(raw.Models)) {
+			if !nameRE.MatchString(agent) {
+				add(r.path, "overrides.models", "invalid agent name %q", agent)
+				continue
+			}
+			o.Models[agent] = list("overrides.models."+agent, raw.Models[agent], false)
+		}
+	}
+	return o
+}
+
+// RepoOverrides reads the [overrides] allow-list from data, the contents
+// of a repository config file at path (as one checkout or commit has it),
+// for judging a change's overrides against that copy rather than the
+// loaded config's. It returns nil when the file has no [overrides] table.
+// Problems are reported only when the file cannot be decoded or the
+// table itself is invalid; the rest of the file is not judged here.
+func RepoOverrides(path string, data []byte) (*Overrides, Problems) {
+	f := parse(path, string(data), true)
+	if f.broken {
+		return nil, f.problems
+	}
+	var ps Problems
+	for _, p := range f.problems {
+		if p.Key == "overrides" || strings.HasPrefix(p.Key, "overrides.") {
+			ps = append(ps, p)
+		}
+	}
+	o := resolveOverrides(f, func(file, key, format string, args ...any) {
+		ps = append(ps, Problem{File: file, Key: key, Message: fmt.Sprintf(format, args...)})
+	})
+	if len(ps) > 0 {
+		return nil, ps
+	}
+	return o, nil
 }

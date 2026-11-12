@@ -28,21 +28,23 @@ func (e *Engine) shippingFix(ctx context.Context, ws Workspace, rs *Run, stepID 
 	}
 	queue.Leave()
 	defer slot.Release()
+	step, recorded, why := e.stepSettings(ctx, ws, rs.Change, step)
+	if why != "" {
+		return nil, fmt.Errorf("%s", why)
+	}
 	rs.Round++
 	rs.Reason = ""
+	rs.StepSettings = &StepSettings{Step: stepID, Round: rs.Round, Settings: *recorded}
 	if err := e.save(ws, rs); err != nil {
 		return nil, err
 	}
-	e.event(ws, rs, history.Event{Kind: history.StepStarted, Agent: step.Agent})
+	e.event(ws, rs, history.Event{Kind: history.StepStarted, Agent: step.Agent, Settings: recorded})
 	template, err := agent.Resolve(step.Agent, e.templates())
 	if err != nil {
 		return nil, err
 	}
+	// The effective settings hold the agent's defaults already.
 	model, effort := step.Model, step.Effort
-	if a, ok := e.Config.Agents[step.Agent]; ok {
-		model = firstNonEmpty(model, a.Model)
-		effort = firstNonEmpty(effort, a.Effort)
-	}
 	opts := e.Agent
 	opts.OnStart = func(pid int) { rs.AgentPid = pid; _ = e.save(ws, rs) }
 	// A shipping fix runs outside the run's workflow slot record, so it

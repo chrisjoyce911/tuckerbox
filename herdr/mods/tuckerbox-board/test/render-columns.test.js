@@ -38,7 +38,7 @@ test("renders the In progress column and the step or queued badge on its cards",
     assert.ok(drawn.text.includes("In progress"));
     assert.ok(drawn.text.includes(badge));
     if (badge === "queued") assert.ok(!drawn.text.includes("build"));
-    // Its position in priority order (change-priority: Priority on the board).
+    // Its position in priority order (board-data: Priority on the board).
     assert.ok(drawn.text.includes("#2"));
   }
 });

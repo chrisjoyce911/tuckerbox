@@ -96,12 +96,14 @@ var depReadHook func()
 
 // depWait holds a run until its dependencies are met.
 type depWait struct {
-	e     *Engine
-	ws    Workspace
-	rs    *Run
-	ids   []string
-	roots []string
-	l     *depLookup
+	shipping *shippingDeps
+	blocked  bool
+	e        *Engine
+	ws       Workspace
+	rs       *Run
+	ids      []string
+	roots    []string
+	l        *depLookup
 }
 
 // newDepWait reads the dependencies the change declares in its worktree.
@@ -132,6 +134,18 @@ func (w *depWait) check(ctx context.Context) (met bool, fail string, err error) 
 		w.e.logf(w.rs.Change, "warning: reading dependency runs: %v", err)
 	}
 	unmet, unknown := deps.Pending(w.roots, w.ids, w.l.lookup)
+	if w.l.archiveOnly {
+		var fail string
+		var err error
+		unmet, unknown, fail, err = w.shippingPending(ctx)
+		if err != nil {
+			return false, "", err
+		}
+		if fail != "" {
+			w.blocked = true
+			return false, fail, nil
+		}
+	}
 	if len(unknown) > 0 {
 		return false, fmt.Sprintf("depends on %s, which is neither an active nor an archived change (see tuckerbox check)", strings.Join(unknown, ", ")), nil
 	}

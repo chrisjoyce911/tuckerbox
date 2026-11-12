@@ -19,8 +19,9 @@
 //
 // Every line has "v" (Version). Fields may be added within a version,
 // never renamed or removed, and readers must ignore fields and kinds they
-// don't know. A line looks like:
+// don't know. Lines look like:
 //
+//	{"v":1,"time":"2026-11-12T08:59:00.456+10:00","kind":"step_started","change":"fix-login","step":"build","round":1,"agent":"codex","machine":"build-01","settings":{"agent":{"value":"codex","source":"change"},"model":{"source":"default"},"effort":{"value":"high","source":"repo"},"permissions":{"value":"edit","source":"machine"}}}
 //	{"v":1,"time":"2026-11-12T09:00:00.123+10:00","kind":"rejected","change":"fix-login","step":"review","round":1,"agent":"codex","machine":"build-01","to":"build","summary":"not yet","findings":[{"severity":"high","file":"login.go","detail":"password is logged"}]}
 //
 // # Events
@@ -36,7 +37,16 @@
 //   - queued: the run joined the queue for a slot. Every started, resumed
 //     and rerun is followed by queued, then by step_started once a slot is
 //     free (or by stopped or failed).
-//   - step_started: step's agent was started for round.
+//   - step_started: step's agent was started for round. agent is the
+//     effective agent, and settings what the step started with: its agent,
+//     model, effort and permissions (a machine permission profile's name),
+//     each as {"value": ..., "source": ...}. source is "change" (the
+//     change's tuckerbox.toml), "repo" (.tuckerbox/config.toml),
+//     "machine" (machine config) or "default"; with "default" the value is
+//     the agent's default from [agents.<name>], or absent for the agent
+//     CLI's own default (or, for permissions, no profile). A profile's
+//     flags are never recorded, only its name. Events written before
+//     settings were recorded have no settings.
 //   - step_finished: the step's agent reported a result: status (done,
 //     rejected, blocked or failed), summary, findings and exit_code. A step
 //     that ends without a result has no step_finished; a failed or stopped
@@ -182,6 +192,8 @@ type Event struct {
 	OldScope string `json:"old_scope,omitempty"`
 	// Task is the task number, for task_ticked and task_unticked.
 	Task string `json:"task,omitempty"`
+	// Settings is what the step started with, for step_started.
+	Settings *Settings `json:"settings,omitempty"`
 	// By is "autopilot" on started, resumed and scope_started events that
 	// tuckerbox autopilot asked for; absent when a person did. On answered
 	// it is who answered.
@@ -190,6 +202,24 @@ type Event struct {
 	Text string `json:"text,omitempty"`
 	// Terminal is the terminal an answered event's text was typed into.
 	Terminal string `json:"terminal,omitempty"`
+}
+
+// Settings is what a step started with: its effective agent, model,
+// effort and permission profile name, and where each came from. It never
+// holds a profile's flags.
+type Settings struct {
+	Agent       Setting `json:"agent"`
+	Model       Setting `json:"model"`
+	Effort      Setting `json:"effort"`
+	Permissions Setting `json:"permissions"`
+}
+
+// Setting is one effective step setting and its source: "change", "repo",
+// "machine" or "default". Value is absent when the agent's own default
+// applies (or, for permissions, no profile).
+type Setting struct {
+	Value  string `json:"value,omitempty"`
+	Source string `json:"source"`
 }
 
 // Machine returns this machine's name for Event.Machine: its host name,

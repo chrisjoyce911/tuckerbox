@@ -89,10 +89,21 @@ export default class Main extends View {
       "committed", "Resume", "Re-run review", "Follow review log ↗", "Open worktree", "EDIT", "login spec",
       // blocked-answers: a blocked card's question box (this one blocked on
       // the review limit, so its step asked nothing) with both answers.
-      "QUESTION", "The run is blocked, but its step left no question.", "Answer and resume", "Answer"],
+      "QUESTION", "The run is blocked, but its step left no question.", "Answer and resume", "Answer",
+      "SETTINGS", "studio, mini", "gpt-5.5", "agent default", "set-build-agent", "▾"],
     // Started is the oldest event: newest first puts Blocked before it.
     order: ["Blocked review: review limit reached", "Run started"],
   },
+};
+
+// settings-board, No pickers while running: the same card, running its
+// review step, shows its settings with no picker.
+views["card-running"] = {
+  ...views.card,
+  main: views.card.main.replace("card: b.cards[0]", 'card: { ...b.cards[0], state: "running", column: "in_progress" }'),
+  want: ["SETTINGS", "studio, mini", "gpt-5.5", "Settings change only while no run is queued or running"],
+  absent: ["▾"],
+  order: undefined,
 };
 
 views.compact = {

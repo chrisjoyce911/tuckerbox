@@ -17,6 +17,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/chrisjoyce911/tuckerbox/internal/approval"
+	"github.com/chrisjoyce911/tuckerbox/internal/autopilot"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/deps"
 	"github.com/chrisjoyce911/tuckerbox/internal/edits"
@@ -66,6 +67,9 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 	}
 	refs := refApprovals(ctx, repo.Root)
 	doc := &Document{Version: Version, Ship: string(cfg.Ship), Repo: key, Path: repo.Root, Machine: history.Machine(), OS: runtime.GOOS, RequireApproval: cfg.RequireApproval, Columns: columns(cfg), Cards: []Card{}}
+	if m := autopilot.ReadMarker(repo.Common); m != nil {
+		doc.Autopilot = Autopilot{Running: true, Pid: m.Pid, Started: timestamp(m.Started)}
+	}
 	doc.Steps = make([]string, 0, len(cfg.Steps))
 	for _, step := range cfg.Steps {
 		doc.Steps = append(doc.Steps, step.ID)
@@ -98,6 +102,7 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 			c.State, c.Reason, c.Step, c.Round = string(r.State), r.Reason, r.Step, r.Round
 			c.Since, c.Branch, c.Worktree = timestamp(r.Since), r.Branch, r.Worktree
 			c.Scope = r.Scope
+			c.NeedsYou = needsYou(r, c.Approval.State, p.ChangeDir(), cfg.Autopilot.Scope)
 			if step, ok := cfg.Step(r.Step); ok {
 				c.Agent = step.Agent
 			}
@@ -142,6 +147,12 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 				if cfg.BoardColumns != config.BoardSteps && !r.ShippingStarted && r.State != runs.Merged {
 					c.Column = "in_progress"
 				}
+			}
+		}
+		c.Settings, c.Machines = cardSettings(cfg, folder, r)
+		for _, s := range c.Settings {
+			if s.Started {
+				c.Agent = s.Agent.Value // what the running step started with
 			}
 		}
 		addShipping(&c, r, cfg)
@@ -196,6 +207,12 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 			return nil, &Error{"unknown_change", "no board card for change " + change}
 		}
 		doc.Detail, err = readDetail(change, folder, places[change].State, states[change])
+		if err == nil {
+			doc.Detail.Choices = noChoices()
+			if p, ok := places[change]; ok && !archivedCard(doc.Cards, change) {
+				doc.Detail.Choices, err = readChoices(p.Dir)
+			}
+		}
 		if err != nil {
 			for i := range doc.Cards {
 				if doc.Cards[i].Change == change {
@@ -205,6 +222,16 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 		}
 	}
 	return doc, nil
+}
+
+// archivedCard reports whether change's card is an archived one.
+func archivedCard(cards []Card, change string) bool {
+	for _, c := range cards {
+		if c.Change == change {
+			return c.Archived != ""
+		}
+	}
+	return false
 }
 
 // sortedColumn reports whether a column lists its cards in priority order:
@@ -281,7 +308,7 @@ func columns(cfg *config.Config) []Column {
 }
 
 func readCard(ctx context.Context, id, folder, machine string, archived bool, refs refView) (Card, error) {
-	c := Card{Change: id, Title: strings.ReplaceAll(id, "-", " "), Machine: machine, DependsOn: []Dependency{}, Approval: Approval{State: "none", Committed: archived, Published: true}}
+	c := Card{Change: id, Title: strings.ReplaceAll(id, "-", " "), Machine: machine, DependsOn: []Dependency{}, Approval: Approval{State: "none", Committed: archived, Published: true}, Settings: []StepSettings{}, Machines: []string{}}
 	var sidecar struct {
 		Title     string   `toml:"title"`
 		DependsOn []string `toml:"depends_on"`

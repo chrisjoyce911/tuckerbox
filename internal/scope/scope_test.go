@@ -149,3 +149,53 @@ func TestCheckAndUnticked(t *testing.T) {
 		t.Errorf("complete change has unticked %v (ship tasks don't count)", got)
 	}
 }
+
+func TestTickShipPreservesFencesAndLineEndings(t *testing.T) {
+	text := "## 1. Build\r\n- [x] 1.1 done\r\n- [ ] 1.2 ordinary\r\n- [ ] 1.3 (ship) archive\r\n```md\r\n- [ ] 1.3 (ship) example\r\n```\r\n"
+	got, err := TickShip(text)
+	want := strings.Replace(text, "- [ ] 1.3 (ship) archive", "- [x] 1.3 (ship) archive", 1)
+	if err != nil || got != want {
+		t.Fatal(got, err)
+	}
+	if _, err := TickShip("- [ ] 1.1 (ship) first\n- [ ] 1.1 ordinary duplicate\n"); err == nil {
+		t.Fatal("ambiguous task number accepted")
+	}
+}
+
+func TestCITasks(t *testing.T) {
+	for text, want := range map[string]bool{
+		"(ci) Release archives build":                         true,
+		"(CI) Release archives build":                         true,
+		"Go tests pass on Linux, macOS and Windows CI":        true,
+		"The suite passes in CI":                              true,
+		"Everything is green on CI":                           true,
+		"Add a CI workflow that passes go vet":                false,
+		"Tests pass locally. Document the CI workflow":        false,
+		"Run go test -race ./... and pass on Linux":           false,
+		"(ship) Archive once tests pass on CI":                true, // IsCI alone; Parse makes it a ship task
+		"Wire the Checks call into the client (no CI needed)": false,
+	} {
+		if got := IsCI(text); got != want {
+			t.Errorf("IsCI(%q) = %v, want %v", text, got, want)
+		}
+	}
+	text := "## 6. Wrap-up\n\n- [x] 6.1 README\n- [ ] 6.2 Tests pass on Linux, macOS and Windows CI\n- [ ] 6.3 (ci) Release builds\n- [ ] 6.4 (ship) Archive once tests pass on CI\n```\n- [ ] 6.9 (ci) example\n```\n"
+	tasks := Parse(text)
+	if !tasks[1].CI || !tasks[2].CI || tasks[3].CI || !tasks[3].Ship || tasks[0].CI {
+		t.Errorf("tasks %+v", tasks)
+	}
+	if got := strings.Join(Unticked(tasks), " "); got != "6.2 6.3" {
+		t.Errorf("Unticked %s", got)
+	}
+	if got := UntickedBeforeShip(tasks); len(got) != 0 {
+		t.Errorf("UntickedBeforeShip %v", got)
+	}
+	if got := strings.Join(WithoutCI([]string{"6.1", "6.2", "6.3"}, tasks), " "); got != "6.1" {
+		t.Errorf("WithoutCI %s", got)
+	}
+	out, numbers, err := TickCI(text)
+	want := strings.NewReplacer("- [ ] 6.2", "- [x] 6.2", "- [ ] 6.3", "- [x] 6.3").Replace(text)
+	if err != nil || out != want || strings.Join(numbers, " ") != "6.2 6.3" {
+		t.Errorf("TickCI: %v %v\n%s", err, numbers, out)
+	}
+}

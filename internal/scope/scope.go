@@ -20,6 +20,26 @@ const Next = "next"
 // ShipMarker starts the text of a ship task.
 const ShipMarker = "(ship)"
 
+// CIMarker starts the text of a CI task: one only CI can do, such as
+// "(ci) Tests pass on Linux, macOS and Windows CI". Text that says the
+// work passes (or is green) on or in CI is a CI task without the marker.
+// A CI task doesn't hold a change back from shipping to a forge; shipping
+// ticks it once CI is green on the merge request.
+const CIMarker = "(ci)"
+
+// ciWording matches task text that says it passes on CI: "pass", "passes"
+// or "green", then "on" or "in", then the word CI, in one sentence.
+var ciWording = regexp.MustCompile(`(?i:\b(?:pass|passes|green)\b)[^.]*?(?i:\b(?:on|in)\b)[^.]*?\bCI\b`)
+
+// IsCI reports whether task text (after the number) names a CI task.
+func IsCI(text string) bool {
+	text = strings.TrimSpace(text)
+	if strings.HasPrefix(strings.ToLower(text), CIMarker) {
+		return true
+	}
+	return ciWording.MatchString(text)
+}
+
 // Task is one task line of tasks.md.
 type Task struct {
 	// Number is the task's number, such as "2.1".
@@ -31,6 +51,8 @@ type Task struct {
 	Checked bool
 	// Ship is set for a task whose text starts with "(ship)".
 	Ship bool
+	// CI is set for a task that is not a ship task and that IsCI names.
+	CI bool
 }
 
 // Group is a task group: a "## N. Title" heading and the tasks numbered
@@ -131,15 +153,20 @@ func parse(text string) ([]Task, map[int]string) {
 		tasks = append(tasks, Task{
 			Number: m[2], Group: g, Text: text, Checked: m[1] != " ",
 			Ship: strings.HasPrefix(text, ShipMarker),
+			CI:   !strings.HasPrefix(text, ShipMarker) && IsCI(text),
 		})
 	})
 	return tasks, titles
 }
 
 // forLines calls f for each line of text outside fenced code blocks.
-func forLines(text string, f func(string)) {
+func forLines(text string, f func(string)) { forLinesAt(text, func(line string, _ int) { f(line) }) }
+func forLinesAt(text string, f func(string, int)) {
+	offset := 0
 	fence := ""
 	for _, line := range strings.Split(text, "\n") {
+		at := offset
+		offset += len(line) + 1
 		trimmed := strings.TrimSpace(line)
 		run := ""
 		if len(trimmed) >= 3 && (trimmed[0] == '`' || trimmed[0] == '~') {
@@ -161,7 +188,7 @@ func forLines(text string, f func(string)) {
 			fence = run
 			continue
 		}
-		f(line)
+		f(line, at)
 	}
 }
 
@@ -341,6 +368,36 @@ func Changed(before, after []Task) (numbers []string, ticked []bool) {
 	return numbers, ticked
 }
 
+// UntickedBeforeShip returns the unticked tasks that hold a change back
+// from shipping to a forge: those Unticked returns, less CI tasks, which
+// shipping ticks once CI is green.
+func UntickedBeforeShip(tasks []Task) []string {
+	var out []string
+	for _, t := range tasks {
+		if !t.Ship && !t.CI && !t.Checked {
+			out = append(out, t.Number)
+		}
+	}
+	return out
+}
+
+// WithoutCI returns numbers less those of CI tasks in tasks.
+func WithoutCI(numbers []string, tasks []Task) []string {
+	ci := map[string]bool{}
+	for _, t := range tasks {
+		if t.CI {
+			ci[t.Number] = true
+		}
+	}
+	var out []string
+	for _, n := range numbers {
+		if !ci[n] {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 // Lookup returns the tasks in tasks whose numbers are in numbers, in
 // numbers' order; numbers tasks.md doesn't have are left out.
 func Lookup(tasks []Task, numbers []string) []Task {
@@ -355,4 +412,55 @@ func Lookup(tasks []Task, numbers []string) []Task {
 		}
 	}
 	return out
+}
+
+// TickShip returns tasks.md with only unchecked (ship) tasks ticked. It keeps
+// every other byte, including line endings and fenced examples, unchanged.
+func TickShip(text string) (string, error) {
+	out, _, err := tick(text, "ship", func(body string) bool { return strings.HasPrefix(body, ShipMarker) })
+	return out, err
+}
+
+// TickCI returns tasks.md with its unchecked CI tasks ticked, and their
+// numbers in tasks.md order. Like TickShip it changes nothing else.
+func TickCI(text string) (string, []string, error) {
+	return tick(text, "CI", func(body string) bool { return !strings.HasPrefix(body, ShipMarker) && IsCI(body) })
+}
+
+// tick ticks the unchecked tasks whose text match picks, refusing when a
+// picked task's number appears more than once.
+func tick(text, kind string, picks func(body string) bool) (string, []string, error) {
+	counts := map[string]int{}
+	picked := map[string]bool{}
+	var offsets []int
+	var numbers []string
+	forLinesAt(text, func(line string, offset int) {
+		m := taskLine.FindStringSubmatchIndex(line)
+		if m == nil {
+			return
+		}
+		number := line[m[4]:m[5]]
+		counts[number]++
+		body := ""
+		if m[6] >= 0 {
+			body = strings.TrimSpace(line[m[6]:m[7]])
+		}
+		if picks(body) {
+			picked[number] = true
+			if line[m[2]:m[3]] == " " {
+				offsets = append(offsets, offset+m[2])
+				numbers = append(numbers, number)
+			}
+		}
+	})
+	for number := range picked {
+		if counts[number] > 1 {
+			return "", nil, fmt.Errorf("%s task %s appears more than once in tasks.md", kind, number)
+		}
+	}
+	data := []byte(text)
+	for _, offset := range offsets {
+		data[offset] = 'x'
+	}
+	return string(data), numbers, nil
 }

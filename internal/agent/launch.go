@@ -20,10 +20,13 @@ import (
 // Step is everything needed to run one step's agent once.
 type Step struct {
 	ShippingFeedback bool
-	Change           string
-	Step             string
-	Role             string
-	Round            int
+	// ShipsToForge is set when the run ships to a forge (ship = "mr" or
+	// "merge"), where shipping ticks CI tasks; see Brief.ShipsToForge.
+	ShipsToForge bool
+	Change       string
+	Step         string
+	Role         string
+	Round        int
 	// Agent is the resolved agent definition (see Resolve).
 	Agent  Template
 	Model  string
@@ -235,7 +238,7 @@ func Run(ctx context.Context, s Step, opts Options) (Outcome, error) {
 	brief := Brief{
 		Change: s.Change, Step: s.Step, Role: s.Role, Round: s.Round,
 		Root: s.Worktree, ResultPath: o.ResultPath, Base: s.Base, Earlier: s.Earlier,
-		Scope: s.Scope, ShippingFeedback: s.ShippingFeedback, Answers: s.Answers,
+		Scope: s.Scope, ShippingFeedback: s.ShippingFeedback, Answers: s.Answers, ShipsToForge: s.ShipsToForge,
 	}
 	text, err := brief.Render()
 	if err == nil {

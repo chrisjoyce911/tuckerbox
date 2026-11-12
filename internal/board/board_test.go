@@ -351,7 +351,8 @@ func assertShape(t *testing.T, d *Document, fixture string) {
 	// priority is a number or null, and position is absent on archived cards.
 	optional := map[string]bool{".cards[].archived": true, ".cards[].error": true, ".columns[].step": true,
 		".cards[].priority": true, ".cards[].position": true,
-		".cards[].scope": true, ".cards[].scope.spec": true, ".cards[].scope.tasks": true, ".cards[].scope.tasks[]": true}
+		".cards[].scope": true, ".cards[].scope.spec": true, ".cards[].scope.tasks": true, ".cards[].scope.tasks[]": true,
+		".cards[].needs_you": true, ".autopilot.pid": true, ".autopilot.started": true}
 	for _, k := range []string{"mr", "mr.link", "mr.number", "mr.state", "ci", "ci.state", "ci.commit", "ship_round", "max_rounds"} {
 		optional[".cards[]."+k] = true
 	}
@@ -363,8 +364,15 @@ func assertShape(t *testing.T, d *Document, fixture string) {
 	for _, k := range []string{"result", "to", "summary", "findings", "reason", "scope", "old_scope", "commit", "branch", "link", "number", "method", "ship_round", "ci", "jobs", "threads", "task"} {
 		optional[".detail.history[]."+k] = true
 	}
+	// A card may have no machines and a step no recorded settings; the
+	// allow-list's entries depend on the repository.
+	optional[".cards[].machines[]"] = true
+	optional[".cards[].settings[].started"] = true
+	for _, k := range []string{"agents[]", "efforts[]", "permissions[]", "voids_approval[]"} {
+		optional[".detail.choices."+k] = true
+	}
 	for k, v := range want {
-		if optional[k] || strings.HasPrefix(k, ".detail.history[].findings[]") {
+		if optional[k] || strings.HasPrefix(k, ".detail.history[].findings[]") || strings.HasPrefix(k, ".detail.choices.models.") {
 			continue
 		}
 		// A board with no running, queued or stopped card has no activity,
@@ -381,7 +389,7 @@ func assertShape(t *testing.T, d *Document, fixture string) {
 		if strings.HasPrefix(k, ".cards[].activity.") && want[".cards[].activity"] == "" {
 			continue
 		}
-		if !optional[k] && want[k] != v {
+		if !optional[k] && !strings.HasPrefix(k, ".detail.choices.models.") && want[k] != v {
 			t.Errorf("unexpected shape %s: %s", k, v)
 		}
 	}

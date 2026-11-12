@@ -69,10 +69,8 @@ func (f *queueFixture) setPriority(c string, v int64) {
 }
 
 // waitAdmit runs WaitSlot for q in the background.
-// waitAdmit waits for a slot in the background. The test's cleanup waits
-// until it has given up (ctx must be cancelled by then), so it does not
-// make lock files while the test's directory is removed.
 func waitAdmit(t *testing.T, ctx context.Context, q *Queue, common string, max int) <-chan *Slot {
+	ctx, cancel := context.WithCancel(ctx)
 	ch := make(chan *Slot, 1)
 	done := make(chan struct{})
 	go func() {
@@ -80,7 +78,19 @@ func waitAdmit(t *testing.T, ctx context.Context, q *Queue, common string, max i
 		s, _ := WaitSlot(ctx, common, max, q, 5*time.Millisecond, nil)
 		ch <- s
 	}()
-	t.Cleanup(func() { <-done })
+	// Stop polling and wait before the test's temporary directory goes:
+	// Windows can't remove a lock file the goroutine still has open.
+	t.Cleanup(func() {
+		cancel()
+		<-done
+		select {
+		case s := <-ch:
+			if s != nil {
+				s.Release()
+			}
+		default:
+		}
+	})
 	return ch
 }
 

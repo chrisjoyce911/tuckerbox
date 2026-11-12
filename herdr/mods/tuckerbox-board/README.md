@@ -13,7 +13,7 @@ stores no task state, writes no files and never moves a card by itself
 | `board.js` | The board: header (repository, running and needs-you counts, Dock or Undock and Close), columns, cards; a running card shows its agent's activity (step, agent and model, `on <n>` with the task's text on hover, time since the last tick, running time, `waiting for you`) |
 | `drawer.js` | The peek drawer: nothing without a Tuckerbox repository, else the repository and its running and needs-you counts; a click toggles the board window |
 | `keys.json` | The toggle key `tuckerbox herdr install --keys` merges into the person's `keys.json` |
-| `card.js` | Card detail: proposal (markdown), tasks with tick boxes, approval, last validation, dependencies, rounds with findings and task scope, activity (every `activity` field and the run's ticks, newest first), history (newest first, local time), actions, and Run group… (where Start is offered, and on Ready cards with unticked tasks) |
+| `card.js` | Card detail: proposal (markdown), tasks with tick boxes, approval, last validation, dependencies, rounds with findings and task scope, activity (every `activity` field and the run's ticks, newest first), history (newest first, local time), step settings with their pickers, actions, and Run group… (where Start is offered, and on Ready cards with unticked tasks) |
 | `model.js` | Data rules with no Herdr imports: reading the document, grouping, counts, times, polling |
 | `actions.js` | Which actions each state offers, and `commandLine()`, the one function that builds every tuckerbox command line |
 | `perform.js` | Runs an action: `exec` of the tuckerbox command on the card's machine, or the Herdr tab, pane or view for it. With the fixtures it only says what it would run |
@@ -142,7 +142,7 @@ The command still exits non-zero with an error document.
 
 Proposed, Approved, In progress, and in the steps layout Queued and each
 step column, list their cards in priority order; Ready and Done keep their
-order (change-priority: Priority on the board). The mod groups cards in the
+order (board-data: Priority on the board). The mod groups cards in the
 document's order, so it sorts nothing itself.
 
 Default `[board] columns = "compact"` shows Proposed, Approved (when required),
@@ -185,6 +185,8 @@ machine default. `board.json` demonstrates steps; `detail.json` demonstrates com
 | `position` | number | Its place in priority order (priority, then age, then id), from 1. Absent on archived cards. The board shows it as `#n` |
 | `archived` | string | For Done cards: the archive date (`2026-11-08`). Their approval is `none`, with blank metadata and `committed: true`; no approval or commit checks are needed |
 | `activity` | object | On cards with a running, queued or stopped run: what its agent is doing, see below |
+| `settings` | list | Each workflow step's effective settings, in workflow order: `[{ "step", "agent", "model", "effort", "permissions", "started" }]`, each key `{ "value", "source" }` with `source` one of `change`, `repo`, `machine`, `default` and `value` `""` for the agent's own default (or no permission profile). For a step a run is running, the values it started with (from `run.json`), with `started: true`; otherwise what it would run with now. `[]` for archived cards |
+| `machines` | list of strings | The change's `machines` from its `tuckerbox.toml`, in order; `[]` for none |
 | `error` | string | Optional diagnostic when this card could only be read partially (missing worktree/change folder, malformed metadata, unreadable files or obsolete run step). Other cards remain available. Retained fields may be incomplete; a run with an absent or unknown step stays visible in In progress (compact) or Queued (steps), with badge `queued` |
 
 ### Activity (agent-activity)
@@ -213,6 +215,7 @@ machine default. `board.json` demonstrates steps; `detail.json` demonstrates com
 | `rounds` | list | `[{ "round", "result", "step", "summary", "findings", "ended" }]`: `result` is the round's last step result (`done`, `rejected`, `blocked`, `failed`, `stopped`) or `""` while it runs; `step` is the step that gave it |
 | `history` | list | The run history, oldest first, see below. The board shows it newest first |
 | `ticks` | list | The current run's `task_ticked` and `task_unticked` events as `{ "number", "at", "ticked", "step", "round" }`, newest first; the Activity timeline |
+| `choices` | object | The settings pickers' allow-list, from `[overrides]` in the repository config where `tuckerbox set` edits the change: `{ "agents", "models", "efforts", "permissions", "voids_approval" }`. `models` maps an agent to its allowed models; `voids_approval` lists the step keys whose change voids an approval (`agent`, `permissions`). Every list is empty when the repository has no `[overrides]` |
 
 A finding is `{ "severity", "file", "detail" }`, as agents write it
 (`critical`, `high`, `medium`, `low`, `info`; `file` may be `""`).
@@ -264,7 +267,17 @@ card says it wasn't validated since the edit and the detail offers Validate.
 | Tick, Untick | no queued or running run | `tuckerbox tasks <id> tick\|untick <n.m>` |
 | Open proposal | the card has an `edit_folder` | A pane with this mod's proposal view, read through `tuckerbox board --json --change` |
 | Reorder | drag a card within a sorted column (not into another) | `tuckerbox priority <id> <n>` |
+| Settings | a step key the allow-list permits, no queued or running run (card detail's Settings) | `tuckerbox set <id> step.<step>.<key>=<value>`; "repository default": `tuckerbox set <id> --unset step.<step>.<key>` |
 | Open worktree | the card has a `worktree` | `space.select` of a space already there, else `space.new` in the worktree on the card's machine |
+
+**Settings:** card detail lists each workflow step's agent, model, effort
+and permission profile with its source. Clicking a key the allow-list
+permits opens its picker: the allowed values (models for the step's
+effective agent) and "repository default". A pick runs `tuckerbox set` and
+shows its output, including the note that nothing was committed. On an
+approved change, a pick of `agent` or `permissions` first says it will void
+the approval and runs only on "Change it"; model and effort never ask. No
+picker is offered while a run is queued or running.
 
 **Reorder:** a press on a card and a move of more than a few pixels starts a
 drag; releasing over a card of the same sorted column drops it above that

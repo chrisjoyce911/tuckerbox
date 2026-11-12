@@ -42,6 +42,11 @@ Commands:
                             spec:<capability> in your editor, then validate
   validate <change> [--json]  Validate a change strictly
   tasks <change> tick|untick <n.m>  Tick or untick one task in tasks.md
+  set <change> <key>=<value> | --unset <key> [--json]
+                            Set or remove one of a change's own step
+                            settings (step.<step>.agent, model, effort,
+                            permissions) or machines, in its sidecar
+                            (not committed)
   approve <change>          Approve a change's text so runs may start it
   unapprove <change>        Withdraw a change's approval
   priority [--json]         List the active changes in priority order
@@ -163,6 +168,8 @@ func (a App) Run(args []string) int {
 		return a.validate(rest)
 	case "tasks":
 		return a.tasks(rest)
+	case "set":
+		return a.set(rest)
 	case "approve":
 		return a.approve(rest)
 	case "unapprove":
