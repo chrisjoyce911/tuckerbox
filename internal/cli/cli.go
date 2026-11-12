@@ -98,6 +98,7 @@ func (a App) Run(args []string) int {
 			fmt.Fprintln(a.Stderr, "tuckerbox:", err)
 			return 1
 		}
+		fmt.Fprintln(a.Stdout, a.backendDoctorLine())
 		if line := a.herdrDoctorLine(); line != "" {
 			fmt.Fprintln(a.Stdout, line)
 		}

@@ -115,6 +115,11 @@ func (a App) run(args []string) int {
 	if !ok {
 		return 1
 	}
+	// Before anything is validated or made: agent_backend = "terminal"
+	// without a working herdr-core refuses the run and leaves no state.
+	if _, err := a.chooseBackend(cfg.AgentBackend); err != nil {
+		return a.errf("run", "%v", err)
+	}
 	ctx := context.Background()
 	ospec := runs.OpenSpec{Dir: repo.Root}
 	changes := pos

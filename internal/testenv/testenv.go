@@ -25,6 +25,9 @@ type Tools struct {
 	Bin string
 	// Tuckerbox is the tuckerbox binary, if it was built.
 	Tuckerbox string
+	// HCBin is a directory holding a fake herdr-core "hc" (see
+	// testdata/fakehc). It is not on PATH unless a test puts it there.
+	HCBin string
 }
 
 func exe(name string) string {
@@ -60,10 +63,11 @@ func Build(withTuckerbox bool) (*Tools, error) {
 	if err != nil {
 		return nil, err
 	}
-	t := &Tools{Dir: dir, FakeAgent: filepath.Join(dir, exe("fakeagent")), Bin: filepath.Join(dir, "bin")}
+	t := &Tools{Dir: dir, FakeAgent: filepath.Join(dir, exe("fakeagent")), Bin: filepath.Join(dir, "bin"), HCBin: filepath.Join(dir, "hcbin")}
 	steps := [][2]string{
 		{t.FakeAgent, "./testdata/fakeagent"},
 		{filepath.Join(t.Bin, exe("openspec")), "./testdata/fakeopenspec"},
+		{filepath.Join(t.HCBin, exe("hc")), "./testdata/fakehc"},
 	}
 	if withTuckerbox {
 		t.Tuckerbox = filepath.Join(dir, exe("tuckerbox"))
@@ -89,6 +93,25 @@ var NoNetwork = map[string]string{
 	"SSH_ASKPASS":         "echo",
 	"GCM_INTERACTIVE":     "never",
 	"GIT_SSH_COMMAND":     "ssh -o BatchMode=yes",
+}
+
+// PathWithout returns the PATH list path without the directories that hold
+// a program called name, so a test can run as on a machine without it.
+func PathWithout(path, name string) string {
+	var keep []string
+	for _, dir := range filepath.SplitList(path) {
+		if dir == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, exe(name))); err == nil {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			continue
+		}
+		keep = append(keep, dir)
+	}
+	return strings.Join(keep, string(os.PathListSeparator))
 }
 
 // Remove deletes the built programs.

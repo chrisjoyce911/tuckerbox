@@ -191,10 +191,11 @@ func TestDoctorReportsTheBoardMod(t *testing.T) {
 	if !strings.Contains(out.String(), "warning: herdr board mod (v0.0.1) is not the one this tuckerbox") || !strings.Contains(out.String(), "tuckerbox herdr install") {
 		t.Errorf("out %q", out)
 	}
-	// No Herdr: no line.
+	// No Herdr: no board mod line (the agent backend line may name
+	// herdr-core, which is a different program).
 	b, out2, _ := herdrApp(t, filepath.Join(home, "absent"), tools...)
 	b.Run([]string{"doctor"})
-	if strings.Contains(out2.String(), "herdr") {
+	if strings.Contains(out2.String(), "herdr board mod") || strings.Contains(out2.String(), "herdr install") {
 		t.Errorf("out %q", out2)
 	}
 }

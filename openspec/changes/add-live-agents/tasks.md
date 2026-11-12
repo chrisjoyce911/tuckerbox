@@ -2,12 +2,12 @@
 
 ## 1. Backend choice (repo-config, agent-terminals, agent-launch)
 
-- [ ] 1.1 Parse machine-only `agent_backend` (`auto`, `terminal`, `headless`); refuse it in repository config; `doctor` reports the backend and why; document it in README
-- [ ] 1.2 Test "Repository sets the backend"
-- [ ] 1.3 Test "No herdr-core" (no `hc` on PATH; headless; doctor's reason)
-- [ ] 1.4 Test "Terminal asked for without herdr-core" (fake `hc` whose `server status` fails; no run state)
-- [ ] 1.5 Backend interface in `internal/agent`; today's `Run` becomes the headless backend unchanged
-- [ ] 1.6 Test "Following a running step" and "Headless fallback" (existing headless tests pass through the interface)
+- [x] 1.1 Parse machine-only `agent_backend` (`auto`, `terminal`, `headless`); refuse it in repository config; `doctor` reports the backend and why; document it in README
+- [x] 1.2 Test "Repository sets the backend"
+- [x] 1.3 Test "No herdr-core" (no `hc` on PATH; headless; doctor's reason)
+- [x] 1.4 Test "Terminal asked for without herdr-core" (fake `hc` whose `server status` fails; no run state)
+- [x] 1.5 Backend interface in `internal/agent`; today's `Run` becomes the headless backend unchanged
+- [x] 1.6 Test "Following a running step" and "Headless fallback" (existing headless tests pass through the interface)
 
 ## 2. Terminal backend (agent-terminals)
 
