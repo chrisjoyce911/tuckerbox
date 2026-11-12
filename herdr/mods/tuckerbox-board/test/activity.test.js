@@ -1,12 +1,14 @@
 // A run's activity on the board and in card detail, and Watch
 // (agent-activity: Activity on the board, Waiting for a person;
 // agent-terminals: Watch from the board).   node --test test/
-process.env.TZ = "Australia/Brisbane";
+// Activity times are Brisbane time whatever the computer's time zone, so
+// these run in New York's.
+process.env.TZ = "America/New_York";
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { normaliseBoard, normaliseCard, normaliseDetail, counts, drawerRows, needsYou, activityLine, activityRows, duration, eventText } from "../model.js";
+import { normaliseBoard, normaliseCard, normaliseDetail, counts, drawerRows, needsYou, activityLine, activityRows, duration, eventText, fmtBrisbane, fmtLocal } from "../model.js";
 import { detailActions, cardActions, invocation, herdrCall, commandLine, actionLabel } from "../actions.js";
 
 const raw = (name) => JSON.parse(readFileSync(new URL(`../fixtures/${name}`, import.meta.url), "utf8"));
@@ -70,6 +72,21 @@ const body = source
   .replace(/^import .* from "(?!file:).*";\n/gm, "");
 const { CardView } = await import(`data:text/javascript;base64,${Buffer.from(stubs + body).toString("base64")}`);
 
+// The board's cards through the same stand-in, with the real model and
+// actions.
+const boardStubs = stubs.replace("const div = node, h_flex = node, v_flex = node, TextView = { markdown: node };",
+  "const div = node, h_flex = node, v_flex = node, svg = node;") + `
+const openOverlay = () => {}, spaces = () => [], panes = () => [], focused = () => null, run = async () => ({}), notify = () => {};
+const MOD = "tuckerbox-board", loadAll = async () => null, locate = () => null, candidates = () => [], fixturesFolder = () => "";
+const SPINNER = "";
+`;
+const boardBody = readFileSync(new URL("../board.js", import.meta.url), "utf8")
+  .replace(/^import .* from "\.\/model\.js";\n/m, (l) => l.replace("./model.js", model))
+  .replace(/^import .* from "\.\/actions\.js";\n/m, (l) => l.replace("./actions.js", actions))
+  .replace(/^import .* from "(?!file:).*";\n/gm, "");
+const { BoardView } = await import(`data:text/javascript;base64,${Buffer.from(boardStubs + boardBody).toString("base64")}`);
+const boardView = () => { const v = new BoardView(); v.board = { columns: [], steps: ["plan", "build", "review"], require_approval: true }; return v; };
+
 test("Owner opens a running card: step, agent, model and effort, round, task, last tick, times and last activity", () => {
   const c = running();
   const view = new CardView();
@@ -89,9 +106,11 @@ test("Owner opens a running card: step, agent, model and effort, round, task, la
   assert.equal(rows["Step running"], "25m, since 08:50");
   assert.equal(rows["Run running"], "1h 10m, since 08:05");
   assert.equal(rows["Last activity"], "09:14 (1m ago)");
-  // The ticks of the current run as a timeline, newest first.
+  // The ticks of the current run as a timeline, newest first, at their
+  // Brisbane times (09:11 and 08:57 on 12 Nov).
   const t2 = text.indexOf("ticked 2.2 in build · round 2"), t1 = text.indexOf("ticked 2.1 in build · round 2");
   assert.ok(t2 >= 0 && t1 > t2, `tick timeline:\n${text}`);
+  assert.ok(/(^|\s)09:11$/m.test(text) && /(^|\s)08:57$/m.test(text), `tick times in Brisbane time:\n${text}`);
   assert.equal(eventText(detail.history[0]), "Ticked 2.2 build");
 });
 
@@ -113,6 +132,30 @@ test("Quiet agent: running for 25 minutes, last activity 12 minutes ago", () => 
   const a = activityLine(c, NOW);
   assert.equal(a.running, "running 25m");
   assert.equal(a.last, "last activity 12m ago");
+  // The card on the board shows both.
+  const now = Date.now(), before = (m) => new Date(now - m * 60000).toISOString();
+  const shown = running({ step_started: before(25), last_activity: before(12), last_tick: null, backend: "headless", terminal: null });
+  const text = boardView().card(shown).text.join("\n");
+  for (const want of ["build", "claude · opus", "on 2.3", "running 25m", "last activity 12m ago"]) {
+    assert.ok(text.includes(want), `card lacks ${JSON.stringify(want)}:\n${text}`);
+  }
+  assert.ok(!text.includes("waiting for you"));
+  assert.ok(boardView().card(running({ ...shown.activity, agent_state: "waiting for you" })).text.includes("waiting for you"));
+});
+
+test("activity times are Brisbane time on any computer, with Brisbane's day boundaries", () => {
+  assert.equal(new Date(NOW).getTimezoneOffset() > 0, true, "the test runs west of UTC");
+  const now = new Date("2026-11-13T00:10:00+10:00");
+  // 23:30 yesterday in Brisbane, though the same day (08:30) in New York.
+  assert.equal(fmtBrisbane("2026-11-12T23:30:00+10:00", now), "12 Nov 23:30");
+  assert.equal(fmtLocal("2026-11-12T23:30:00+10:00", now), "08:30");
+  assert.equal(fmtBrisbane("2026-11-12T14:05:00Z", now), "00:05");
+  assert.equal(fmtBrisbane("2025-12-31T14:30:00Z", now), "1 Jan 00:30");
+  assert.equal(fmtBrisbane("2025-12-31T13:30:00Z", now), "31 Dec 2025 23:30");
+  assert.equal(fmtBrisbane("", now), "");
+  const rows = Object.fromEntries(activityRows(running({ step_started: "2026-11-12T23:30:00+10:00", last_activity: "2026-11-13T00:05:00+10:00" }), now.getTime()));
+  assert.equal(rows["Step running"], "40m, since 12 Nov 23:30");
+  assert.equal(rows["Last activity"], "00:05 (5m ago)");
 });
 
 test("Permission prompt: a waiting card shows waiting for you and counts in the board's and drawer's needs-you count", () => {

@@ -5,7 +5,7 @@ import { View, div } from "gpui-kit";
 import { v_flex, h_flex, TextView } from "gpui-base";
 import { theme, props, closeOverlay } from "herdr";
 import { loadDetail } from "./data.js";
-import { normaliseCard, cardAt, columnName, newestFirst, eventText, fmtLocal, taskGroups, approvalBadge, isActive, activityRows, waitingForYou, ago } from "./model.js";
+import { normaliseCard, cardAt, columnName, newestFirst, eventText, fmtLocal, fmtBrisbane, taskGroups, approvalBadge, isActive, activityRows, waitingForYou, ago } from "./model.js";
 import { detailActions, invocation, actionLabel, defaultStep, rerunSteps, runGroups, canEdit, EDIT_FILES, ACTIONS } from "./actions.js";
 import { perform, validate, watchEdits, changed } from "./perform.js";
 import { editOf, editNote } from "./edits.js";
@@ -152,7 +152,7 @@ export class CardView extends View {
         .child(div().flex_1().min_w(0).text_color(tm.foreground).child(v))))
       .when(ticks.length > 0, (el) => el.child(div().pt(6).pb(2).text_size(11).font_medium().text_color(tm.muted).child("Ticks"))
         .children(ticks.map((t, i) => h_flex().id(`tick-${i}`).items_start().gap(8)
-          .child(div().flex_none().w(84).text_color(tm.dim).child(fmtLocal(t.at)))
+          .child(div().flex_none().w(84).text_color(tm.dim).child(fmtBrisbane(t.at)))
           .child(dot(t.ticked ? tm.working : tm.dim, 7).mt(5))
           .child(div().flex_1().min_w(0).text_color(tm.muted).child(`${t.ticked ? "ticked" : "unticked"} ${t.number}${t.step ? ` in ${t.step}` : ""}${t.round ? ` · round ${t.round}` : ""}`))
           .child(div().flex_none().text_size(10.5).text_color(tm.dim).child(ago(t.at))))));

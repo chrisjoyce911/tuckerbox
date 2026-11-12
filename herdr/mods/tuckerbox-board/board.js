@@ -172,7 +172,8 @@ export class BoardView extends View {
 
   // A running card's agent (agent-activity: Activity on the board): step,
   // agent and model, "on <n>" with the task's text on hover, the time since
-  // the last tick, the step's running time, and waiting for you.
+  // the last tick, the step's running time, the last activity, and waiting
+  // for you.
   activity(c) {
     const tm = theme();
     const a = activityLine(c);
@@ -184,6 +185,7 @@ export class BoardView extends View {
       .child(h_flex().items_center().gap(6).flex_wrap()
         .when(Boolean(a.tick), (el) => el.child(div().child(a.tick)))
         .when(Boolean(a.running), (el) => el.child(div().child(a.running)))
+        .when(Boolean(a.last), (el) => el.child(div().child(a.last)))
         .when(a.waiting, (el) => el.child(div().text_color(tm.blocked).font_medium().child("waiting for you"))));
   }
 

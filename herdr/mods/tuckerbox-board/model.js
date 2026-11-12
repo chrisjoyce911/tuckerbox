@@ -335,6 +335,21 @@ export function fmtLocal(iso, now = new Date()) {
   return d.getFullYear() === now.getFullYear() ? `${day} ${hm}` : `${day} ${d.getFullYear()} ${hm}`;
 }
 
+// A time in Brisbane time (Australia/Brisbane, UTC+10 all year: Queensland
+// has no daylight saving), whatever this computer's time zone: "09:15" on
+// Brisbane's today, else "12 Nov 09:15", with the year when it isn't
+// Brisbane's this year.
+const BRISBANE_MS = 10 * 3600 * 1000;
+export function fmtBrisbane(iso, now = new Date()) {
+  const t = Date.parse(iso);
+  if (!iso || Number.isNaN(t)) return "";
+  const d = new Date(t + BRISBANE_MS), n = new Date(now.getTime() + BRISBANE_MS);
+  const hm = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  if (d.getUTCFullYear() === n.getUTCFullYear() && d.getUTCMonth() === n.getUTCMonth() && d.getUTCDate() === n.getUTCDate()) return hm;
+  const day = `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+  return d.getUTCFullYear() === n.getUTCFullYear() ? `${day} ${hm}` : `${day} ${d.getUTCFullYear()} ${hm}`;
+}
+
 export function ago(iso, now = Date.now()) {
   const t = Date.parse(iso);
   if (!iso || Number.isNaN(t)) return "";
@@ -379,18 +394,18 @@ export function activityLine(card, now = Date.now()) {
 }
 
 // Every activity field for card detail, as [label, value] rows; empty
-// values are left out.
+// values are left out. Times are Brisbane time.
 export function activityRows(card, now = Date.now()) {
   const a = card?.activity;
   if (!a) return [];
-  const at = (iso) => (iso ? `${fmtLocal(iso, new Date(now))} (${ago(iso, now)})` : "");
+  const at = (iso) => (iso ? `${fmtBrisbane(iso, new Date(now))} (${ago(iso, now)})` : "");
   const rows = [
     ["Step", a.step ? `${a.step}${a.round ? ` · round ${a.round}` : ""}` : ""],
     ["Agent", [a.agent, a.model, a.effort && `effort ${a.effort}`].filter(Boolean).join(" · ")],
     ["Task", a.task ? `${a.task_label}: ${a.task.text}` : a.task_label],
     ["Last tick", a.last_tick ? `${a.last_tick.number} ticked ${at(a.last_tick.at)}` : "no ticks yet"],
-    ["Step running", a.step_started ? `${duration(a.step_started, now)}, since ${fmtLocal(a.step_started, new Date(now))}` : ""],
-    ["Run running", a.run_started ? `${duration(a.run_started, now)}, since ${fmtLocal(a.run_started, new Date(now))}` : ""],
+    ["Step running", a.step_started ? `${duration(a.step_started, now)}, since ${fmtBrisbane(a.step_started, new Date(now))}` : ""],
+    ["Run running", a.run_started ? `${duration(a.run_started, now)}, since ${fmtBrisbane(a.run_started, new Date(now))}` : ""],
     ["Last activity", at(a.last_activity)],
     ["Agent state", a.agent_state],
     ["Backend", a.backend + (a.terminal ? ` · terminal ${a.terminal.address}${a.terminal.machine ? ` on ${a.terminal.machine}` : ""}` : "")],
