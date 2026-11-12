@@ -16,9 +16,9 @@ const detail = normaliseBoard(raw("detail.json"));
 
 // The fields README.md lists. The fixtures must have each one, so the
 // board-data worker can build `tuckerbox board --json` from them.
-const DOC_KEYS = ["version", "repo", "path", "machine", "require_approval", "columns", "cards"];
+const DOC_KEYS = ["version", "repo", "path", "machine", "require_approval", "steps", "columns", "cards"];
 const COLUMN_KEYS = ["id", "kind", "name"];
-const CARD_KEYS = ["change", "title", "column", "tasks", "approval", "state", "reason", "step", "agent", "round",
+const CARD_KEYS = ["change", "title", "column", "tasks", "approval", "state", "reason", "badge", "step", "agent", "round",
   "since", "branch", "worktree", "machine", "edit_folder", "depends_on"];
 const DETAIL_KEYS = ["change", "proposal", "specs", "tasks", "rounds", "history"];
 const EVENT_KEYS = ["at", "event", "step", "round", "agent", "machine"];
@@ -244,4 +244,15 @@ test("the mod's folder from a stack line", () => {
   assert.equal(dirFromStack("at f (C:\\Users\\me\\mods\\tuckerbox-board\\data.js:1:2)", "data.js"), "C:\\Users\\me\\mods\\tuckerbox-board");
   assert.equal(dirFromStack("at f (/x/mydata.js:1:2)", "data.js"), null);
   assert.equal(dirFromStack("nothing here", "data.js"), null);
+});
+
+test("compact fixture: In progress keeps step badges and all rerun choices", async () => {
+  const { rerunSteps } = await import("../actions.js");
+  assert.deepEqual(detail.columns.map((c) => c.id), ["proposed", "approved", "in_progress", "ready", "done"]);
+  const col = group(detail).find((c) => c.id === "in_progress");
+  assert.equal(col.cards[0].badge, "review");
+  assert.equal(col.cards[0].state, "blocked");
+  assert.deepEqual(rerunSteps(col.cards[0], detail), ["plan", "build", "review"]);
+  const queued = normaliseBoard({ ...raw("detail.json"), cards: [{ change: "waiting", column: "in_progress", state: "queued", step: "build", badge: "queued" }] });
+  assert.equal(group(queued).find((c) => c.id === "in_progress").cards[0].badge, "queued");
 });

@@ -102,18 +102,29 @@ func TestNoRunsAndApproval(t *testing.T) {
 	}
 }
 func TestColumns(t *testing.T) {
-	for _, required := range []bool{true, false} {
-		cfg := &config.Config{RequireApproval: required, Steps: []config.Step{{ID: "plan"}, {ID: "build"}, {ID: "review"}}}
-		var names []string
-		for _, c := range columns(cfg) {
-			names = append(names, c.Name)
-		}
-		want := "Proposed,Approved,Queued,Plan,Build,Review,Ready,Done"
-		if !required {
-			want = "Proposed,Queued,Plan,Build,Review,Ready,Done"
-		}
-		if strings.Join(names, ",") != want {
-			t.Fatal(names)
+	for _, layout := range []config.BoardColumns{"", config.BoardCompact, config.BoardSteps} {
+		for _, required := range []bool{true, false} {
+			cfg := &config.Config{BoardColumns: layout, RequireApproval: required, Steps: []config.Step{{ID: "plan"}, {ID: "build"}, {ID: "review"}}}
+			want := []string{"proposed"}
+			if required {
+				want = append(want, "approved")
+			}
+			if layout == config.BoardSteps {
+				want = append(want, "queued", "step:plan", "step:build", "step:review")
+			} else {
+				want = append(want, "in_progress")
+			}
+			want = append(want, "ready", "done")
+			var ids []string
+			for _, c := range columns(cfg) {
+				ids = append(ids, c.ID)
+				if c.ID == "in_progress" && c.Name != "In progress" {
+					t.Fatal(c)
+				}
+			}
+			if !reflect.DeepEqual(ids, want) {
+				t.Fatalf("%s approval=%v: %v, want %v", layout, required, ids, want)
+			}
 		}
 	}
 }
@@ -148,6 +159,12 @@ func TestRunsDependenciesAndDetail(t *testing.T) {
 	testTools.Setup(t)
 	ids := []string{"add-login", "add-users", "waiting", "ready-change", "failed-change", "stopped-change"}
 	root := testTools.NewRepo(t, testenv.RepoOptions{Changes: ids, RequireApproval: true})
+	configPath := filepath.Join(root, config.RepoFile)
+	original, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testenv.WriteFile(t, configPath, string(original)+"\n[board]\ncolumns = 'steps'\n")
 	wt := filepath.Join(filepath.Dir(root), "repo-worktrees", "add-login")
 	testenv.Git(t, root, "worktree", "add", "-qb", "tuckerbox/add-login", wt)
 	// The board must read the worktree, including its uncommitted edits.
@@ -182,7 +199,7 @@ func TestRunsDependenciesAndDetail(t *testing.T) {
 		id    string
 		state runs.State
 		step  string
-	}{{"add-users", runs.Running, "build"}, {"waiting", runs.Queued, ""}, {"ready-change", runs.Ready, ""}, {"failed-change", runs.Failed, "build"}, {"stopped-change", runs.Stopped, "review"}} {
+	}{{"add-users", runs.Running, "build"}, {"waiting", runs.Queued, "build"}, {"ready-change", runs.Ready, ""}, {"failed-change", runs.Failed, "build"}, {"stopped-change", runs.Stopped, "review"}} {
 		path := filepath.Join(filepath.Dir(root), "repo-worktrees", item.id)
 		testenv.Git(t, root, "worktree", "add", "-qb", item.id, path)
 		s, err := statedir.Resolve(context.Background(), path)
@@ -221,6 +238,25 @@ func TestRunsDependenciesAndDetail(t *testing.T) {
 	}
 	if len(detail.Tasks) != 2 || detail.Tasks[0].Number != "2.1" || !detail.Tasks[0].Checked || detail.Tasks[0].Group != "2. Sign in" || len(detail.Specs) != 1 || detail.Specs[0].Capability != "login" {
 		t.Fatal(detail)
+	}
+	assertShape(t, d, "detail.json")
+	// Omit board.columns: compact is the default, and dependencies use the same ids.
+	testenv.WriteFile(t, configPath, string(original))
+	d = read(t, root, "add-login")
+	for id, badge := range map[string]string{"add-login": "review", "add-users": "build", "waiting": "queued", "failed-change": "build", "stopped-change": "review"} {
+		c := card(t, d, id)
+		if c.Column != "in_progress" || c.Badge != badge {
+			t.Fatal(c)
+		}
+	}
+	if c := card(t, d, "ready-change"); c.Column != "ready" || c.Badge != "" {
+		t.Fatal(c)
+	}
+	if c := card(t, d, "add-login"); c.DependsOn[0].Column != "in_progress" {
+		t.Fatal(c)
+	}
+	if !reflect.DeepEqual(d.Steps, []string{"build", "review"}) {
+		t.Fatal(d.Steps)
 	}
 	assertShape(t, d, "detail.json")
 }
@@ -418,7 +454,7 @@ func TestCrashedRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := card(t, read(t, root, ""), "add-login")
-	if c.State != "stopped" || c.Reason != runs.Crashed || c.Column != "step:build" {
+	if c.State != "stopped" || c.Reason != runs.Crashed || c.Column != "in_progress" || c.Badge != "build" {
 		t.Fatal(c)
 	}
 	stored, err := runs.ReadRun(st.RunFile())

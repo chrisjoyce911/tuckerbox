@@ -49,7 +49,7 @@ export class CardView extends View {
         this.error = null;
         const card = d.cards.find((c) => c.change === this.change);
         if (card) this.card = { ...card, on: at.on, path: d.path || at.cwd };
-        this.board = { ...this.board, columns: d.columns, require_approval: d.require_approval, path: d.path };
+        this.board = { ...this.board, columns: d.columns, steps: d.steps, require_approval: d.require_approval, path: d.path };
         this.detail = d.detail && d.detail.change === this.change ? d.detail : null;
         if (!this.detail) this.error = `No detail for ${this.change} in what tuckerbox printed.`;
       }

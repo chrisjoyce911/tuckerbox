@@ -156,19 +156,31 @@ func TestMissingRunStepFallsBackToExistingColumn(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	d := read(t, root, "")
-	for _, c := range d.Cards {
-		if c.Column != "queued" || c.Error == "" || c.State != "blocked" {
-			t.Fatal(c)
+	configPath := filepath.Join(root, ".tuckerbox", "config.toml")
+	original, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, layout := range []string{"compact", "steps"} {
+		testenv.WriteFile(t, configPath, string(original)+"\n[board]\ncolumns = '"+layout+"'\n")
+		d := read(t, root, "")
+		want := "in_progress"
+		if layout == "steps" {
+			want = "queued"
 		}
-		exists := false
-		for _, col := range d.Columns {
-			if col.ID == c.Column {
-				exists = true
+		for _, c := range d.Cards {
+			if c.Column != want || c.Badge != "queued" || c.Error == "" || c.State != "blocked" {
+				t.Fatal(c)
 			}
-		}
-		if !exists {
-			t.Fatal(c)
+			exists := false
+			for _, col := range d.Columns {
+				if col.ID == c.Column {
+					exists = true
+				}
+			}
+			if !exists {
+				t.Fatal(c)
+			}
 		}
 	}
 }

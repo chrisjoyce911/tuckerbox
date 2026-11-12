@@ -70,6 +70,12 @@ export default class Main extends View {
   },
 };
 
+views.compact = {
+  ...views.board,
+  fixture: detail,
+  want: ["Tuckerbox", "Proposed", "Approved", "In progress", "Ready", "Done", "review", "review limit reached"],
+};
+
 let failed = 0;
 for (const [name, v] of Object.entries(views)) {
   const dir = mkdtempSync(join(tmpdir(), `tuckerbox-board-${name}-`));

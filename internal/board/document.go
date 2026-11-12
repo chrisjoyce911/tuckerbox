@@ -12,6 +12,7 @@ type Document struct {
 	Path            string   `json:"path"`
 	Machine         string   `json:"machine"`
 	RequireApproval bool     `json:"require_approval"`
+	Steps           []string `json:"steps"`
 	Columns         []Column `json:"columns"`
 	Cards           []Card   `json:"cards"`
 	Detail          *Detail  `json:"detail,omitempty"`
@@ -45,6 +46,7 @@ type Card struct {
 	Approval   Approval     `json:"approval"`
 	State      string       `json:"state"`
 	Reason     string       `json:"reason"`
+	Badge      string       `json:"badge"`
 	Step       string       `json:"step"`
 	Agent      string       `json:"agent"`
 	Round      int          `json:"round"`

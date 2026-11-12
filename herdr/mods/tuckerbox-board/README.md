@@ -80,6 +80,7 @@ in the machine’s local zone, with its offset. Fields may be added; renaming or
 | `path` | string | The repository checkout on this machine. Board actions run here |
 | `machine` | string | This machine's name |
 | `require_approval` | bool | The repository's `require_approval`; `false` means no Approved column and Start on Proposed cards |
+| `steps` | list of strings | Workflow step ids in order, used for Re-run in either layout |
 | `columns` | list | In board order, see below |
 | `cards` | list | Every active change and the 20 most recently archived, see below |
 | `detail` | object | Only with `--change`, see below |
@@ -91,14 +92,20 @@ its root (`config.ErrNoRepoConfig`). The board then says so and offers `tuckerbo
 (herdr-board: Space outside a repository). Other codes are shown as they are.
 The command still exits non-zero with an error document.
 
+Default `[board] columns = "compact"` shows Proposed, Approved (when required),
+In progress, Ready, Done. In progress combines queued runs and every workflow
+step, including stopped, blocked and failed runs. `columns = "steps"` shows
+Queued and each workflow step separately. Repository config overrides the
+machine default. `board.json` demonstrates steps; `detail.json` demonstrates compact.
+
 ### Column
 
 | Field | Type | Meaning |
 |---|---|---|
-| `id` | string | `proposed`, `approved`, `queued`, `step:<step>`, `ready`, `done`. Cards name their column by this id |
-| `kind` | string | `proposed`, `approved`, `queued`, `step`, `ready` or `done` |
-| `step` | string | The workflow step, for `kind: "step"`. Re-run offers these steps, in this order |
-| `name` | string | What the board shows: `Proposed`, `Approved`, `Queued`, the step's name capitalised, `Ready`, `Done` |
+| `id` | string | `proposed`, `approved`, `in_progress`, `queued`, `step:<step>`, `ready`, `done`. Cards name their column by this id |
+| `kind` | string | `proposed`, `approved`, `in_progress`, `queued`, `step`, `ready` or `done` |
+| `step` | string | The workflow step, for `kind: "step"`. Legacy documents use these for Re-run; new documents use `steps` |
+| `name` | string | What the board shows: `Proposed`, `Approved`, `In progress`, `Queued`, the step's name capitalised, `Ready`, `Done` |
 
 ### Card
 
@@ -111,6 +118,7 @@ The command still exits non-zero with an error document.
 | `approval` | object | `{ "state", "by", "at", "committed" }`: `state` is `approved`, `stale` or `none`; `by` the git `user.name`, `at` the time; `committed` is `false` when the approval or a hashed file has uncommitted changes in `edit_folder` |
 | `state` | string | The run's state: `queued`, `running`, `blocked`, `stopped`, `failed`, `ready`, or `""` with no run (and for archived changes) |
 | `reason` | string | Why it is queued, blocked or failed (`waiting on add-users`, `review limit reached`) |
+| `badge` | string | Current workflow step or `queued` for in-progress cards; empty otherwise. Displayed as a small badge |
 | `step` | string | The run's current step |
 | `agent` | string | The current step's agent (`claude`, `codex`) |
 | `round` | number | The run's round, from 1; `0` with no run |
@@ -121,7 +129,7 @@ The command still exits non-zero with an error document.
 | `edit_folder` | string | Where `tuckerbox edit` would edit: the worktree if there is one, else the checkout. Open proposal reads `<edit_folder>/openspec/changes/<change>/proposal.md` |
 | `depends_on` | list | `[{ "change", "column" }]`: each dependency with the column id it is in (`done` when archived, `""` when unknown) |
 | `archived` | string | For Done cards: the archive date (`2026-11-08`). Their approval is `none`, with blank metadata and `committed: true`; no approval or commit checks are needed |
-| `error` | string | Optional diagnostic when this card could only be read partially (missing worktree/change folder, malformed metadata, unreadable files or obsolete run step). Other cards remain available. Retained fields may be incomplete; a run with an absent or unknown step stays visible in Queued |
+| `error` | string | Optional diagnostic when this card could only be read partially (missing worktree/change folder, malformed metadata, unreadable files or obsolete run step). Other cards remain available. Retained fields may be incomplete; a run with an absent or unknown step stays visible in In progress (compact) or Queued (steps), with badge `queued` |
 
 ### Detail (`--change <id>`)
 

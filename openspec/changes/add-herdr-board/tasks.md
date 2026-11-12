@@ -41,6 +41,8 @@
 - [x] 5.4 Normalised remote URL as the repository key
 - [x] 5.5 Tests for each board-data scenario; JSON schema snapshot test
 
+- [x] 5.6 Default compact board columns with repo/machine `board.columns`, steps opt-in, validation, card badges, mod rendering and tests for both layouts
+
 ## 6. Herdr mod (herdr-board)
 
 - [x] 6.1 `herdr/mods/tuckerbox-board/`: board view with header counts, columns and cards (look based on Kelpie's board), approval badge on each card

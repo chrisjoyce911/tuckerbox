@@ -124,6 +124,8 @@ type Config struct {
 	Ship ShipMode
 	// Worktree holds the worktree and branch settings for runs.
 	Worktree Worktree
+	// BoardColumns defaults to compact; steps shows each workflow step separately.
+	BoardColumns BoardColumns
 
 	// Agents holds the agent command templates defined in config, by name:
 	// custom agents from either file and machine overrides of built-ins. An
@@ -142,6 +144,14 @@ type Config struct {
 	// repository config sets require_approval = false.
 	RequireApproval bool
 }
+
+// BoardColumns selects the board layout. Repository values override machine defaults.
+type BoardColumns string
+
+const (
+	BoardCompact BoardColumns = "compact"
+	BoardSteps   BoardColumns = "steps"
+)
 
 // Step is one step of the workflow.
 type Step struct {

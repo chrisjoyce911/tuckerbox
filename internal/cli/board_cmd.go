@@ -45,9 +45,9 @@ func (a App) board(args []string) int {
 	if asJSON {
 		return a.writeJSON(doc)
 	}
-	rows := [][]string{{"CHANGE", "TITLE", "COLUMN", "TASKS", "STATE", "REASON", "ERROR"}}
+	rows := [][]string{{"CHANGE", "TITLE", "COLUMN", "BADGE", "TASKS", "STATE", "REASON", "ERROR"}}
 	for _, c := range doc.Cards {
-		rows = append(rows, []string{c.Change, c.Title, c.Column, strconv.Itoa(c.Tasks.Done) + "/" + strconv.Itoa(c.Tasks.Total), dash(c.State), c.Reason, c.Error})
+		rows = append(rows, []string{c.Change, c.Title, c.Column, c.Badge, strconv.Itoa(c.Tasks.Done) + "/" + strconv.Itoa(c.Tasks.Total), dash(c.State), c.Reason, c.Error})
 	}
 	writeTable(a.Stdout, rows)
 	if doc.Detail != nil {

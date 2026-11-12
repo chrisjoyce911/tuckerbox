@@ -4,13 +4,11 @@
   "path": "/work/shop",
   "machine": "studio",
   "require_approval": true,
+  "steps": ["plan", "build", "review"],
   "columns": [
     { "id": "proposed", "kind": "proposed", "name": "Proposed" },
     { "id": "approved", "kind": "approved", "name": "Approved" },
-    { "id": "queued", "kind": "queued", "name": "Queued" },
-    { "id": "step:plan", "kind": "step", "step": "plan", "name": "Plan" },
-    { "id": "step:build", "kind": "step", "step": "build", "name": "Build" },
-    { "id": "step:review", "kind": "step", "step": "review", "name": "Review" },
+    { "id": "in_progress", "kind": "in_progress", "name": "In progress" },
     { "id": "ready", "kind": "ready", "name": "Ready" },
     { "id": "done", "kind": "done", "name": "Done" }
   ],
@@ -18,12 +16,12 @@
     {
       "change": "add-login-page",
       "title": "add login page",
-      "column": "step:review",
+      "column": "in_progress",
       "tasks": { "done": 3, "total": 5 },
       "approval": { "state": "approved", "by": "Sam Example", "at": "2026-11-10T09:00:00+10:00", "committed": true },
       "state": "blocked",
       "reason": "review limit reached",
-      "step": "review",
+      "badge": "review", "step": "review",
       "agent": "codex",
       "round": 3,
       "since": "2026-11-12T08:15:30+10:00",
@@ -31,7 +29,7 @@
       "worktree": "/work/shop-worktrees/add-login-page",
       "machine": "studio",
       "edit_folder": "/work/shop-worktrees/add-login-page",
-      "depends_on": [{ "change": "add-users", "column": "step:build" }]
+      "depends_on": [{ "change": "add-users", "column": "in_progress" }]
     }
   ],
   "detail": {

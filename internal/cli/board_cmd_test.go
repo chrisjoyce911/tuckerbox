@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/board"
+	"github.com/chrisjoyce911/tuckerbox/internal/runs"
+	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 	"github.com/chrisjoyce911/tuckerbox/internal/testenv"
 )
 
@@ -109,5 +112,52 @@ func TestBoardCLIKeepsBrokenCard(t *testing.T) {
 	text := f.tb("board")
 	if text.code != 0 || !strings.Contains(text.stdout, "ERROR") {
 		t.Fatal(text)
+	}
+}
+
+func TestBoardLayoutsAndCheck(t *testing.T) {
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}})
+	wt := filepath.Join(filepath.Dir(f.repo), "repo-worktrees", "add-login")
+	testenv.Git(t, f.repo, "worktree", "add", "-qb", "add-login", wt)
+	st, err := statedir.Resolve(context.Background(), wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runs.WriteRun(st.RunFile(), &runs.Run{Change: "add-login", Worktree: wt, State: runs.Blocked, Step: "build"}); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(f.repo, ".tuckerbox", "config.toml")
+	original, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, layout := range []string{"compact", "steps"} {
+		testenv.WriteFile(t, configPath, string(original)+"\n[board]\ncolumns = '"+layout+"'\n")
+		want := "in_progress"
+		if layout == "steps" {
+			want = "step:build"
+		}
+		for _, args := range [][]string{{"board"}, {"board", "--json"}} {
+			res := f.tb(args...)
+			if res.code != 0 || !strings.Contains(res.stdout, want) {
+				t.Fatal(res)
+			}
+			if len(args) == 2 {
+				var doc board.Document
+				if err := json.Unmarshal([]byte(res.stdout), &doc); err != nil {
+					t.Fatal(err)
+				}
+				if doc.Cards[0].Column != want || doc.Cards[0].Badge != "build" {
+					t.Fatal(doc.Cards)
+				}
+			} else if !strings.Contains(res.stdout, "BADGE") {
+				t.Fatal(res)
+			}
+		}
+	}
+	testenv.WriteFile(t, configPath, string(original)+"\n[board]\ncolumns = 'wide'\n")
+	res := f.tb("check")
+	if res.code == 0 || !strings.Contains(res.stderr, ".tuckerbox/config.toml") || !strings.Contains(res.stderr, "board.columns") || !strings.Contains(res.stderr, "wide") {
+		t.Fatal(res)
 	}
 }

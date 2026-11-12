@@ -7,7 +7,7 @@ Defines the machine-readable board for one repository, derived from OpenSpec and
 ## ADDED Requirements
 
 ### Requirement: Board document
-`tuckerbox board --json` run in a repository SHALL print one JSON document with `version`, the repository's remote URL (or its path if it has no remote), the machine name, whether the repository requires approval, the ordered `columns`, and a `cards` array. Times SHALL use the machine’s local time zone and include its offset. Format versioning SHALL follow the same rules as `tuckerbox status --json`.
+`tuckerbox board --json` run in a repository SHALL print one JSON document with `version`, the repository's remote URL (or its path if it has no remote), the machine name, whether the repository requires approval, the ordered `columns`, workflow step ids in an ordered `steps` array, and a `cards` array. Times SHALL use the machine’s local time zone and include its offset. Format versioning SHALL follow the same rules as `tuckerbox status --json`.
 
 #### Scenario: Repository without runs
 - **WHEN** a repository has three active changes, none approved and none ever run
@@ -18,30 +18,42 @@ Defines the machine-readable board for one repository, derived from OpenSpec and
 - **THEN** it exits non-zero and prints a document with `version` and `error` holding `code` `not_a_repository` and a message, so a dashboard can offer `tuckerbox init`
 
 ### Requirement: Derived columns
-Columns SHALL be derived from OpenSpec, approval and run state, never stored. The order SHALL be Proposed, Approved, Queued, one column per workflow step in workflow order, Ready, then Done. When the repository sets `require_approval = false`, there SHALL be no Approved column.
+Columns SHALL be derived from OpenSpec, approval and run state, never stored. `[board] columns` SHALL select `compact` (default) or `steps`. Compact order SHALL be Proposed, Approved, In progress, Ready, Done. Steps order SHALL be Proposed, Approved, Queued, one column per workflow step in workflow order, Ready, Done. Approved SHALL appear only when `require_approval` is true. Column ids SHALL remain `proposed`, `approved`, `in_progress`, `queued`, `step:<id>`, `ready`, `done` as applicable.
+
+#### Scenario: Compact default
+- **WHEN** the workflow's steps are plan, build and review and no board layout is configured
+- **THEN** the columns are Proposed, Approved, In progress, Ready, Done
 
 #### Scenario: Repository with three steps
-- **WHEN** the workflow's steps are plan, build and review and approval is required
+- **WHEN** `board.columns = "steps"`, workflow steps are plan, build and review and approval is required
 - **THEN** the columns are Proposed, Approved, Queued, Plan, Build, Review, Ready, Done
 
 #### Scenario: Approval not required
-- **WHEN** the workflow's steps are plan, build and review and `require_approval = false`
-- **THEN** the columns are Proposed, Queued, Plan, Build, Review, Ready, Done
+- **WHEN** `require_approval = false`
+- **THEN** neither layout includes Approved; compact has Proposed, In progress, Ready, Done, while steps has Proposed, Queued, each workflow step, Ready, Done
 
 ### Requirement: Column placement
-An active change with no run SHALL be in Approved when its approval state is `approved` and approval is required, else in Proposed. A run waiting for a slot or dependencies SHALL be in Queued. A running, stopped, blocked or failed run SHALL be in its current step's column. A finished, unarchived run SHALL be in Ready. The 20 most recently archived changes SHALL be in Done.
+Without a run, an approved change SHALL be in Approved when approval is required, else Proposed. Compact SHALL group queued, running, stopped, blocked and failed runs in In progress. Steps SHALL place queued runs in Queued and other runs in their step column. A run's `badge` SHALL be `queued` or its step; other badges SHALL be empty. Finished runs SHALL be Ready and the 20 latest archives Done. Plain board output SHALL use the same placement and badges.
 
 #### Scenario: Approved change
-- **WHEN** a change with no run has approval state `approved`
-- **THEN** its card is in the Approved column
+- **WHEN** a change with no run has approval state `approved` and approval is required
+- **THEN** its card is in the Approved column in either layout
 
 #### Scenario: Stale approval
 - **WHEN** a change with no run was approved and its proposal was edited afterwards
 - **THEN** its card is in the Proposed column with approval state `stale`
 
 #### Scenario: Blocked review
-- **WHEN** a run is blocked in its review step because the review limit was reached
-- **THEN** its card is in the Review column with state `blocked` and reason `review limit reached`
+- **WHEN** a run is blocked in review because the review limit was reached
+- **THEN** its card is in In progress in compact layout or Review in steps layout, with badge `review`, state `blocked` and reason `review limit reached`
+
+#### Scenario: Queued run
+- **WHEN** a run waits for dependencies or a parallel slot, even if its recorded step is build
+- **THEN** its card is in In progress in compact layout or Queued in steps layout, with badge `queued`
+
+#### Scenario: Workflow runs
+- **WHEN** runs are running, stopped or failed at any workflow step
+- **THEN** each is in In progress in compact layout or its current step's column in steps layout, with the step as its badge
 
 ### Requirement: Card summary
 Each card SHALL include the change id, a title (`title` from the change's `tuckerbox.toml`, else the change id with dashes as spaces; the proposal template's `# Proposal` heading is the same in every change, so it is not used), task progress from tasks.md, state and reason, current step, agent and round, and when the state last changed.
@@ -61,8 +73,8 @@ Each card SHALL include its approval state (`approved`, `stale` or `none`), who 
 Each card with a run SHALL include its branch, worktree path and machine. Every card SHALL include the folder where edits happen, and list its dependencies with the column each is in.
 
 #### Scenario: Waiting on a dependency
-- **WHEN** change B depends on change A, which is in Build
-- **THEN** B's card lists A with column Build
+- **WHEN** change B depends on change A, which is running build
+- **THEN** B's card lists A with column `in_progress` in compact layout or `step:build` in steps layout
 
 ### Requirement: Card detail
 `tuckerbox board --json --change <id>` SHALL also include the proposal text, the change's spec deltas by capability, the task list with each task's number and checked state, each round with its result and findings, and the run history.
@@ -90,11 +102,11 @@ Done cards SHALL show approval state `none`, blank approval metadata and `commit
 - **THEN** its card is in Done with approval state `none` and no approval or commit-status checks are run
 
 ### Requirement: Obsolete run steps
-A run whose step is empty or no longer in the workflow SHALL stay visible in Queued, retaining its run state and reporting a per-card error.
+A run whose step is empty or no longer in the workflow SHALL stay visible in In progress (compact) or Queued (steps), with badge `queued`, retaining its run state and reporting a per-card error.
 
 #### Scenario: Removed workflow step
 - **WHEN** a blocked run names a step that the workflow no longer contains
-- **THEN** its card remains blocked, is in Queued and includes an error naming the missing step
+- **THEN** its card remains blocked, is in In progress (compact) or Queued (steps) and includes an error naming the missing step
 
 ### Requirement: Round lifecycle
 Round detail SHALL include stopped and crashed rounds with result `stopped` and an end time. Admission events alone SHALL NOT create rounds before work starts or a step result is recorded.
