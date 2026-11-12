@@ -86,7 +86,10 @@ export default class Main extends View {
     want: ["add login page", "PROPOSAL", "TASKS", "2.1", "Check the password against the users table", "DEPENDS ON", "add-users",
       "ROUNDS", "Round 1", "rejected", "The form uses GET, so the password ends up in the access log.", "Round 3",
       "HISTORY", "Blocked review: review limit reached", "Handed on build → review", "approved", "by Sam Example",
-      "committed", "Resume", "Re-run review", "Follow review log ↗", "Open worktree", "EDIT", "login spec"],
+      "committed", "Resume", "Re-run review", "Follow review log ↗", "Open worktree", "EDIT", "login spec",
+      // blocked-answers: a blocked card's question box (this one blocked on
+      // the review limit, so its step asked nothing) with both answers.
+      "QUESTION", "The run is blocked, but its step left no question.", "Answer and resume", "Answer"],
     // Started is the oldest event: newest first puts Blocked before it.
     order: ["Blocked review: review limit reached", "Run started"],
   },

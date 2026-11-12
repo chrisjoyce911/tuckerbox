@@ -5,7 +5,7 @@
 // through Tuckerbox). Every action is a `tuckerbox` command on the card's
 // machine; the Herdr-only ones (Open proposal, Open worktree, Watch) open or
 // focus a view and change nothing.
-import { isActive } from "./model.js";
+import { isActive, answerable } from "./model.js";
 
 export const ACTIONS = {
   mr: {label:"Open merge request ↗"},
@@ -17,6 +17,8 @@ export const ACTIONS = {
   rerun: { label: "Re-run step" },
   follow: { label: "Follow log ↗" },
   watch: { label: "Watch ↗", primary: true },
+  answer: { label: "Answer" },
+  answer_resume: { label: "Answer and resume", primary: true },
   proposal: { label: "Open proposal" },
   worktree: { label: "Open worktree" },
   edit: { label: "Edit" },
@@ -72,6 +74,10 @@ export function commandLine(action, change, extra = {}) {
       if (!Number.isInteger(n) || n < 1) throw new Error(`priority needs a position from 1, not ${JSON.stringify(n)}`);
       return ["tuckerbox", "priority", change, String(n)];
     }
+    // blocked-answers: the text goes on standard input ("-"), so quoting and
+    // newlines are safe; see answerText and stdinCall.
+    case "answer": answerText(extra.text); return ["tuckerbox", "answer", change, "-"];
+    case "answer_resume": answerText(extra.text); return ["tuckerbox", "answer", change, "--resume", "-"];
     case "mr":
     case "proposal":
     case "worktree":
@@ -93,6 +99,7 @@ export function invocation(action, card, extra = {}) {
   const place = action === "mr" ? "browser" : action === "edit" ? "pane" : action === "follow" ? "tab" : argv ? "exec" : "view";
   const out = { action, place, argv, change: card?.change ?? "", on: card?.on ?? null, cwd: card?.path || "" };
   if(action==="mr"){const link=card?.mr?.link??"";if(!/^https:\/\/[^/?#\s]+(?:[/?#]|$)/.test(link) || link.split("/")[2].includes("@"))throw new Error("merge request needs an HTTPS link");out.url=link;}
+  if (action === "answer" || action === "answer_resume") out.stdin = answerText(extra.text);
   if (action === "follow") out.title = `${card?.change} ${extra.step} log`;
   if (action === "edit") out.title = `edit ${card?.change} ${extra.file}`;
   if (action === "proposal") out.file = card?.edit_folder ? `${card.edit_folder}/openspec/changes/${card.change}/proposal.md` : "";
@@ -103,6 +110,34 @@ export function invocation(action, card, extra = {}) {
     out.terminal = addr;
   }
   return out;
+}
+
+// The most an answer may be: tuckerbox answer refuses more (16 KiB).
+export const MAX_ANSWER = 16 * 1024;
+
+// An answer's text, trimmed as tuckerbox answer trims it. Throws on an
+// empty one, or one over MAX_ANSWER bytes of UTF-8.
+export function answerText(text) {
+  const t = String(text ?? "").trim();
+  if (!t) throw new Error("Type an answer first.");
+  const bytes = typeof TextEncoder === "function" ? new TextEncoder().encode(t).length : t.length;
+  if (bytes > MAX_ANSWER) throw new Error(`The answer is ${bytes} bytes; tuckerbox takes up to ${MAX_ANSWER} (16 KiB).`);
+  return t;
+}
+
+// The answer actions a card's detail offers under its question: Answer on
+// blocked and waiting cards, and Answer and resume on blocked ones.
+export function answerActions(card) {
+  if (!answerable(card)) return [];
+  return card.state === "blocked" ? ["answer_resume", "answer"] : ["answer"];
+}
+
+// Herdr's exec gives a program no standard input, so a command that reads
+// its input from "-" runs under sh, which pipes the text in. The text is
+// sh's $1, an argument it never parses: nothing in it is quoted or run.
+export const STDIN_SCRIPT = 'text=$1; shift; printf \'%s\' "$text" | "$@"';
+export function stdinCall(argv, text) {
+  return { command: "sh", args: ["-c", STDIN_SCRIPT, "sh", String(text), ...argv] };
 }
 
 // agent-terminals: Watch from the board. A running card whose agent works in

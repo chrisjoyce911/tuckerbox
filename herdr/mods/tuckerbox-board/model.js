@@ -32,6 +32,30 @@ export function needsYou(card) {
   return NEEDS_YOU_STATES.has(card?.state) || waitingForYou(card);
 }
 
+// What a card's run asks the person (blocked-answers), or null: kind
+// "blocked" (its step's blocked result, with the answers given so far) or
+// "waiting" (a terminal agent waits; summary is its last message).
+function normaliseQuestion(q) {
+  if (!q || typeof q !== "object" || !["blocked", "waiting"].includes(q.kind)) return null;
+  return {
+    kind: q.kind, step: str(q.step), round: num(q.round), summary: str(q.summary),
+    findings: list(q.findings).map((f) => ({ severity: str(f?.severity), file: str(f?.file), detail: str(f?.detail) })),
+    answers: list(q.answers).map((a) => ({ text: str(a?.text), by: str(a?.by), at: str(a?.at) })),
+  };
+}
+
+// Text on one line, cut to at most max characters with an ellipsis.
+export function oneLine(text, max = 160) {
+  const t = str(text).replace(/\s+/g, " ").trim();
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+}
+
+// blocked-answers: Answering from the board. A blocked card, or one whose
+// terminal agent waits for the person, takes an answer.
+export function answerable(card) {
+  return card?.state === "blocked" || waitingForYou(card);
+}
+
 // A card's activity (agent-activity: Activity in board data), or null.
 function normaliseActivity(a) {
   if (!a || typeof a !== "object") return null;
@@ -89,6 +113,7 @@ export function normaliseCard(c, src = {}) {
     // The run's task scope (add-task-scope), or null for the whole change.
     scope: c?.scope && str(c.scope.spec) ? { spec: str(c.scope.spec), tasks: list(c.scope.tasks).map(str) } : null,
     activity: normaliseActivity(c?.activity),
+    question: normaliseQuestion(c?.question),
     on: src.on ?? null,
     path: src.path ?? "",
   };

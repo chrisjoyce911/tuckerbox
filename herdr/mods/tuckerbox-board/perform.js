@@ -3,7 +3,7 @@
 // something; the board writes nothing itself. With the dev fixtures the
 // board's paths are made up, so actions only say what they would run.
 import { exec, run, spaces, panes, focused } from "herdr";
-import { shown, herdrCall, outcome, parseValidation, invocation } from "./actions.js";
+import { shown, herdrCall, outcome, parseValidation, invocation, stdinCall } from "./actions.js";
 import { startEdit, tick, markValidating, setValidation, keyCard } from "./edits.js";
 import { MOD } from "./data.js";
 
@@ -17,7 +17,9 @@ const ACTION_MS = 120000;
 
 async function tuckerbox(inv) {
   try {
-    const r = await exec("tuckerbox", inv.argv.slice(1), { cwd: inv.cwd || undefined, on: inv.on, timeout: ACTION_MS });
+    // An answer's text goes on standard input (stdinCall: under sh).
+    const call = inv.stdin != null ? stdinCall(inv.argv, inv.stdin) : { command: "tuckerbox", args: inv.argv.slice(1) };
+    const r = await exec(call.command, call.args, { cwd: inv.cwd || undefined, on: inv.on, timeout: ACTION_MS });
     return { code: r.code ?? 0, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
   } catch (e) {
     // exec rejects when tuckerbox can't start there or the machine is unreachable.

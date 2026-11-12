@@ -4,7 +4,7 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, props, openOverlay, closeOverlay, spaces, panes, focused, run, notify } from "herdr";
 import { MOD, loadAll, locate, candidates, fixturesFolder } from "./data.js";
-import { group, counts, columnName, due, isShown, ago, needsYou, activityLine, candidatesKey, openGate, NO_CONFIG, sortedColumn, dropPosition, eventBox, liveDrop, priorityCard } from "./model.js";
+import { group, counts, columnName, due, isShown, ago, needsYou, activityLine, candidatesKey, openGate, NO_CONFIG, sortedColumn, dropPosition, eventBox, liveDrop, priorityCard, oneLine } from "./model.js";
 import { cardActions, invocation, actionLabel, defaultStep, ACTIONS, dockCall, undockCalls } from "./actions.js";
 import { perform, watchEdits, changed } from "./perform.js";
 import { editOf, editNote } from "./edits.js";
@@ -235,7 +235,11 @@ export class BoardView extends View {
           .on_click((_e,cx)=>{cx.stop_propagation();this.act("mr", c, {}, cx);}).child(`#${c.mr.number}`))
         .when(Boolean(c.ci),(el)=>el.child(div().px(5).rounded(4).bg(tm.raised).text_color(c.ci.state==="red"?tm.blocked:c.ci.state==="green"?tm.working:tm.dim).child(`CI ${c.ci.state}`)))
         .when(c.ship_round>0,(el)=>el.child(div().text_color(tm.dim).child(`ship round ${c.ship_round}`)))))
-      .when(Boolean(c.reason), (el) => el.child(div().text_size(11).text_color(flag ? tm.blocked : tm.dim).child(c.reason)))
+      // blocked-answers: the question on the card; its reason only repeats
+      // a blocked result's summary.
+      .when(Boolean(c.question?.summary), (el) => el.child(div().text_size(11).text_color(tm.blocked)
+        .child(`asks (${c.question.step}): ${oneLine(c.question.summary, 160)}`)))
+      .when(Boolean(c.reason) && !(c.question?.kind === "blocked" && c.question.summary), (el) => el.child(div().text_size(11).text_color(flag ? tm.blocked : tm.dim).child(c.reason)))
       .when(c.depends_on.length > 0 && !c.archived, (el) => el.child(div().text_size(11).text_color(tm.dim)
         .child(`after ${c.depends_on.map((d) => `${d.change} (${columnName(b, d.column)})`).join(", ")}`)))
       .when(Boolean(c.branch), (el) => el.child(div().text_size(10.5).text_color(tm.dim).truncate().child(`⎇ ${c.branch}`)))
