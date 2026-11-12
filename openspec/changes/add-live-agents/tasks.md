@@ -27,12 +27,20 @@
 - [ ] 2.14 `stop`: signal the run process when it holds the lock; otherwise take the lock, `hc kill <name>`, record `stopped`
 - [ ] 2.15 Test "Stop after a crash" (run process killed; agent terminal live; stop ends it)
 - [ ] 2.16 Crash detection with a live terminal shows `running` and `not watched`; `resume` and autopilot's crash resume adopt it with no new round
-- [ ] 2.17 Test "Resume after the run process died"
-- [ ] 2.18 `logs` through `hc read` (and following) while the terminal lives; append its history to the step log at the end
-- [ ] 2.19 Test "Logs after the step"
-- [ ] 2.20 `doctor` turn-hook self-check for each installed CLI
-- [ ] 2.21 Run TLC on `formal/terminals.tla` and its broken variants (`scripts/tla-check.sh` locally, the `tla` job in CI): the model passes, both variants are rejected
-- [ ] 2.22 Code review against model.md's mapping table: every terminal start is under the change lock with the change's one name; stop with a free lock takes the lock before `hc kill`
+- [ ] 2.17 Slot agent locks (`slots/<n>.agent.lock`, and for fleet slots): admission takes a slot only when both locks are free; record the slot number in `run.json`
+- [ ] 2.18 `tuckerbox agent-hold --slot <n> -- <argv>` (hidden): takes the agent lock, refuses if held, runs the agent as its child, passes its exit status; the terminal runs it
+- [ ] 2.19 Adoption takes the run lock of the agent's own slot from `run.json`, needing no free slot, waiting out an admission's brief hold
+- [ ] 2.20 Test "Crash, then another change queued" (kill the run process; the queued change stays queued until the agent ends)
+- [ ] 2.21 Test "Crash with room for another change"
+- [ ] 2.22 Test "Agent ends while orphaned"
+- [ ] 2.23 Test "Crash, another change admitted, then adoption" (separate processes holding real locks; never more than `max_parallel` agents)
+- [ ] 2.24 Run TLC on `formal/liveslots.tla` and `liveslots_broken_runlockonly` (`/opsx:tlc`, `scripts/tla-check.sh` in CI)
+- [ ] 2.25 Test "Resume after the run process died"
+- [ ] 2.26 `logs` through `hc read` (and following) while the terminal lives; append its history to the step log at the end
+- [ ] 2.27 Test "Logs after the step"
+- [ ] 2.28 `doctor` turn-hook self-check for each installed CLI
+- [ ] 2.29 Run TLC on `formal/terminals.tla` and its broken variants (`scripts/tla-check.sh` locally, the `tla` job in CI): the model passes, both variants are rejected
+- [ ] 2.30 Code review against model.md's mapping table: every terminal start is under the change lock with the change's one name; stop with a free lock takes the lock before `hc kill`
 
 ## 3. Activity (agent-activity)
 

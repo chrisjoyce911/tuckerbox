@@ -12,6 +12,8 @@ The activity and answer parts don't need a model: ticks are read by the one run 
 |---|---|
 | `formal/terminals.tla`, `formal/terminals.cfg` | Model; TLC must pass |
 | `formal/terminals_broken_roundnames.tla`, `.cfg` | Broken variant: each round's terminal gets its own name, so a live agent is never found and herdr-core never refuses; TLC must reject (`OneAgent`) |
+| `formal/liveslots.tla`, `formal/liveslots.cfg` | Model of parallel slots across changes when agents outlive their run process; TLC must pass |
+| `formal/liveslots_broken_runlockonly.tla`, `.cfg` | Broken variant: admission looks only at the run lock, as before; TLC must reject (`WithinLimitLive`) |
 | `formal/terminals_broken_stopnokill.tla`, `.cfg` | Broken variant: `stop` with no process holding the lock records `stopped` without ending the agent; TLC must reject (`StoppedMeansNoAgent`) |
 
 ### Actors and shared state
@@ -29,7 +31,16 @@ The activity and answer parts don't need a model: ticks are read by the one run 
 |---|---|---|
 | `OneAgent` | A change never has two live agents | agent-terminals: One agent per change |
 | `StoppedMeansNoAgent` | A run recorded `stopped`, with no process holding its lock, has no live agent | agent-terminals: Stopping a terminal agent |
+| `WithinLimitLive` | Changes with a live run process or a live agent never outnumber the slots | agent-terminals: Orphan agents keep their slot; Adoption takes the agent's own slot |
+| `OrphanHoldsSlot` | Every live agent, orphaned or not, holds a slot's agent lock | agent-terminals: Orphan agents keep their slot |
 | `TypeOK` | Variables keep their types | (type check) |
+
+### Slots across changes (`liveslots`)
+
+- **Actors:** run processes of several changes (`Admit`, `Launch`, `RunEnds`, `Crash`, `Adopt`) and their agents (`AgentEnds`).
+- **Shared state:** each slot's run lock and agent lock, the changes with a live run process, the changes with a live agent.
+- **Atomic:** each OS lock. **Not atomic:** a run process's life and its agent's.
+- Bounds: `Changes = {a, b, c}`, `Slots = {s1, s2}`, `MaxCrashes = 2`. Three changes for two slots so a queued change is waiting when a crash frees a run lock; two crashes so one change can crash, be adopted and crash again. TLC explores 468 distinct states. The passing model reaches crash, another change admitted to the other slot, and adoption. `liveslots_broken_runlockonly` is rejected within 131 states: a run crashes, and two more changes are admitted while its agent lives.
 
 ### Bounds
 
