@@ -57,6 +57,12 @@ type Card struct {
 	EditFolder string       `json:"edit_folder"`
 	DependsOn  []Dependency `json:"depends_on"`
 	Archived   string       `json:"archived,omitempty"`
+	// Priority is the change's stored priority in the repository checkout
+	// on this machine, or null; Position is its place in priority order,
+	// from 1. Both only for active changes (change-priority: Priority on
+	// the board).
+	Priority *int64 `json:"priority"`
+	Position int    `json:"position,omitempty"`
 }
 type Detail struct {
 	Change   string  `json:"change"`

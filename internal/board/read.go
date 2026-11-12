@@ -20,6 +20,7 @@ import (
 	"github.com/chrisjoyce911/tuckerbox/internal/deps"
 	"github.com/chrisjoyce911/tuckerbox/internal/edits"
 	"github.com/chrisjoyce911/tuckerbox/internal/history"
+	"github.com/chrisjoyce911/tuckerbox/internal/priority"
 	"github.com/chrisjoyce911/tuckerbox/internal/runs"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 )
@@ -116,6 +117,7 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 		folders[id] = p.ChangeDir()
 		doc.Cards = append(doc.Cards, c)
 	}
+	setPriorities(doc.Cards, repo.Checkout())
 	archives, err := archiveFolders(repo.Root)
 	if err != nil {
 		return nil, err
@@ -162,6 +164,59 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 		}
 	}
 	return doc, nil
+}
+
+// sortedColumn reports whether a column lists its cards in priority order:
+// Proposed, Approved, In progress, Queued and each step column. Ready and
+// Done keep their order.
+func sortedColumn(id string) bool {
+	switch id {
+	case "proposed", "approved", "in_progress", "queued":
+		return true
+	}
+	return strings.HasPrefix(id, "step:")
+}
+
+// setPriorities gives the active cards their priority and position, read
+// from the repository checkout on this machine, and puts the cards of the
+// sorted columns in priority order, each in the places those cards held.
+func setPriorities(cards []Card, checkout string) {
+	cs, err := priority.Load(checkout)
+	if err != nil {
+		return
+	}
+	vals := map[string]int64{}
+	for _, c := range cs {
+		if c.Ranked() {
+			vals[c.ID] = c.Priority
+		}
+	}
+	pos := priority.Positions(cs)
+	var slots []int
+	for i := range cards {
+		c := &cards[i]
+		c.Position = pos[c.Change]
+		if v, ok := vals[c.Change]; ok {
+			c.Priority = &v
+		}
+		if sortedColumn(c.Column) {
+			slots = append(slots, i)
+		}
+	}
+	sorted := make([]Card, len(slots))
+	for k, i := range slots {
+		sorted[k] = cards[i]
+	}
+	sort.SliceStable(sorted, func(a, b int) bool {
+		pa, pb := sorted[a].Position, sorted[b].Position
+		if pa == 0 || pb == 0 {
+			return pb == 0 && pa != 0 // a card without a position goes last
+		}
+		return pa < pb
+	})
+	for k, i := range slots {
+		cards[i] = sorted[k]
+	}
 }
 
 func columns(cfg *config.Config) []Column {

@@ -53,6 +53,8 @@ export function normaliseCard(c, src = {}) {
     edit_folder: str(c?.edit_folder),
     depends_on: list(c?.depends_on).map((d) => ({ change: str(d?.change), column: str(d?.column) })),
     archived: str(c?.archived),
+    priority: Number.isInteger(c?.priority) && c.priority > 0 ? c.priority : null,
+    position: Number.isInteger(c?.position) && c.position > 0 ? c.position : 0,
     on: src.on ?? null,
     path: src.path ?? "",
   };
@@ -127,6 +129,40 @@ export function group(board) {
     col.cards.push(card);
   }
   return cols;
+}
+
+// Columns listed in priority order, where a card can be dragged to reorder
+// it (change-priority: Priority on the board, Drag to reorder). Ready and
+// Done keep their order, and cards never move between columns.
+export function sortedColumn(id) {
+  return ["proposed", "approved", "in_progress", "queued"].includes(id) || String(id ?? "").startsWith("step:");
+}
+
+// The position `tuckerbox priority <change> <n>` gets when `dragged` is
+// dropped over `over` in its column's list `cards` (in board order).
+// `below` is true when the drop is on the lower half of `over`: below it
+// means above the next card, or below the column's last card. Dropping
+// above card B: B's position if the card came from below B, else one less.
+// Below the last card L: L's position if the card came from above L, else
+// one more. Null when the drop can't reorder (another column, an unsorted
+// column, no positions, or no move).
+export function dropPosition(cards, dragged, over, below = false) {
+  const list = Array.isArray(cards) ? cards : [];
+  const d = list.find((c) => c.change === dragged);
+  let i = list.findIndex((c) => c.change === over);
+  if (!d || i < 0 || !sortedColumn(d.column) || !d.position) return null;
+  if (below) i += 1;
+  let n;
+  if (i >= list.length) {
+    const last = list[list.length - 1];
+    if (!last.position) return null;
+    n = d.position < last.position ? last.position : last.position + 1;
+  } else {
+    const b = list[i];
+    if (!b.position) return null;
+    n = d.position > b.position ? b.position : b.position - 1;
+  }
+  return n === d.position || n < 1 ? null : n;
 }
 
 export function counts(board) {
