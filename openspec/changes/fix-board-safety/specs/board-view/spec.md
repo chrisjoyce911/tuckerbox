@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines which repository and machine the Herdr board mod reads, how it discards reads that finish after the space changed, how Done cards show approval, and where change titles come from.
+Defines which repository and machine the Herdr board mod reads, how it discards reads that finish after the space changed, how its columns scroll when they don't fit, how Done cards show approval, and where change titles come from.
 
 ## ADDED Requirements
 
@@ -53,6 +53,21 @@ Cards in Done SHALL show no approval badge on the board or in card detail, whate
 #### Scenario: Active change without approval
 - **WHEN** a Proposed card has approval state `none`
 - **THEN** it still shows the `not approved` badge
+
+### Requirement: Columns scroll sideways
+In the board window and in a docked board pane, every column SHALL keep a fixed width of at least 236 px. When the columns don't fit, the column row SHALL scroll horizontally, with a visible scrollbar, by trackpad swipe, by shift with the mouse wheel, and by dragging the scrollbar. It SHALL NOT squeeze, wrap or hide columns. The header SHALL stay in place.
+
+#### Scenario: Narrow docked pane
+- **WHEN** the board is docked in a pane 500 px wide and has five columns
+- **THEN** the first two columns show at full width, a horizontal scrollbar shows, and scrolling right reaches Ready and Done
+
+#### Scenario: Shift and the mouse wheel
+- **WHEN** the person turns the mouse wheel with shift held over the columns of a board that doesn't fit
+- **THEN** the columns scroll sideways, not up or down
+
+#### Scenario: Wide window
+- **WHEN** every column fits in the board window
+- **THEN** no horizontal scrollbar shows and nothing scrolls sideways
 
 ### Requirement: Titles of this repository's changes
 A card's title SHALL come from `title` in the change's `tuckerbox.toml`, else the change id with dashes as spaces. The proposal's first heading SHALL NOT be used. Every active change in this repository SHALL have a `tuckerbox.toml` with a non-empty `title`, and a test SHALL fail when one does not.

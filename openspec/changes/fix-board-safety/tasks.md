@@ -30,9 +30,13 @@
 - [ ] 2.11 Board and card detail: no approval chip on Done cards
 - [ ] 2.12 Node test "Archived change"
 - [ ] 2.13 Node test "Active change without approval"
-- [ ] 2.14 Add `openspec/changes/add-herdr-board/tuckerbox.toml` with `title = "Herdr board"`; check every other active change has a title
-- [ ] 2.15 Test "Herdr board change" (board JSON for this repository's fixture shows `Herdr board`)
-- [ ] 2.16 Test "Change added without a title" (`TestRepositoryChangesHaveTitles` fails on a temporary change folder without a title)
+- [ ] 2.14 `board.js`: bound the column row to the board's width so `overflow_x_scrollbar` scrolls, columns `flex_none` at `COL_W`, header outside the row; shift with the mouse wheel scrolls sideways (handle `on_scroll_wheel` if the platform doesn't)
+- [ ] 2.15 Node test "Narrow docked pane" (render test: the row is width-bound with a horizontal scrollbar, every column has fixed width 236 and none is dropped), then check by hand in a 500 px docked pane that Ready and Done are reachable
+- [ ] 2.16 Node test "Shift and the mouse wheel" (the row's wheel handler moves the horizontal offset when shift is held)
+- [ ] 2.17 Node test "Wide window" (no sideways offset change when the columns fit), and check by hand in the board window
+- [ ] 2.18 Add `openspec/changes/add-herdr-board/tuckerbox.toml` with `title = "Herdr board"`; check every other active change has a title
+- [ ] 2.19 Test "Herdr board change" (board JSON for this repository's fixture shows `Herdr board`)
+- [ ] 2.20 Test "Change added without a title" (`TestRepositoryChangesHaveTitles` fails on a temporary change folder without a title)
 
 ## 3. Integration
 

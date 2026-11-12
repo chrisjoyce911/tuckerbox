@@ -7,7 +7,8 @@ herdr install` can leave a person's Herdr files changed with no record to
 undo them, and two ways the board mod can show the wrong repository. The
 owner then saw three more board bugs live: a board read a change's worktree
 instead of the repository, Done cards show a "not approved" badge, and the
-board's own change is titled `add herdr board`.
+board's own change is titled `add herdr board`. Later, in a narrow docked
+pane, the columns overflowed and Ready and Done couldn't be reached.
 
 This is the first change Tuckerbox builds through its own board, so it is
 small and every rule has a test.
@@ -30,6 +31,9 @@ small and every rule has a test.
 - **The board finds the main checkout:** a pane in a change's worktree
   resolves to the repository's main worktree, never the change worktree.
 - **Done cards show no approval badge.**
+- **Columns scroll sideways** in the board window and a docked pane when
+  they don't fit, at a fixed width each, by trackpad, shift-wheel and
+  scrollbar drag. In a narrow docked pane Ready and Done were unreachable.
 - **Titles come from `title` in each change's `tuckerbox.toml`,** as now.
   The proposal's heading is not used. Every active change in this
   repository gets a title, `add-herdr-board` gets `title = "Herdr board"`,

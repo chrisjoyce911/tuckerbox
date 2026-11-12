@@ -2,7 +2,7 @@
 
 ## Context
 
-See proposal.md for why. The rules being fixed are in `add-herdr-board` (active, built and merged as code): `herdr-board`'s `Install record`, `Toggle key`, `Adding the drawer`, `Uninstalling`, `Which repository`, `Docking the board` and `What the drawer shows`, and `board-data`'s `Card summary` and `Archived approvals`. Findings 1–6 come from the review of PR #25; 7–9 were seen live on the board.
+See proposal.md for why. The rules being fixed are in `add-herdr-board` (active, built and merged as code): `herdr-board`'s `Install record`, `Toggle key`, `Adding the drawer`, `Uninstalling`, `Which repository`, `Docking the board` and `What the drawer shows`, and `board-data`'s `Card summary` and `Archived approvals`. Findings 1–6 come from the review of PR #25; 7–10 were seen live on the board.
 
 This is the first change Tuckerbox builds through its own board: the owner approves it, `tuckerbox run` builds it with Claude and reviews it with Codex. So it changes no config, flag or JSON format, and every requirement maps to tests.
 
@@ -33,6 +33,7 @@ The natural form is MODIFIED deltas against `herdr-board` and `board-data`. But 
 | Explicit machine pin | herdr-board: Which repository, Docking the board |
 | Stale reads are dropped | herdr-board: What the drawer shows, Boards follow their own space |
 | No approval badge on Done cards | board-data: Archived approvals (the data stays `none`; the mod hides it) |
+| Columns scroll sideways | herdr-board: Docking the board, Card detail view |
 | Titles of this repository's changes | board-data: Card summary |
 
 No `depends_on = ["add-herdr-board"]`: a run waits until each dependency is `ready` on this machine or archived, and `add-herdr-board` is neither, so the dependency would hold this run forever. The code it fixes is already on the base branch.
@@ -70,6 +71,15 @@ Both views keep a `want` key, the candidate folders and machine joined, updated 
 ### Done cards
 
 `board-data` keeps approval `none` on Done cards, as `Archived approvals` says. The mod's card and card detail skip the approval chip for column `done`. Nothing changes in the JSON.
+
+### Columns scroll sideways
+
+`board.js` already gives the column row `overflow_x_scrollbar()`, but the row is `flex_1` in a column with no width bound, so it grows to fit its fixed-width (`COL_W`, 236 px) columns instead of scrolling, and the pane clips Ready and Done. The fix bounds the row to the board's width (`w_full().min_w(0)` on the row and its parent), keeps each column `flex_none` at `COL_W`, and leaves the header outside the scrolling row. Trackpad swipes and scrollbar drags then work through the framework's own scrolling. If shift with the mouse wheel isn't turned into horizontal scrolling on every platform, the row handles `on_scroll_wheel` with shift held and moves its scroll offset sideways.
+
+A narrow pane could instead stack the columns as collapsible sections. We don't, in this change:
+- The mod gets no reliable width signal for its pane, so choosing a layout by width would be a guess, and would flip as panes are resized.
+- One layout is one thing to test and explain. The compact layout (five columns) is already the default, and scrolling reaches all of them.
+- It is a design change, not a fix; this change is meant to be small. A stacked layout can be a later change once Herdr tells a mod its size.
 
 ### Titles
 
