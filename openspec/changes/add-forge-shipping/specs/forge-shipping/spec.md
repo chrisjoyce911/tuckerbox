@@ -113,7 +113,7 @@ With `ship = "mr"` or `"merge"`, a change's dependency SHALL count as met only o
 
 #### Scenario: Dependency waits for merge
 - **WHEN** `ship = "mr"`, change B depends on A, and A is `ready` with its merge request open
-- **THEN** B stays `queued (waiting on add-a (ready))` until A is merged and archived on the base branch
+- **THEN** B stays `queued (waiting on add-a (ready, not archived))` until A is merged and archived on the base branch
 
 ### Requirement: Starting a shipping run
 In `mr` or `merge` mode, `tuckerbox run` SHALL check before starting that the forge is known and a token is found, and refuse otherwise. If an open merge request for the change's branch carries another machine's claim, it SHALL refuse and link it. If the forge can't be reached, it SHALL warn and start.

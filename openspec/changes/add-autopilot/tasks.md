@@ -13,7 +13,7 @@
 
 ## 2. Passes (autopilot)
 
-- [ ] 2.1 Watch the repository's run states every 5 s; a full pass when a run ends or the interval passes: fetch the base (warn when offline), active changes in admission order (`add-priority`)
+- [x] 2.1 Watch the repository's run states every 5 s; a full pass when a run ends or the interval passes: fetch the base (warn when offline), active changes in admission order (`add-priority`)
 - [x] 2.2 Decide per change: approved (run gate), dependencies met (engine rule, read-only), no run or a ready run with unticked tasks; start until queued and running reach `max_parallel`
 - [x] 2.3 Start with `--tasks next` in group mode, no scope in change mode
 - [x] 2.4 Test: Within max_parallel
@@ -47,29 +47,29 @@
 - [x] 4.3 Test: First group in merge mode
 - [ ] 4.4 Test: Last group in merge mode (with a real `(ship)` archive task in the change)
 - [x] 4.5 Test: Whole change left incomplete
-- [ ] 4.6 Incomplete ready runs: continue with `--tasks next` when the run has a scope or in group mode; in change mode report once, request no start, mark the card `needs_you`
+- [x] 4.6 Incomplete ready runs: continue with `--tasks next` when the run has a scope or in group mode; in change mode report once, request no start, mark the card `needs_you`
 - [x] 4.7 Test: Whole change left ready in local mode (several passes, no start requested)
 - [x] 4.8 Test: Group mode picks up the rest
-- [ ] 4.9 Test: Whole change left ready (board)
+- [x] 4.9 Test: Whole change left ready (board)
 - [ ] 4.10 Test: Fleet mode
 - [ ] 4.11 Test: Team mode
 
 ## 5. Asking for a person (autopilot, autopilot-board)
 
-- [ ] 5.1 Print one line per run that newly needs a person (blocked, failed, crash budget spent, stale approval before a next group); keep the reported set in memory
-- [ ] 5.2 Board document: `autopilot` (running, pid, start time); `needs_you` with a reason on cards; header count uses it
-- [ ] 5.3 Mod: Herdr toast for cards that newly need you between two reads (board and drawer), none at the first read; autopilot on or off in the header
-- [ ] 5.4 Test: Blocked review
-- [ ] 5.5 Test: Stale before the next group
-- [ ] 5.6 Test: Autopilot running
-- [ ] 5.7 Test: Leftover marker
-- [ ] 5.8 Test: Next group waits for approval
-- [ ] 5.9 Test: Run blocks
-- [ ] 5.10 Test: Board opened later
-- [ ] 5.11 Test: Autopilot off
+- [x] 5.1 Print one line per run that newly needs a person (blocked, failed, crash budget spent, stale approval before a next group); keep the reported set in memory
+- [x] 5.2 Board document: `autopilot` (running, pid, start time); `needs_you` with a reason on cards; header count uses it
+- [x] 5.3 Mod: Herdr toast for cards that newly need you between two reads (board and drawer), none at the first read; autopilot on or off in the header
+- [x] 5.4 Test: Blocked review
+- [x] 5.5 Test: Stale before the next group
+- [x] 5.6 Test: Autopilot running
+- [x] 5.7 Test: Leftover marker
+- [x] 5.8 Test: Next group waits for approval
+- [x] 5.9 Test: Run blocks
+- [x] 5.10 Test: Board opened later
+- [x] 5.11 Test: Autopilot off
 
 ## 6. Wrap-up
 
-- [ ] 6.1 README: `tuckerbox autopilot`, that it is not a service, approval as the one gate, and running it in a Herdr pane
-- [ ] 6.2 `go vet ./...`, `go test -race ./...` and `scripts/tla-check.sh` pass
+- [x] 6.1 README: `tuckerbox autopilot`, that it is not a service, approval as the one gate, and running it in a Herdr pane
+- [x] 6.2 `go vet ./...`, `go test -race ./...` and `scripts/tla-check.sh` pass
 - [ ] 6.3 (ship) Archive after `add-task-scope`, `add-priority`, `add-forge-shipping` and `add-operating-modes`, once accepted; move the board requirements into `board-data` and `herdr-board`

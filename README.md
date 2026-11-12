@@ -83,6 +83,14 @@ Each change gets its own worktree (by default `../<repo>-worktrees/<change>`) an
 
 A run can take part of a change: `--tasks 2` runs task group 2, `--tasks 2.3` one task, `--tasks 2.1-2.4` a range in tasks.md order, and `--tasks next` the first group with an unticked task. The brief tells every step to work on, tick and judge only those tasks, and the run is `ready` only when they are all ticked (else `blocked`, naming them). The scope belongs to the change's one run, in the same worktree and branch: `resume` and `rerun` keep it, and `run --tasks` with another scope on a ready, stopped, blocked or failed run starts it again from the first step (`run` without `--tasks` means the whole change). Approval covers the whole change, not the scope: each new scope passes the run gate again, so ticking tasks keeps it approved but any other edit to the change during a scope must be approved before the next. A task whose text starts with `(ship)`, such as archiving the change, is done by shipping: it is never in a scope and doesn't count toward the change being complete.
 
+To keep approved changes moving without starting each run by hand, run autopilot in a terminal or a Herdr pane:
+
+```sh
+tuckerbox autopilot            # until Ctrl-C; --once for one pass, --dry-run to see what it would start
+```
+
+It is not a service: it runs in the foreground for the repository it is started in, one per repository on a machine, and the runs it starts keep going when you stop it. On each pass (every `[autopilot] interval`, 60 s by default, and whenever a run ends) it fetches the base branch and starts approved changes whose dependencies are met while `max_parallel` has room, group by group with `--tasks next` (`[autopilot] scope = "change"` runs whole changes). Approval is the one gate it keeps: it refuses to run with `require_approval = false`, never approves, edits or ticks, and never resumes a blocked or stopped run or re-runs a failed one. A run whose process died is resumed once per crash streak (counted from history since the run's last step result or a person's action). Every start or resume carries the state and time it saw, and the engine does nothing if the run moved on meanwhile. Runs that need you are printed once, flagged on the board (`needs_you`), and toasted by the Herdr board mod; the board header shows whether autopilot is on.
+
 A change can wait for others: list them in `openspec/changes/<change>/tuckerbox.toml` as `depends_on = ["add-users"]`. Its run stays `queued (waiting on add-users (build))`, without taking a slot, until each dependency is `ready` on this machine or archived. A dependency run with a task scope counts only once a run of it is ready with the whole change ticked: `queued (waiting on add-users (ready, tasks 1))`. `tuckerbox check` reports dependencies that name no active or archived change, and cycles.
 
 ### Priority

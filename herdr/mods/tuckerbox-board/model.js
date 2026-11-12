@@ -20,7 +20,31 @@ export function isActive(card) {
 }
 
 export function needsYou(card) {
-  return NEEDS_YOU_STATES.has(card?.state);
+  return NEEDS_YOU_STATES.has(card?.state) || Boolean(card?.needs_you);
+}
+
+// Why a card needs the person: the board's needs_you (add-autopilot), else
+// its state and reason.
+export function needsYouReason(card) {
+  if (card?.needs_you) return card.needs_you;
+  return [card?.state, card?.reason].filter(Boolean).join(": ");
+}
+
+// Toasts for cards that newly need the person between two board reads
+// (add-autopilot: Toast when a card needs you). `seen` is the last read's
+// Map of change -> reason, or null before the first read, which toasts
+// nothing. Returns the toasts and the Map for the next read.
+export function newlyNeeding(seen, board) {
+  const now = new Map();
+  for (const c of board?.cards ?? []) if (needsYou(c) && !c.archived) now.set(c.change, needsYouReason(c));
+  const toasts = [];
+  if (seen) for (const [change, reason] of now) if (seen.get(change) !== reason) toasts.push({ change, reason });
+  return { toasts, seen: now };
+}
+
+// The Herdr notify() call for one toast.
+export function toastCall(t) {
+  return { title: `${t.change} needs you`, body: t.reason, level: "warning", timeout: 8000 };
 }
 
 // One card with every field the mod reads, missing ones filled in. Missing,
@@ -60,6 +84,7 @@ export function normaliseCard(c, src = {}) {
     archived: str(c?.archived),
     priority: Number.isInteger(c?.priority) && c.priority > 0 ? c.priority : null,
     position: Number.isInteger(c?.position) && c.position > 0 ? c.position : 0,
+    needs_you: str(c?.needs_you),
     // The run's task scope (add-task-scope), or null for the whole change.
     scope: c?.scope && str(c.scope.spec) ? { spec: str(c.scope.spec), tasks: list(c.scope.tasks).map(str) } : null,
     // Each workflow step's effective settings with their sources
@@ -85,6 +110,8 @@ export function normaliseBoard(doc, src = {}) {
     path,
     machine: str(doc.machine),
     require_approval: doc.require_approval !== false,
+    // tuckerbox autopilot for the repository on the board's machine.
+    autopilot: { running: doc.autopilot?.running === true, pid: num(doc.autopilot?.pid), started: str(doc.autopilot?.started) },
     steps: list(doc.steps).map(str),
     columns: list(doc.columns).map((c) => ({ id: str(c?.id), kind: str(c?.kind), step: str(c?.step), name: str(c?.name) || str(c?.id) })),
     cards: list(doc.cards).map((c) => normaliseCard(c, s)),
@@ -176,9 +203,10 @@ export function group(board) {
   return cols;
 }
 
-// Columns listed in priority order, where a card can be dragged to reorder
-// it (change-priority: Priority on the board, Drag to reorder). Ready and
-// Done keep their order, and cards never move between columns.
+// Columns listed in priority order, where a card can be dragged to
+// reorder it (board-data: Priority on the board; herdr-board: Drag to
+// reorder). Ready and Done keep their order, and cards never move between
+// columns.
 export function sortedColumn(id) {
   return ["proposed", "approved", "in_progress", "queued"].includes(id) || String(id ?? "").startsWith("step:");
 }
@@ -234,7 +262,7 @@ export function liveDrop(drop, point) {
 }
 
 // The card a reorder runs for: `tuckerbox priority` writes the checkout on
-// the board's machine (change-priority: Drag to reorder), so it runs there
+// the board's machine (herdr-board: Drag to reorder), so it runs there
 // whatever machine the card's run is on.
 export function priorityCard(card, board) {
   return { ...card, on: board?.on ?? null, path: board?.path ?? "" };

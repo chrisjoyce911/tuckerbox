@@ -137,9 +137,13 @@ func parse(text string) ([]Task, map[int]string) {
 }
 
 // forLines calls f for each line of text outside fenced code blocks.
-func forLines(text string, f func(string)) {
+func forLines(text string, f func(string)) { forLinesAt(text, func(line string, _ int) { f(line) }) }
+func forLinesAt(text string, f func(string, int)) {
+	offset := 0
 	fence := ""
 	for _, line := range strings.Split(text, "\n") {
+		at := offset
+		offset += len(line) + 1
 		trimmed := strings.TrimSpace(line)
 		run := ""
 		if len(trimmed) >= 3 && (trimmed[0] == '`' || trimmed[0] == '~') {
@@ -161,7 +165,7 @@ func forLines(text string, f func(string)) {
 			fence = run
 			continue
 		}
-		f(line)
+		f(line, at)
 	}
 }
 
@@ -311,4 +315,40 @@ func Lookup(tasks []Task, numbers []string) []Task {
 		}
 	}
 	return out
+}
+
+// TickShip returns tasks.md with only unchecked (ship) tasks ticked. It keeps
+// every other byte, including line endings and fenced examples, unchanged.
+func TickShip(text string) (string, error) {
+	counts := map[string]int{}
+	shipNumbers := map[string]bool{}
+	var offsets []int
+	forLinesAt(text, func(line string, offset int) {
+		m := taskLine.FindStringSubmatchIndex(line)
+		if m == nil {
+			return
+		}
+		number := line[m[4]:m[5]]
+		counts[number]++
+		body := ""
+		if m[6] >= 0 {
+			body = strings.TrimSpace(line[m[6]:m[7]])
+		}
+		if strings.HasPrefix(body, ShipMarker) {
+			shipNumbers[number] = true
+			if line[m[2]:m[3]] == " " {
+				offsets = append(offsets, offset+m[2])
+			}
+		}
+	})
+	for number := range shipNumbers {
+		if counts[number] > 1 {
+			return "", fmt.Errorf("ship task %s appears more than once in tasks.md", number)
+		}
+	}
+	data := []byte(text)
+	for _, offset := range offsets {
+		data[offset] = 'x'
+	}
+	return string(data), nil
 }

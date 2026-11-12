@@ -71,7 +71,7 @@ export function commandLine(action, change, extra = {}) {
       if (!TASK_NUMBER.test(extra.task ?? "")) throw new Error(`${action} needs a task number like 2.1`);
       return ["tuckerbox", "tasks", change, action, extra.task];
     case "priority": {
-      // A drag to reorder (change-priority: Drag to reorder).
+      // A drag to reorder (herdr-board: Drag to reorder).
       const n = extra.position;
       if (!Number.isInteger(n) || n < 1) throw new Error(`priority needs a position from 1, not ${JSON.stringify(n)}`);
       return ["tuckerbox", "priority", change, String(n)];

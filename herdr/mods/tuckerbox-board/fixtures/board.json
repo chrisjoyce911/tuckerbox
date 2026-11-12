@@ -4,6 +4,7 @@
   "path": "/work/shop",
   "machine": "studio",
   "require_approval": true,
+  "autopilot": { "running": true, "pid": 4242, "started": "2026-11-12T08:00:00+10:00" },
   "steps": [
     "plan",
     "build",
@@ -713,6 +714,7 @@
       },
       "state": "blocked",
       "reason": "review limit reached",
+      "needs_you": "blocked: review limit reached",
       "badge": "review",
       "step": "review",
       "agent": "codex",
