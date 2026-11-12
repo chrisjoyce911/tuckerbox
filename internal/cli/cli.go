@@ -85,6 +85,9 @@ type App struct {
 	// HerdrEnv finds the Herdr app and checks the board mod (herdr install,
 	// doctor); zero fields use the real environment.
 	HerdrEnv herdrmod.Env
+	// BorrowToken reads a token from gh or glab for config show; nil
+	// means the real CLIs.
+	BorrowToken func(ctx context.Context, program string, args ...string) (string, error)
 }
 
 // Run runs the command in args (without the program name) and returns the
@@ -127,6 +130,8 @@ func (a App) Run(args []string) int {
 			return 1
 		}
 		return 0
+	case "config":
+		return a.configCmd(rest)
 	case "check":
 		if len(rest) > 0 {
 			return a.tooMany(cmd)

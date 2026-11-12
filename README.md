@@ -285,7 +285,8 @@ token_env = "WORK_GITLAB_TOKEN"
 borrow_cli_token = false
 ```
 
-Tokens come first from the named variable, then `GH_TOKEN` / `GITHUB_TOKEN`
+Tokens come first from the named variable, then the machine's credentials
+file (below), then `GH_TOKEN` / `GITHUB_TOKEN`
 on github.com or `GITLAB_TOKEN` on gitlab.com only. Setting `borrow_cli_token = true`
 allows the host-specific stored token from `gh` or `glab` to be read with a
 five-second timeout. Borrowing is off by default; no login or refresh is run.
@@ -308,9 +309,59 @@ badge, and offers Open merge request and Resume on ready MR cards. It offers
 no merge button. Compact layout places Shipping after In progress; steps
 layout places it after the last workflow step.
 
+A token can be stored for Tuckerbox in `credentials.toml`, beside machine
+`config.toml`, as `[forges."<host>"] token = "..."`. It is kept apart from
+`config.toml` so the config can be shown or pasted into an issue without
+leaking a token; `tuckerbox check` refuses a `token` in `config.toml`. On
+macOS and Linux the file must be readable only by you (`chmod 600`):
+Tuckerbox refuses to read it otherwise, as SSH does with keys.
+`tuckerbox doctor` names `credentials file` as the token source when it is
+used.
+
 GitHub tokens need repository contents and pull-request write access, plus checks
 and Actions read access. GitLab tokens need `api` scope and project Developer
 access or greater; branch protection can still restrict pushes and merges.
+
+## Reading the configuration
+
+`tuckerbox config show` lists every key Tuckerbox knows, with its effective
+value, where the value comes from (`repo`, `machine` or `default`) and its
+scope: `repo` (repository config only), `machine` (machine config only) or
+`either` (a machine default the repository overrides). When a repository
+value hides a machine value, both are shown. Machine-only keys are listed
+under "<machine>: this machine only". The first lines name each file with
+its revision, the SHA-256 of its bytes.
+
+```
+$ tuckerbox config show
+repository: .tuckerbox/config.toml (revision 3f1c2a9e8b7d)
+machine: /home/sam/.config/tuckerbox/config.toml (revision 9a0b1c2d3e4f)
+
+Repository (machine defaults where the repository sets nothing)
+  max_parallel = 2 (repo; machine sets 4) [either]
+  board.columns = compact (default) [either]
+  steps.review.effort = high (repo) [either]
+  ...
+
+studio: this machine only
+  editor = vim (machine)
+  forges."github.com".token = set (credentials file)
+```
+
+`tuckerbox config get <key>` prints one key's value and source
+(`high (repo)`), or every key of a table such as `steps.review`. A key it
+does not know exits non-zero and names the nearest one. Both take `--json`:
+each key's `key`, `value`, `set`, `source`, `scope`, `file` (`repo`,
+`machine`, `credentials` or `""` for a default), `type`, `allowed`,
+`default` and `secret`, plus `overridden` when a repository value hides a
+machine one; `files` gives each file's `path`, `revision` (null when absent)
+and `error` when it does not parse. `show --json` exits 0 even when a file
+does not parse, listing what the other file sets.
+
+Forge tokens are secrets: `show` and `get` print only `set` or `not set` and
+where the token in use comes from (the credentials file, a variable's name,
+`gh` or `glab`), never the token. The key table these commands read is the
+one `tuckerbox check` uses to refuse a key in the wrong file.
 
 ## Develop
 

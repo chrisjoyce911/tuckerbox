@@ -12,8 +12,23 @@ import (
 )
 
 type Credentials struct {
-	TokenEnv       string
+	TokenEnv string
+	// Stored is the token from the machine's credentials file, if any. It
+	// is tried after TokenEnv and before the default variables.
+	Stored         Token
 	BorrowCLIToken bool
+}
+
+// StoredSource is the Source of a token read from the credentials file.
+const StoredSource = "credentials file"
+
+// StoredToken wraps a token read from the credentials file.
+func StoredToken(value string) Token {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return Token{}
+	}
+	return Token{value, StoredSource}
 }
 
 // Token deliberately has no exported secret field and is safe to format.
@@ -32,10 +47,15 @@ func ReadToken(ctx context.Context, target Target, cfg Credentials) (Token, erro
 	return LookupToken(ctx, target, cfg, os.Getenv, borrowToken)
 }
 func LookupToken(ctx context.Context, target Target, cfg Credentials, getenv func(string) string, borrow func(context.Context, string, ...string) (string, error)) (Token, error) {
-	names := []string{}
 	if cfg.TokenEnv != "" {
-		names = append(names, cfg.TokenEnv)
+		if v := strings.TrimSpace(getenv(cfg.TokenEnv)); v != "" {
+			return Token{v, cfg.TokenEnv}, nil
+		}
 	}
+	if cfg.Stored.Available() {
+		return cfg.Stored, nil
+	}
+	names := []string{}
 	switch target.Host {
 	case "github.com":
 		names = append(names, "GH_TOKEN", "GITHUB_TOKEN")
@@ -71,6 +91,14 @@ func LookupToken(ctx context.Context, target Target, cfg Credentials, getenv fun
 	}
 	return Token{}, nil
 }
+
+// BorrowCLIToken runs gh or glab to read the token it holds, as
+// [ReadToken] does when borrow_cli_token is set. Its errors never carry
+// the CLI's output.
+func BorrowCLIToken(ctx context.Context, program string, args ...string) (string, error) {
+	return borrowToken(ctx, program, args...)
+}
+
 func borrowToken(ctx context.Context, program string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, program, args...)
 	cmd.Stderr = io.Discard

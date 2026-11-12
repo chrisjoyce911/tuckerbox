@@ -16,7 +16,7 @@ import (
 func CheckForge(ctx context.Context, target forge.Target, credentials forge.Credentials, httpClient *http.Client) string {
 	prefix := fmt.Sprintf("forge: %s %s/%s", target.Kind, target.Host, target.Project)
 	token, err := forge.ReadToken(ctx, target, credentials)
-	help := fmt.Sprintf("machine [forges.%q] token_env or borrow_cli_token", target.Host)
+	help := fmt.Sprintf("machine [forges.%q] token_env or borrow_cli_token; or store one with tuckerbox config set --machine forges.%q.token", target.Host, target.Host)
 	switch target.Host {
 	case "github.com":
 		help += "; GH_TOKEN or GITHUB_TOKEN"
