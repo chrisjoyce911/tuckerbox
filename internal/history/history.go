@@ -170,7 +170,8 @@ type Event struct {
 	Summary string `json:"summary,omitempty"`
 	// Findings are the step's findings, for step_finished and rejected.
 	Findings []agent.Finding `json:"findings,omitempty"`
-	// ExitCode is the agent's exit status, for step_finished.
+	// ExitCode is the agent's exit status, for step_finished; absent when
+	// it is unknown (a terminal agent ended after it reported).
 	ExitCode *int `json:"exit_code,omitempty"`
 	// Reason says why, for blocked, failed and stopped.
 	Reason string `json:"reason,omitempty"`

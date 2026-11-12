@@ -61,12 +61,18 @@ func (e *Engine) startEvents(ws Workspace, rs *Run, mode Mode, prev Run, by stri
 	e.event(ws, rs, history.Event{Kind: history.Queued})
 }
 
-// resultEvent records a step's accepted result.
+// resultEvent records a step's accepted result. An exit status below
+// zero is unknown (a terminal agent Tuckerbox ended after it reported, or
+// one whose exit herdr-core doesn't say) and is left out of the event.
 func (e *Engine) resultEvent(ws Workspace, rs *Run, res *agent.Result, exitCode int) {
-	e.event(ws, rs, history.Event{
+	ev := history.Event{
 		Kind: history.StepFinished, Status: res.Status, Summary: res.Summary,
-		Findings: res.Findings, ExitCode: &exitCode,
-	})
+		Findings: res.Findings,
+	}
+	if exitCode >= 0 {
+		ev.ExitCode = &exitCode
+	}
+	e.event(ws, rs, ev)
 }
 
 // finishKind is the history kind for a final state.
