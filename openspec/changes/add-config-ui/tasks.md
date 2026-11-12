@@ -25,8 +25,8 @@
 
 ## 3. Saving (config-save, config-cli)
 
-- [ ] 3.1 Line-level TOML rewrite for set and unset (key line, new key at table end, new table at file end, whole multi-line arrays, empty `[steps.<id>]` removed); write by temporary file and rename
-- [ ] 3.2 Test "Comment kept"
+- [x] 3.1 Line-level TOML rewrite for set and unset (key line, new key at table end, new table at file end, whole multi-line arrays, empty `[steps.<id>]` removed); write by temporary file and rename
+- [x] 3.2 Test "Comment kept"
 - [ ] 3.3 Check before saving: parse, merge with the other file, run the config checks, compare problems before and after; list problems a save causes in active changes without blocking
 - [ ] 3.4 Test "Removing a step another step needs"
 - [ ] 3.5 Test "Fixing one of two problems"
@@ -46,7 +46,7 @@
 - [ ] 3.19 Test "Token in the arguments" (the value is not printed)
 - [ ] 3.20 `tuckerbox config edit [--machine]` with the `tuckerbox edit` editor, then the check; no commit
 - [ ] 3.21 Test "Syntax error after an edit"
-- [ ] 3.22 Run TLC on `formal/configsave.tla` and its broken variants `blindwrite` and `checkbeforelock` (`/opsx:tlc` locally, `scripts/tla-check.sh` in CI); the model passes and each variant is rejected
+- [x] 3.22 Run TLC on `formal/configsave.tla` and its broken variants `blindwrite` and `checkbeforelock` (`/opsx:tlc` locally, `scripts/tla-check.sh` in CI); the model passes and each variant is rejected
 
 ## 4. Where a repository save goes (config-save)
 
