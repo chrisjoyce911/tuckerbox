@@ -290,19 +290,23 @@ func Reason(unmet []Unmet) string {
 }
 
 // Pending returns the dependencies in ids that are neither archived in any
-// of roots nor ready according to lookup. Those that are not active in any
-// root either are returned as unknown: no run can make them ready.
+// of roots nor ready according to lookup. Those that are neither archived
+// nor active in any root are returned as unknown, whatever their run
+// state: no run can make them ready.
 func Pending(roots []string, ids []string, lookup Lookup) (unmet []Unmet, unknown []string) {
 	for _, d := range ids {
 		if anyRoot(roots, d, IsArchived) {
 			continue
 		}
-		state, step := lookup(d)
-		switch {
-		case state == Ready:
-			continue
-		case state == "" && !anyRoot(roots, d, IsActive):
+		// Whether a change exists depends on its folder alone: a run
+		// left behind by a change removed without archiving does not
+		// count, whatever its state.
+		if !anyRoot(roots, d, IsActive) {
 			unknown = append(unknown, d)
+			continue
+		}
+		state, step := lookup(d)
+		if state == Ready {
 			continue
 		}
 		why := state

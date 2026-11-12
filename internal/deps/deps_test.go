@@ -165,3 +165,16 @@ func TestPending(t *testing.T) {
 		t.Errorf("unknown %q", unknown)
 	}
 }
+
+// A change removed without archiving is unknown even when this machine
+// still has a run record for it, whatever its state.
+func TestPendingRemovedChangeWithRunRecord(t *testing.T) {
+	root := t.TempDir()
+	for _, state := range []string{"stopped", "failed", "ready", "queued"} {
+		lookup := func(string) (string, string) { return state, "build" }
+		unmet, unknown := Pending([]string{root}, []string{"a"}, lookup)
+		if len(unmet) != 0 || !reflect.DeepEqual(unknown, []string{"a"}) {
+			t.Errorf("%s run: unmet %v, unknown %q", state, unmet, unknown)
+		}
+	}
+}
