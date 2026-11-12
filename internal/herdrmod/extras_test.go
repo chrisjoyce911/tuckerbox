@@ -90,6 +90,13 @@ type fakeHerdr struct {
 	downAfterClone bool
 }
 
+func (f *fakeHerdr) reach(context.Context) error {
+	if f.down {
+		return errors.New("no Herdr window")
+	}
+	return nil
+}
+
 func (f *fakeHerdr) do(_ context.Context, command string, args map[string]any) (string, error) {
 	b, _ := json.Marshal(args)
 	f.calls = append(f.calls, command+" "+string(b))
@@ -119,7 +126,7 @@ func extrasEnv(t *testing.T, home, goos string) (Env, *fakeHerdr) {
 	var dirs []string
 	e := env(t, home, passCheck(&dirs))
 	f := &fakeHerdr{home: home}
-	e.Do, e.GOOS = f.do, goos
+	e.Do, e.Reach, e.GOOS = f.do, f.reach, goos
 	return e, f
 }
 
@@ -337,6 +344,44 @@ func TestDrawerInAShippedLayoutClonesIt(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(did, "\n"), "switched back to main") {
 		t.Errorf("did %q", did)
+	}
+}
+
+// Owner decision on the extras review: every precondition of the requested
+// steps is checked before any change, so install --keys --drawer with Herdr
+// not running fails up front, changes nothing (not even the key) and says why.
+func TestKeysAndDrawerWithHerdrNotRunningChangeNothing(t *testing.T) {
+	home := herdrHome(t)
+	e, f := extrasEnv(t, home, "darwin")
+	f.down = true
+	before := snapshot(t, home)
+	did, err := InstallExtras(context.Background(), e, Options{Keys: true, Drawer: true})
+	if !errors.Is(err, ErrHerdrNotRunning) {
+		t.Fatalf("err %v", err)
+	}
+	for _, want := range []string{"--drawer", "nothing was changed", "open Herdr"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message %q lacks %q", err, want)
+		}
+	}
+	if len(did) != 0 || len(f.calls) != 0 {
+		t.Errorf("did %q, calls %v", did, f.calls)
+	}
+	got := snapshot(t, home)
+	if len(got) != len(before) {
+		t.Errorf("files %d, were %d", len(got), len(before))
+	}
+	for k, v := range before {
+		if got[k] != v {
+			t.Errorf("%s changed", k)
+		}
+	}
+	if _, err := os.Stat(journalPath(home)); err == nil {
+		t.Error("journal written")
+	}
+	// Keys alone don't need the window.
+	if _, err := InstallExtras(context.Background(), e, Options{Keys: true}); err != nil {
+		t.Errorf("keys alone: %v", err)
 	}
 }
 

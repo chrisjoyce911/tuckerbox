@@ -131,6 +131,38 @@ func herdrAppDo(ctx context.Context, command string, args map[string]any) (strin
 	return string(out), nil
 }
 
+// herdrAppReach asks the running window for its status; herdr-app exits
+// non-zero when there is no window to answer.
+func herdrAppReach(ctx context.Context) error {
+	bin, err := exec.LookPath("herdr-app")
+	if err != nil {
+		return fmt.Errorf("%w on PATH", ErrNoChecker)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "status").CombinedOutput()
+	if err != nil {
+		if msg := strings.TrimSpace(string(out)); msg != "" {
+			return errors.New(msg)
+		}
+		return err
+	}
+	return nil
+}
+
+// Preconditions checks, before anything changes, what the requested steps
+// need from outside the Herdr home: the drawer needs the window running,
+// to clone a shipped layout and to switch back if the install is undone.
+func Preconditions(ctx context.Context, env Env, opt Options) error {
+	env = env.withDefaults()
+	if opt.Drawer {
+		if err := env.Reach(ctx); err != nil {
+			return fmt.Errorf("%w for --drawer, and it can't be reached (%v); nothing was changed: open Herdr and run this again", ErrHerdrNotRunning, err)
+		}
+	}
+	return nil
+}
+
 func (e Env) goos() string {
 	if e.GOOS != "" {
 		return e.GOOS
@@ -560,6 +592,11 @@ func InstallExtras(ctx context.Context, env Env, opt Options) ([]string, error) 
 		return nil, err
 	}
 	defer unlock()
+	// All or nothing starts here: no step begins, and no earlier journal is
+	// undone, unless every step can run.
+	if err := Preconditions(ctx, env, opt); err != nil {
+		return nil, err
+	}
 	_, did, err := recoverJournal(ctx, home, env)
 	if err != nil {
 		return did, err

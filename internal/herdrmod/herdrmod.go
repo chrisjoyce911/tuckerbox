@@ -44,13 +44,17 @@ type Env struct {
 	// Do runs `herdr-app do <command> <args>` against the running window
 	// (layout.clone and layout.switch for the drawer). Tests replace it.
 	Do func(ctx context.Context, command string, args map[string]any) (string, error)
+	// Reach answers nil when the Herdr window is running and answers
+	// (`herdr-app status`). Install checks it before changing anything when
+	// a requested step needs the window. Tests replace it.
+	Reach func(ctx context.Context) error
 	// GOOS picks the toggle key's spelling (cmd- on macOS); "" is this one.
 	GOOS string
 }
 
 // SystemEnv uses the real environment and herdr-app.
 func SystemEnv() Env {
-	return Env{Getenv: os.Getenv, UserHome: os.UserHomeDir, Check: herdrAppCheck, Do: herdrAppDo}
+	return Env{Getenv: os.Getenv, UserHome: os.UserHomeDir, Check: herdrAppCheck, Do: herdrAppDo, Reach: herdrAppReach}
 }
 
 func herdrAppCheck(ctx context.Context, dir string) (string, error) {
@@ -77,6 +81,9 @@ func (e Env) withDefaults() Env {
 	}
 	if e.Do == nil {
 		e.Do = s.Do
+	}
+	if e.Reach == nil {
+		e.Reach = s.Reach
 	}
 	return e
 }

@@ -38,6 +38,11 @@ func (a App) herdr(args []string) int {
 func (a App) herdrInstall(opt herdrmod.Options) int {
 	info := version.Get()
 	ctx := context.Background()
+	// Every requested step's preconditions first, so a step that can't run
+	// fails here with nothing installed or changed.
+	if err := herdrmod.Preconditions(ctx, a.HerdrEnv, opt); err != nil {
+		return a.errf("herdr install", "%v", err)
+	}
 	res, err := herdrmod.Install(ctx, a.HerdrEnv, info.Version, info.Commit)
 	for _, d := range res.Recovered {
 		fmt.Fprintln(a.Stdout, d)

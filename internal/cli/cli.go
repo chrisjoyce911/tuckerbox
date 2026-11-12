@@ -52,7 +52,8 @@ Commands:
   herdr install [--keys [--key <key>]] [--drawer]
                             Install or update the board mod in the Herdr app;
                             --keys binds a key to open and hide it, --drawer
-                            adds a peek drawer to your layout
+                            adds a peek drawer to your layout (Herdr must
+                            be running; if not, nothing changes)
   herdr uninstall           Undo what herdr install did
   version [--json]          Print the version, commit, Go version and platform
   doctor                    Check that git, openspec and the agent CLIs are installed

@@ -32,7 +32,8 @@ tuckerbox version   # version, commit, Go version and platform (--json for tools
 tuckerbox doctor    # checks git, openspec and the agent CLIs (claude, codex)
 tuckerbox init      # writes a commented starter .tuckerbox/config.toml
 tuckerbox herdr install  # installs or updates the board mod in the Herdr app
-                         # (--keys: a key to open and hide it; --drawer: a peek drawer)
+                         # (--keys: a key to open and hide it; --drawer: a peek drawer,
+                         #  with Herdr running, else nothing changes)
 tuckerbox herdr uninstall  # undoes exactly what herdr install did
 tuckerbox check     # validates it, merged with this machine's config
 ```
