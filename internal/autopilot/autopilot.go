@@ -96,8 +96,9 @@ type Pilot struct {
 	// Start asks the engine for req in the background, as tuckerbox run
 	// does. A *runs.ChangedError (or any error) means nothing was started.
 	Start func(ctx context.Context, req Request) error
-	// Order puts the active changes in admission order. Nil keeps them
-	// sorted by id.
+	// Order puts the active changes in admission order (add-priority's
+	// priority.Admission in tuckerbox autopilot). Nil keeps them sorted
+	// by id.
 	Order func(ctx context.Context, ids []string) ([]string, error)
 	// Warn receives problems that don't stop a pass (offline fetch).
 	Warn func(string)
