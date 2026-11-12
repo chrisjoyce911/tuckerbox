@@ -14,6 +14,9 @@
 //	                   prints everything it wrote
 //	hc send [--json] N TEXT
 //	                   types TEXT and enter into it
+//	hc keys [--json] N KEY...
+//	                   presses keys: writes "keys" and the key names, as
+//	                   one line, to its input
 //	hc ls --json       the live terminals
 //	hc killall         ends every terminal (test cleanup)
 //	hc status N STATE  sets the status the terminal's program reports, as
@@ -251,6 +254,21 @@ func main() {
 		fmt.Fprintln(f, pos[1])
 		f.Close()
 		fmt.Println(`{"sent":true}`)
+	case "keys":
+		pos := positionals(rest)
+		if len(pos) < 2 {
+			fail(2, "fakehc keys: want <terminal> <keys>...")
+		}
+		name := resolve(pos[0])
+		r, err := readRecord(name)
+		if err != nil || r.State != "live" {
+			notFound(pos[0])
+		}
+		f, err := os.OpenFile(path(name, ".in"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		must(err)
+		fmt.Fprintln(f, "keys "+strings.Join(pos[1:], " "))
+		f.Close()
+		fmt.Println(`{"status":null,"turn":0}`)
 	case "ls":
 		entries, _ := os.ReadDir(dir())
 		var live []*record

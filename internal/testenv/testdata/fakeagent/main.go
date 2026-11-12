@@ -66,6 +66,11 @@ type action struct {
 	// FileFirst (interactive) writes the result file mid-turn, then ends
 	// that turn a second later with "Done." and no result.
 	FileFirst bool `json:"file_first"`
+	// Trust (interactive) first shows Claude Code's folder-trust prompt
+	// for this folder ("." is the working directory), with "No, exit"
+	// selected. It wants down (the fake hc's keys writes "keys down"),
+	// then shows "Yes" selected and wants enter; anything else exits 1.
+	Trust string `json:"trust"`
 }
 
 // hook is how the fake agent hands a turn's final message over.
@@ -258,6 +263,26 @@ func interactive(h *hook, a action, change, step string, round int, status, summ
 	}
 	result := func(r int) string {
 		return "Finished.\n\n```json\n" + string(resultJSON(r)) + "\n```"
+	}
+	if a.Trust != "" {
+		dir := a.Trust
+		if dir == "." {
+			dir, _ = os.Getwd()
+		}
+		prompt := func(no, yes string) {
+			fmt.Printf("────\n Accessing workspace:\n\n %s\n\n Quick safety check: Is this a project you created or one you trust?\n\n %s No, exit\n %s Yes, I trust this folder\n\n Enter to confirm · Esc to cancel\n", dir, no, yes)
+		}
+		prompt("❯", " ")
+		if !in.Scan() || in.Text() != "keys down" {
+			fmt.Println("fakeagent: folder not trusted")
+			os.Exit(1)
+		}
+		prompt(" ", "❯")
+		if !in.Scan() || in.Text() != "keys enter" {
+			fmt.Println("fakeagent: folder not trusted")
+			os.Exit(1)
+		}
+		fmt.Println("fakeagent: folder trusted")
 	}
 	if a.Ask != "" {
 		fmt.Println(a.Ask)

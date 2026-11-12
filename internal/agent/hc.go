@@ -294,6 +294,20 @@ func textLen(out []byte) int {
 	return n
 }
 
+// screenLines is how many lines of history Screen asks for.
+const screenLines = "60"
+
+// Screen returns the terminal's screen and its last lines of history.
+func (h HC) Screen(ctx context.Context, name string) ([]byte, error) {
+	return h.run(ctx, "read", "--lines", screenLines, name)
+}
+
+// Keys presses the named keys ("down", "enter", ...) in the terminal.
+func (h HC) Keys(ctx context.Context, name string, keys ...string) error {
+	_, err := h.run(ctx, append([]string{"keys", "--json", name}, keys...)...)
+	return err
+}
+
 // Send pastes text into the terminal and presses enter.
 func (h HC) Send(ctx context.Context, name, text string) error {
 	_, err := h.run(ctx, "send", "--json", name, text)

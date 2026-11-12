@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -144,6 +146,31 @@ func terminalPrompt(briefFile string) string {
 	return "Read the Tuckerbox brief at " + briefFile + " and follow it. " +
 		"It ends with the result JSON your final message must contain. " +
 		"If you need a decision from the person watching, ask it and end your turn; they answer here."
+}
+
+// terminalPermissions is a terminal agent's permission flags: the step's
+// profile, and for Claude Code read access to the brief's directory
+// (--add-dir), which is in the repository's git directory, outside the
+// worktree: its first prompt says to read the brief there, and without it
+// Claude Code stops at a permission prompt. A profile that already adds
+// that directory is left as it is. Codex needs nothing: it may read any
+// file in every sandbox mode.
+func terminalPermissions(tmpl Template, perms []string, briefDir string) []string {
+	if tmpl.Hook != HookClaude {
+		return perms
+	}
+	for i, p := range perms {
+		dir, ok := strings.CutPrefix(p, "--add-dir=")
+		if !ok && p == "--add-dir" && i+1 < len(perms) {
+			dir, ok = perms[i+1], true
+		}
+		if ok && filepath.Clean(dir) == filepath.Clean(briefDir) {
+			return perms
+		}
+	}
+	// One argument: --add-dir takes several directories, so a separate
+	// value would also take a prompt that follows it.
+	return append(slices.Clone(perms), "--add-dir="+briefDir)
 }
 
 // HoldArgv is the command a terminal runs: tuckerbox agent-hold, which
@@ -286,7 +313,7 @@ func (t Terminal) Run(ctx context.Context, s Step, opts Options) (Outcome, error
 		inner, err := s.Agent.ExpandInteractive(Values{
 			Brief: terminalPrompt(o.BriefPath), BriefFile: o.BriefPath, Result: o.ResultPath,
 			LastMessage: o.MessagePath, Workdir: s.Worktree, Model: s.Model, Effort: s.Effort,
-			Permissions: s.Permissions, TurnHook: hook,
+			Permissions: terminalPermissions(s.Agent, s.Permissions, filepath.Dir(o.BriefPath)), TurnHook: hook,
 		})
 		if err != nil {
 			return o, err
@@ -385,6 +412,13 @@ func (t Terminal) Run(ctx context.Context, s Step, opts Options) (Outcome, error
 	turnOver := false
 	graceFor, graceAfter := opts.ResultGrace, "its result"
 	lastLook := time.Time{}
+	// Claude Code asks whether to trust a folder it hasn't seen before
+	// its first turn: Tuckerbox answers for the worktree it made, while
+	// the agent starts (see acceptTrust).
+	var trustUntil time.Time
+	if s.Agent.Hook == HookClaude {
+		trustUntil = time.Now().Add(trustWindow)
+	}
 loop:
 	for {
 		select {
@@ -428,6 +462,9 @@ loop:
 				break loop
 			case agentState == AgentWaiting && term.Working():
 				setState(AgentWorking)
+			case !trustUntil.IsZero() && time.Now().Before(trustUntil) && t.acceptTrust(ctx, s, log):
+				trustUntil = time.Time{}
+				setState(AgentWorking)
 			case agentState == AgentWorking && term.Waiting():
 				// A permission prompt or a question: herdr-core sees the
 				// agent waiting for the person.
@@ -454,6 +491,110 @@ loop:
 		o.Tail, _ = TailLog(o.LogPath, opts.TailBytes)
 	}
 	return o, nil
+}
+
+// trustWindow is how long after a Claude Code step starts Tuckerbox looks
+// for its folder-trust prompt.
+const trustWindow = 2 * time.Minute
+
+// acceptTrust answers Claude Code's folder-trust prompt when the terminal
+// shows it for the step's worktree, which Tuckerbox made for the change: a
+// fresh worktree is a folder Claude Code hasn't seen, and the prompt would
+// hold the step until a person answered it. A prompt for any other folder
+// is left to the person. It presses one key a look (see trustKeys) and
+// reports whether it has answered: pressed enter on "Yes".
+func (t Terminal) acceptTrust(ctx context.Context, s Step, log io.Writer) bool {
+	screen, err := t.HC.Screen(ctx, s.Term.Name)
+	if err != nil {
+		return false
+	}
+	keys := trustKeys(string(screen), s.Worktree)
+	if keys == nil {
+		return false
+	}
+	if err := t.HC.Keys(ctx, s.Term.Name, keys...); err != nil {
+		logLine(log, "step %s round %d: answering Claude Code's folder-trust prompt: %v", s.Step, s.Round, err)
+		return false
+	}
+	if keys[0] != "enter" {
+		return false
+	}
+	logLine(log, "step %s round %d: trusted the worktree %s at Claude Code's folder-trust prompt", s.Step, s.Round, s.Worktree)
+	return true
+}
+
+// Claude Code's folder-trust prompt (2.1): the folder after "Accessing
+// workspace:", then the choices, "No, exit" first and selected.
+const (
+	trustHeading = "Accessing workspace:"
+	trustYes     = "Yes, I trust this folder"
+	trustNo      = "No, exit"
+	trustCursor  = "❯"
+)
+
+// trustKeys returns the next key towards "Yes, I trust this folder" when
+// screen's last trust prompt is Claude Code's for worktree: down while "No,
+// exit" is selected, enter once "Yes" is, or nil. One key a look: keys sent
+// together as the prompt first draws can be read before the selection
+// moves, and enter on "No, exit" ends Claude Code. The folder is compared
+// without white space, which the screen may wrap.
+func trustKeys(screen, worktree string) []string {
+	i := strings.LastIndex(screen, trustHeading)
+	if i < 0 || worktree == "" {
+		return nil
+	}
+	prompt := screen[i+len(trustHeading):]
+	if !strings.Contains(prompt, trustYes) {
+		return nil
+	}
+	head, _, _ := strings.Cut(prompt, trustNo)
+	if y := strings.Index(head, trustYes); y >= 0 {
+		head = head[:y]
+	}
+	// The folder is what comes before the question; it must be the
+	// worktree (as given or with links resolved), not a folder within it.
+	var parts []string
+	for _, line := range strings.Split(head, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			if len(parts) > 0 {
+				break
+			}
+			continue
+		}
+		parts = append(parts, line)
+	}
+	folder := strings.Join(strings.Fields(strings.Join(parts, "")), "")
+	match := false
+	for _, w := range worktreeNames(worktree) {
+		if folder == strings.Join(strings.Fields(w), "") {
+			match = true
+		}
+	}
+	if !match {
+		return nil
+	}
+	for _, line := range strings.Split(prompt, "\n") {
+		if !strings.Contains(line, trustCursor) {
+			continue
+		}
+		switch {
+		case strings.Contains(line, trustYes):
+			return []string{"enter"}
+		case strings.Contains(line, trustNo):
+			return []string{"down"}
+		}
+	}
+	return nil
+}
+
+// worktreeNames is worktree, cleaned, and with links resolved.
+func worktreeNames(worktree string) []string {
+	names := []string{filepath.Clean(worktree)}
+	if real, err := filepath.EvalSymlinks(worktree); err == nil && real != names[0] {
+		names = append(names, real)
+	}
+	return names
 }
 
 // startSettle is how long reconcileStart keeps looking for a terminal an

@@ -976,3 +976,173 @@ func waitUntil(t *testing.T, what string, limit time.Duration, cond func() bool)
 		time.Sleep(50 * time.Millisecond)
 	}
 }
+
+// fakeClaude is the built-in claude template running the fake agent.
+func fakeClaude() Template {
+	tmpl := Builtin()["claude"]
+	tmpl.Interactive = slices.Clone(tmpl.Interactive)
+	tmpl.Interactive[0] = termTools.FakeAgent
+	return tmpl
+}
+
+// A terminal Claude gets read access to the brief's directory, which is
+// outside its worktree: its first prompt says to read the brief there.
+func TestTerminalClaudeReadsTheBrief(t *testing.T) {
+	f := newTermFixture(t)
+	s := f.step("build", "builder", 1, fakeClaude())
+	s.Permissions = []string{"--permission-mode", "acceptEdits"}
+	o := f.run(s, termOpts)
+	if o.Result == nil {
+		t.Fatalf("outcome %+v\n%s", o, readFile(t, o.LogPath))
+	}
+	prog := program(f.runCalls()[0])
+	inner := prog[slices.Index(prog, "--")+1:]
+	want := "--add-dir=" + filepath.Dir(o.BriefPath)
+	if i := slices.Index(inner, want); i < 0 || inner[i-1] != "acceptEdits" {
+		t.Errorf("command lacks %q after the profile: %q", want, inner)
+	}
+	if strings.HasPrefix(filepath.Dir(o.BriefPath), s.Worktree) {
+		t.Errorf("brief %s is inside the worktree; the test proves nothing", o.BriefPath)
+	}
+}
+
+func TestTerminalPermissions(t *testing.T) {
+	claude, codex := Builtin()["claude"], Builtin()["codex"]
+	dir := filepath.Join("repo", ".git", "tuckerbox", "fix", "briefs")
+	for _, c := range []struct {
+		name  string
+		tmpl  Template
+		perms []string
+		want  []string
+	}{
+		{"claude, no profile", claude, nil, []string{"--add-dir=" + dir}},
+		{"claude, a profile", claude, []string{"--permission-mode", "plan"}, []string{"--permission-mode", "plan", "--add-dir=" + dir}},
+		{"claude, the profile adds it", claude, []string{"--add-dir", dir}, []string{"--add-dir", dir}},
+		{"claude, the profile adds it in one", claude, []string{"--add-dir=" + dir + string(filepath.Separator)}, []string{"--add-dir=" + dir + string(filepath.Separator)}},
+		{"claude, the profile adds another", claude, []string{"--add-dir", "elsewhere"}, []string{"--add-dir", "elsewhere", "--add-dir=" + dir}},
+		{"codex reads anywhere", codex, []string{"--sandbox", "read-only"}, []string{"--sandbox", "read-only"}},
+		{"a custom agent", interactiveFakeTemplate(), nil, nil},
+	} {
+		got := terminalPermissions(c.tmpl, c.perms, dir)
+		if !slices.Equal(got, c.want) {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+	perms := []string{"--permission-mode", "plan"}
+	_ = terminalPermissions(claude, perms[:1], dir)
+	if perms[1] != "plan" {
+		t.Error("terminalPermissions changed the profile's flags")
+	}
+}
+
+// interactiveFakeTemplate is interactiveFake without the fake agent's
+// path, for tests that don't run it.
+func interactiveFakeTemplate() Template {
+	return Template{Name: "fake", Command: []string{"fake", PhBrief}, Interactive: []string{"fake", "--notify", PhTurnHook, "--", PhBrief}}
+}
+
+// claudeTrustScreen is Claude Code 2.1's folder-trust prompt as hc read
+// shows it, for folder.
+func claudeTrustScreen(folder string) string {
+	return "\n" + strings.Repeat("─", 40) + "\n Accessing workspace:\n\n " + folder + "\n\n" +
+		" Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source project, or work from your team). If not, take a moment to review what's in this\n" +
+		" folder first.\n\n Claude Code'll be able to read, edit, and execute files here.\n\n Security guide\n\n" +
+		" ❯ No, exit\n   Yes, I trust this folder\n\n Enter to confirm · Esc to cancel\n"
+}
+
+func TestTrustKeys(t *testing.T) {
+	wt := filepath.Join(t.TempDir(), "shop-worktrees", "fix-login")
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	real, err := filepath.EvalSymlinks(wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	screen := claudeTrustScreen(wt)
+	for _, c := range []struct {
+		name, screen string
+		want         []string
+	}{
+		{"the worktree, No selected", screen, []string{"down"}},
+		{"the worktree, Yes selected", strings.Replace(strings.Replace(screen, "❯ No", "  No", 1), "  Yes, I", "❯ Yes, I", 1), []string{"enter"}},
+		{"the worktree with links resolved", claudeTrustScreen(real), []string{"down"}},
+		{"the worktree, wrapped", claudeTrustScreen(wt[:10] + "\n " + wt[10:]), []string{"down"}},
+		{"trailing spaces on the screen's lines", strings.ReplaceAll(screen, "\n", "   \n"), []string{"down"}},
+		{"another folder", claudeTrustScreen(filepath.Join(wt, "..")), nil},
+		{"a folder within it", claudeTrustScreen(filepath.Join(wt, "sub")), nil},
+		{"a folder that starts like it", claudeTrustScreen(wt + "-old"), nil},
+		{"no prompt", "fakeagent: fix-login build round 1\n", nil},
+		{"the prompt is answered: no choices left", strings.Split(screen, " ❯ No")[0], nil},
+		{"no selection", strings.Replace(screen, "❯", " ", 1), nil},
+		{"an older prompt for it, then one for another folder", screen + claudeTrustScreen("/elsewhere"), nil},
+	} {
+		if got := trustKeys(c.screen, wt); !slices.Equal(got, c.want) {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+	if got := trustKeys(screen, ""); got != nil {
+		t.Errorf("no worktree: %q", got)
+	}
+}
+
+// Claude Code's folder-trust prompt in the step's fresh worktree is
+// answered without a person, and the step goes on.
+func TestClaudeTrustsTheWorktree(t *testing.T) {
+	f := newTermFixture(t)
+	f.env.SetPlan(t, map[string]testenv.Action{"build": {Trust: "."}})
+	s := f.step("build", "builder", 1, fakeClaude())
+	o := f.run(s, termOpts)
+	if o.Result == nil || o.Source != messageLabel {
+		t.Fatalf("outcome %+v\n%s", o, readFile(t, o.LogPath))
+	}
+	var keys [][]string
+	for _, c := range f.calls() {
+		if c[0] == "keys" {
+			keys = append(keys, c)
+		}
+	}
+	if len(keys) != 2 || !slices.Equal(keys[0], []string{"keys", "--json", s.Term.Name, "down"}) ||
+		!slices.Equal(keys[1], []string{"keys", "--json", s.Term.Name, "enter"}) {
+		t.Errorf("keys calls %q, want down, then enter", keys)
+	}
+	log := readFile(t, o.LogPath)
+	for _, want := range []string{"trusted the worktree " + s.Worktree, "fakeagent: folder trusted"} {
+		if !strings.Contains(log, want) {
+			t.Errorf("log lacks %q:\n%s", want, log)
+		}
+	}
+}
+
+// A trust prompt for a folder other than the worktree is left to the
+// person, as is the prompt of an agent that isn't Claude Code.
+func TestTrustPromptForAnotherFolder(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		trust string
+		tmpl  func() Template
+	}{
+		{"claude, another folder", "/somewhere/else", fakeClaude},
+		{"a custom agent, the worktree", ".", interactiveFake},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newTermFixture(t)
+			f.env.SetPlan(t, map[string]testenv.Action{"build": {Trust: c.trust}})
+			s := f.step("build", "builder", 1, c.tmpl())
+			ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+			defer cancel()
+			o, err := f.be.Run(ctx, s, termOpts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !o.Stopped || o.Result != nil {
+				t.Errorf("outcome %+v", o)
+			}
+			for _, call := range f.calls() {
+				if call[0] == "keys" {
+					t.Errorf("pressed keys: %q", call)
+				}
+			}
+		})
+	}
+}

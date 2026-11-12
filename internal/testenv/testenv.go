@@ -194,6 +194,10 @@ type Action struct {
 	// FileFirst, in a terminal, writes the result file mid-turn and ends
 	// that turn a second later with a message holding no result.
 	FileFirst bool `json:"file_first,omitempty"`
+	// Trust, in a terminal, first shows Claude Code's folder-trust prompt
+	// for this folder ("." is the agent's working directory) and exits
+	// unless it is answered with down, then enter.
+	Trust string `json:"trust,omitempty"`
 }
 
 // Finding is a fake agent finding.
