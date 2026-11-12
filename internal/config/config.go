@@ -235,6 +235,27 @@ type Step struct {
 	// rejections the run is blocked. It is DefaultMaxRounds unless set, and
 	// setting it without OnReject is invalid.
 	MaxRounds int
+	// From says which file set Agent, Model, Effort and Permissions:
+	// SourceRepo or SourceMachine, or "" when neither did.
+	From StepSources
+}
+
+// Source is where a step setting's value came from.
+type Source string
+
+// Sources of a step setting, from weakest to strongest. A change's own
+// overrides (package settings) win over the repository's.
+const (
+	SourceDefault Source = "default"
+	SourceMachine Source = "machine"
+	SourceRepo    Source = "repo"
+	SourceChange  Source = "change"
+)
+
+// StepSources says where each of a step's agent, model, effort and
+// permissions came from; "" when not set in either config file.
+type StepSources struct {
+	Agent, Model, Effort, Permissions Source
 }
 
 // Agent is a command template for an agent CLI defined in config.
@@ -323,6 +344,13 @@ func (c *Config) ProfileProblem(prof, agent string) string {
 		return fmt.Sprintf("permission profile %q grants no flags for agent %q; add permissions.%s.args.%s in machine config", prof, agent, prof, agent)
 	}
 	return ""
+}
+
+// KnownAgent reports whether name is a built-in agent or one defined in
+// config.
+func (c *Config) KnownAgent(name string) bool {
+	_, ok := c.Agents[name]
+	return ok || IsBuiltinAgent(name)
 }
 
 // IsBuiltinAgent reports whether name is a built-in agent.

@@ -215,6 +215,20 @@ func Parse(data []byte) (Sidecar, []Problem, error) {
 	return sc, ps, nil
 }
 
+// Judge parses a sidecar's contents (nil: the change has none) and checks
+// it against cfg, returning the sidecar and every problem with it. A
+// sidecar that does not parse is one problem.
+func Judge(cfg *config.Config, data []byte) (Sidecar, []Problem) {
+	if data == nil {
+		return Sidecar{Steps: map[string]Override{}}, nil
+	}
+	sc, ps, err := Parse(data)
+	if err != nil {
+		return Sidecar{Steps: map[string]Override{}}, []Problem{{Message: err.Error()}}
+	}
+	return sc, append(ps, Check(cfg, sc)...)
+}
+
 // Read reads and parses change id's sidecar in the checkout at root. A
 // missing sidecar is an empty one.
 func Read(root, id string) (Sidecar, []Problem, error) {
@@ -251,6 +265,10 @@ func Check(cfg *config.Config, sc Sidecar) []Problem {
 			agent = o.Agent
 		}
 		for _, k := range StepKeys {
+			if k == KeyAgent && o.Agent != "" && allowed(cfg.Overrides, k, o.Agent, agent) == "" && !cfg.KnownAgent(o.Agent) {
+				add(key+"."+k, "agent %q is allowed but not defined; use %s, or define it under [agents.%s]", o.Agent, strings.Join(config.BuiltinAgents, ", "), o.Agent)
+				continue
+			}
 			v := o.Get(k)
 			if v == "" {
 				continue
@@ -265,8 +283,82 @@ func Check(cfg *config.Config, sc Sidecar) []Problem {
 				}
 			}
 		}
+		// The repository's profile is kept when the change picks another
+		// agent; it must grant that agent flags, as for a repository step.
+		if o.Agent != "" && o.Permissions == "" && step.Permissions != "" {
+			if msg := cfg.ProfileProblem(step.Permissions, agent); msg != "" {
+				add(key+"."+KeyAgent, "%s (the step's profile from %s config)", msg, step.From.Permissions)
+			}
+		}
 	}
 	return ps
+}
+
+// Effective is the settings a step runs with, and where each came from
+// (config.SourceChange, SourceRepo, SourceMachine or SourceDefault). An
+// empty Model or Effort leaves the agent CLI's own default; an empty
+// Permissions runs the agent with no profile.
+type Effective struct {
+	Agent, Model, Effort, Permissions string
+	From                              config.StepSources
+}
+
+// Resolve works out the effective settings of step for a change whose
+// override for it is o: for each key the change's value, else the
+// repository's, else the machine's (both already merged into step, with
+// step.From saying which), else the agent's default ([agents.<name>] model
+// and effort, or none). When o changes the step's agent, a model or effort
+// set for the old agent in config is dropped: the change's value is used,
+// else the new agent's default. The permission profile is kept, by name;
+// [Check] refuses it if it grants the new agent nothing.
+func Resolve(cfg *config.Config, step config.Step, o Override) Effective {
+	var e Effective
+	or := func(src config.Source) config.Source {
+		if src == "" {
+			return config.SourceDefault
+		}
+		return src
+	}
+	e.Agent, e.From.Agent = step.Agent, or(step.From.Agent)
+	if o.Agent != "" {
+		e.Agent, e.From.Agent = o.Agent, config.SourceChange
+	}
+	changed := e.Agent != step.Agent
+	def := cfg.Agents[e.Agent] // a built-in agent not in config has no defaults
+	for _, f := range []struct {
+		over, inherited, fallback string
+		src                       config.Source
+		dst                       *string
+		from                      *config.Source
+	}{
+		{o.Model, step.Model, def.Model, step.From.Model, &e.Model, &e.From.Model},
+		{o.Effort, step.Effort, def.Effort, step.From.Effort, &e.Effort, &e.From.Effort},
+	} {
+		switch {
+		case f.over != "":
+			*f.dst, *f.from = f.over, config.SourceChange
+		case f.inherited != "" && !changed:
+			*f.dst, *f.from = f.inherited, or(f.src)
+		default:
+			*f.dst, *f.from = f.fallback, config.SourceDefault
+		}
+	}
+	e.Permissions, e.From.Permissions = step.Permissions, or(step.From.Permissions)
+	if step.Permissions == "" {
+		e.From.Permissions = config.SourceDefault
+	}
+	if o.Permissions != "" {
+		e.Permissions, e.From.Permissions = o.Permissions, config.SourceChange
+	}
+	return e
+}
+
+// Apply returns step with its agent, model, effort and permissions set to
+// e's, ready to run.
+func (e Effective) Apply(step config.Step) config.Step {
+	step.Agent, step.Model, step.Effort, step.Permissions = e.Agent, e.Model, e.Effort, e.Permissions
+	step.From = e.From
+	return step
 }
 
 // allowed returns "" when the allow-list o lets a change set key to v on a

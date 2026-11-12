@@ -237,6 +237,20 @@ func nilIfUndefined(f *file, v []string) *[]string {
 	return &v
 }
 
+// source says which file set a string step key: the repository's if r
+// is set to a non-empty value, else the machine's, else neither ("").
+func source(r, m *string) Source {
+	switch {
+	case r != nil && *r != "":
+		return SourceRepo
+	case r != nil:
+		return ""
+	case m != nil && *m != "":
+		return SourceMachine
+	}
+	return ""
+}
+
 type addFunc func(file, key, format string, args ...any)
 
 func resolveStep(cfg *Config, root, id string, i int, index map[string]int, ms, rs rawStep, mf, rf, orderFrom string, knownAgent func(string) bool, add addFunc) Step {
@@ -265,6 +279,12 @@ func resolveStep(cfg *Config, root, id string, i int, index map[string]int, ms, 
 
 	s.Model, _, _ = pick(rs.Model, ms.Model, rf, mf)
 	s.Effort, _, _ = pick(rs.Effort, ms.Effort, rf, mf)
+	s.From = StepSources{
+		Agent:       source(rs.Agent, ms.Agent),
+		Model:       source(rs.Model, ms.Model),
+		Effort:      source(rs.Effort, ms.Effort),
+		Permissions: source(rs.Permissions, ms.Permissions),
+	}
 
 	if prof, from, ok := pick(rs.Permissions, ms.Permissions, rf, mf); ok && prof != "" {
 		s.Permissions = prof
