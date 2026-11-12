@@ -26,7 +26,8 @@ test("every action builds its tuckerbox command line", () => {
   assert.deepEqual(commandLine("validate", c), ["tuckerbox", "validate", c, "--json"]);
   assert.deepEqual(commandLine("tick", c, { task: "2.1" }), ["tuckerbox", "tasks", c, "tick", "2.1"]);
   assert.deepEqual(commandLine("untick", c, { task: "2.1" }), ["tuckerbox", "tasks", c, "untick", "2.1"]);
-  assert.deepEqual(commandLine("init", ""), ["tuckerbox", "init"]);
+  // tuckerbox init stays a CLI command: the board never offers it.
+  assert.throws(() => commandLine("init", c), /unknown action/);
   assert.equal(commandLine("proposal", c), null);
   assert.equal(commandLine("worktree", c), null);
 });

@@ -21,7 +21,6 @@ export const ACTIONS = {
   validate: { label: "Validate" },
   tick: { label: "Tick" },
   untick: { label: "Untick" },
-  init: { label: "tuckerbox init", primary: true },
 };
 
 // Files `tuckerbox edit` opens; a spec delta is `spec:<capability>`.
@@ -35,7 +34,6 @@ const CHANGE_ID = /^[a-z0-9][a-z0-9-]*$/;
 // the file for edit, the task number for tick and untick. Returns null for the
 // Herdr-only actions. Throws on input a command must never get.
 export function commandLine(action, change, extra = {}) {
-  if (action === "init") return ["tuckerbox", "init"];
   if (!CHANGE_ID.test(change ?? "")) throw new Error(`not a change id: ${JSON.stringify(change)}`);
   const step = () => {
     if (!extra.step) throw new Error(`${action} needs a step`);
@@ -207,4 +205,41 @@ export function parseValidation(r) {
   if (!doc || typeof doc.valid !== "boolean") return { error: outcome(r).message };
   const errors = (Array.isArray(doc.errors) ? doc.errors : []).map((e) => (typeof e === "string" ? e : [e?.path, e?.message].filter(Boolean).join(": ")));
   return { valid: doc.valid, errors };
+}
+
+// ---- opening, docking, hiding (herdr-board: Opening the board, Docking) ----
+
+// The board window, as mod.json's `overlay` describes it: what `mod.open`
+// toggles (the toggle key, the drawer) and what Undock opens again.
+export function windowSpec(mod) {
+  return { mod, kind: "window", width: 0.86, height: 0.84, key: mod, keep: true };
+}
+
+// The toggle: the key tuckerbox herdr install --keys binds, and the drawer's
+// click. `mod.open` opens the board window, or closes it when it is open.
+export function toggleCall(mod) {
+  return { command: "mod.open", args: { name: mod } };
+}
+
+// Dock: the board as a pane beside the terminals of the shown space, pinned
+// to the repository it shows (`props.folder`, `props.machine`). It splits the
+// focused pane when that is a terminal in that space, else the shown tab's
+// first terminal, else it opens a tab with the board as its pane.
+export function dockCall({ root, on, space, spaces, panes, focused, mod }) {
+  if (!root) throw new Error("nothing to dock: no Tuckerbox repository here");
+  const props = { folder: root, machine: on ?? null };
+  const s = (spaces ?? []).find((x) => x.id === space) ?? null;
+  const tabs = new Set((s?.tabs ?? []).map((t) => t.id));
+  const active = new Set((s?.tabs ?? []).filter((t) => t.active).map((t) => t.id));
+  const terms = (panes ?? []).filter((p) => tabs.has(p.tab) && p.terminal && !p.mod);
+  const target = terms.find((p) => p.pane === focused?.pane) ?? terms.find((p) => active.has(p.tab)) ?? null;
+  if (target) return { command: "pane.split", args: { direction: "right", pane: target.pane, mod, props } };
+  return { command: "tab.new", args: { ...(s ? { space: s.id } : {}), name: "Tuckerbox", mod, props } };
+}
+
+// Undock: the board back in its window, then this pane closed. Close: only
+// the pane. Both need this copy's own pane id.
+export function undockCalls(pane, mod) {
+  if (!pane) throw new Error("this board doesn't know its pane yet: click it first");
+  return { overlay: windowSpec(mod), close: { command: "pane.close", args: { pane } } };
 }

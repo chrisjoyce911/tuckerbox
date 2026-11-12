@@ -33,7 +33,11 @@ Commands:
   tasks <change> tick|untick <n.m>  Tick or untick one task in tasks.md
   approve <change>          Approve a change's text so runs may start it
   unapprove <change>        Withdraw a change's approval
-  herdr install             Install or update the board mod in the Herdr app
+  herdr install [--keys [--key <key>]] [--drawer]
+                            Install or update the board mod in the Herdr app;
+                            --keys binds a key to open and hide it, --drawer
+                            adds a peek drawer to your layout
+  herdr uninstall           Undo what herdr install did
   version [--json]          Print the version, commit, Go version and platform
   doctor                    Check that git, openspec and the agent CLIs are installed
   check                     Validate .tuckerbox/config.toml with machine config

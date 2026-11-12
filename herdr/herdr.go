@@ -11,7 +11,7 @@ const ModName = "tuckerbox-board"
 
 // Mod is the board mod; its files are under mods/tuckerbox-board.
 //
-//go:embed mods/tuckerbox-board/*.js mods/tuckerbox-board/mod.json mods/tuckerbox-board/*.svg mods/tuckerbox-board/README.md mods/tuckerbox-board/fixtures/*.json
+//go:embed mods/tuckerbox-board/*.js mods/tuckerbox-board/mod.json mods/tuckerbox-board/keys.json mods/tuckerbox-board/*.svg mods/tuckerbox-board/README.md mods/tuckerbox-board/fixtures/*.json
 var Mod embed.FS
 
 // ModRoot is the folder in Mod that holds the mod's files.

@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   normaliseBoard, parseBoard, group, counts, columnName, approvalBadge, newestFirst, eventText, fmtLocal,
-  taskGroups, pollInterval, due, isShown, dirFromStack, resolveWhere, selfPane, POLL_SHOWN_MS, POLL_HIDDEN_MS,
+  taskGroups, pollInterval, due, isShown, dirFromStack, repoCandidates, pickRepo, candidatesKey, openGate, drawerRows, NO_CONFIG, selfPane, POLL_SHOWN_MS, POLL_HIDDEN_MS,
 } from "../model.js";
 
 const raw = (name) => JSON.parse(readFileSync(new URL(`../fixtures/${name}`, import.meta.url), "utf8"));
@@ -99,7 +99,7 @@ test("missing fields read as empty, and a title falls back to the id", () => {
   assert.equal(b.require_approval, true);
 });
 
-test("Space outside a repository: the error document is kept for the board to show", () => {
+test("a not_a_repository error document is kept for the board to show", () => {
   const out = JSON.stringify({ version: 1, error: { code: "not_a_repository", message: "no .tuckerbox/config.toml in /tmp/x" } });
   const b = parseBoard(out, "", 1);
   assert.equal(b.error.code, "not_a_repository");
@@ -178,31 +178,82 @@ const world = (o = {}) => ({
   ],
 });
 
-test("where: focus in another space doesn't move the board's repository or machine", () => {
-  const w = world();
-  // Docked with its space: focus moves to B's terminal (on mini).
-  const docked = resolveWhere({ props: { space: "A" }, ...w, focused: { pane: "pb-shell" } });
-  assert.deepEqual(docked, { cwd: "/repo/a/sub", on: null, space: "A" });
-  // B shown and focused: still A, still this computer.
-  const wb = world({ active: "B" });
-  assert.deepEqual(resolveWhere({ props: { space: "A" }, ...wb, focused: { pane: "pb-shell" } }), { cwd: "/repo/a/sub", on: null, space: "A" });
-  // A pane copy without a space prop finds its space from its own pane.
-  assert.deepEqual(resolveWhere({ props: {}, ...wb, focused: { pane: "pb-shell" }, self: "pa-board" }), { cwd: "/repo/a/sub", on: null, space: "A" });
-  // Focus inside the board's own space is followed.
-  assert.equal(resolveWhere({ props: { space: "A" }, ...w, focused: { pane: "pa-shell" } }).cwd, "/repo/a/sub");
+// What each candidate folder is: in /repo/a (with a Tuckerbox config) or
+// /repo/b (git, no config), or nowhere.
+const probeOf = (cwd) => cwd.startsWith("/repo/a") ? { root: "/repo/a", config: true }
+  : cwd.startsWith("/repo/b") ? { root: "/repo/b", config: false } : null;
+const pick = (c) => pickRepo(c, c.cwds.map(probeOf));
+
+test("Which repository: a folder prop first, with its machine prop", () => {
+  const w = world({ active: "B" });
+  const c = repoCandidates({ props: { folder: "/repo/a", machine: "mini" }, ...w, focused: { pane: "pb-shell" } });
+  assert.deepEqual(c.cwds, ["/repo/a"], "a pinned folder is the only candidate");
+  assert.equal(c.on, "mini");
+  assert.deepEqual(pick(c), { on: "mini", space: "B", found: true, root: "/repo/a", cwd: "/repo/a" });
+  // A docked pane on this computer: machine null stays this computer.
+  assert.equal(repoCandidates({ props: { folder: "/repo/a", machine: null }, ...world(), focused: null }).on, null);
 });
 
-test("where: a window follows the shown space, folder and machine together", () => {
+test("Which repository: the focused pane when it is in the board's space and in a Tuckerbox repo", () => {
+  const w = world();
+  const c = repoCandidates({ props: { overlay: "o1" }, ...w, focused: { pane: "pa-shell" } });
+  assert.equal(c.cwds[0], "/repo/a/sub");
+  assert.equal(pick(c).root, "/repo/a");
+  // Focus in another space is never followed: B's shell doesn't move a board of A.
   const wb = world({ active: "B" });
-  assert.deepEqual(resolveWhere({ props: { overlay: "o1" }, ...wb, focused: { pane: "pb-shell" } }), { cwd: "/repo/b", on: "mini", space: "B" });
-  // Focus left in A while B is shown: B's own terminal, never A's folder on mini.
-  assert.deepEqual(resolveWhere({ props: { overlay: "o1" }, ...wb, focused: { pane: "pa-shell" } }), { cwd: "/repo/b", on: "mini", space: "B" });
+  assert.deepEqual(repoCandidates({ props: { space: "A" }, ...wb, focused: { pane: "pb-shell" } }).cwds, ["/repo/a/sub", "/repo/a"]);
+  // A pane copy without props finds its space from its own pane.
+  assert.equal(repoCandidates({ props: {}, ...wb, focused: { pane: "pb-shell" }, self: "pa-board" }).space, "A");
 });
 
-test("where: a space prop that is gone gives no folder, not another space's", () => {
+test("Which repository: else every pane of the space, the one with .tuckerbox/config.toml wins", () => {
+  // Space A: the focused shell is in /repo/b (git, no config), another pane in /repo/a.
   const w = world();
-  assert.deepEqual(resolveWhere({ props: { space: "gone" }, ...w, focused: { pane: "pa-shell" } }), { cwd: "", on: null, space: null });
-  assert.equal(resolveWhere({ props: { space: "A", folder: "/pinned" }, ...w, focused: null }).cwd, "/pinned");
+  w.panes = [
+    { pane: "pa-shell", tab: "a1", cwd: "/repo/b/x", terminal: "t1" },
+    { pane: "pa-other", tab: "a2", cwd: "/tmp", terminal: "t2" },
+    { pane: "pa-third", tab: "a2", cwd: "/repo/a/web", terminal: "t3" },
+  ];
+  w.spaces[0].folder = "/home/me";
+  const c = repoCandidates({ props: { overlay: "o1" }, ...w, focused: { pane: "pa-shell" } });
+  assert.deepEqual(c.cwds, ["/repo/b/x", "/tmp", "/repo/a/web", "/home/me"], "focused, the shown tab, other tabs, the space's folder");
+  assert.deepEqual(pick(c), { on: null, space: "A", found: true, root: "/repo/a", cwd: "/repo/a" });
+});
+
+test("No Tuckerbox config in the space: nothing is found", () => {
+  // B: a git repository without .tuckerbox/config.toml, on mini.
+  const wb = world({ active: "B" });
+  const c = repoCandidates({ props: { overlay: "o1" }, ...wb, focused: { pane: "pb-shell" } });
+  assert.deepEqual(c.cwds, ["/repo/b"]);
+  assert.deepEqual(pick(c), { on: "mini", space: "B", found: false, root: "", cwd: "" });
+  // Folders that couldn't be looked at (null) and a space gone: nothing either.
+  assert.equal(pickRepo(c, [null]).found, false);
+  const gone = repoCandidates({ props: { space: "gone" }, ...wb, focused: null });
+  assert.deepEqual(gone.cwds, []);
+  assert.equal(pick(gone).found, false);
+});
+
+test("the candidate key changes with the shown space and its folders", () => {
+  const a = candidatesKey(repoCandidates({ props: { overlay: "o1" }, ...world(), focused: null }));
+  const b = candidatesKey(repoCandidates({ props: { overlay: "o1" }, ...world({ active: "B" }), focused: null }));
+  assert.notEqual(a, b);
+  assert.equal(a, candidatesKey(repoCandidates({ props: { overlay: "o1" }, ...world(), focused: null })));
+});
+
+test("Toggle in a space without a config: the window closes, a later space shows a message", () => {
+  assert.equal(openGate({ overlay: "o1", everFound: false, found: false }), "close");
+  assert.equal(openGate({ overlay: "o1", everFound: true, found: false }), "message", "it showed a board, then the space changed");
+  assert.equal(openGate({ overlay: null, everFound: false, found: false }), "message", "a docked pane whose config went");
+  assert.equal(openGate({ overlay: "o1", everFound: false, found: true }), "board");
+  assert.equal(NO_CONFIG, "No Tuckerbox config in this space");
+});
+
+test("drawer rows: the repository, then running and needs-you counts", () => {
+  assert.deepEqual(drawerRows({ running: 2, needs: 1, total: 5 }, "shop").map((r) => [r.kind, r.count, r.text]),
+    [["repo", null, "shop"], ["running", 2, "running"], ["needs", 1, "needs you"]]);
+  assert.deepEqual(drawerRows({ running: 0, needs: 0, total: 3 }, "shop").map((r) => r.kind), ["repo"]);
+  assert.deepEqual(drawerRows({ error: "boom" }, "shop").map((r) => r.kind), ["repo", "error"]);
+  assert.equal(drawerRows({ running: 0, needs: 3 }, "").find((r) => r.kind === "needs").text, "need you");
 });
 
 test("shown: each copy by its own pane, two copies in two tabs", () => {

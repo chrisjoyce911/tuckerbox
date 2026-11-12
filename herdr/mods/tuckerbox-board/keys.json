@@ -1,0 +1,5 @@
+{
+  "global": {
+    "ctrl-shift-k": "mod.open:tuckerbox-board"
+  }
+}

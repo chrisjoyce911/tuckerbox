@@ -36,18 +36,40 @@ export default class Main extends View {
       "add login page", "review limit reached", "stale approval", "not committed", "2 running", "2 need you",
       "after add-users (Build)", "Approve", "▶ Start", "Resume", "Stop", "Re-run build", "round 3"],
   },
-  "not-a-repo": {
+  "no-config": {
     main: `import { View } from "gpui-kit";
 import { BoardView } from "./board.js";
-import { parseBoard } from "./model.js";
-import doc from "./fixture.js";
-const b = parseBoard(JSON.stringify(doc), "", 1);
+const b = { error: { code: "no_config", message: "" } };
 export default class Main extends View {
   init(p, cx) { this.v = new BoardView({ board: b }); this.v.init({ board: b }, cx); }
   render(cx) { return this.v.render(cx); }
 }`,
-    fixture: JSON.stringify({ version: 1, error: { code: "not_a_repository", message: "no .tuckerbox/config.toml in this repository" } }),
-    want: ["Not a Tuckerbox repository", "Run tuckerbox init here"],
+    fixture: "null",
+    want: ["No Tuckerbox config in this space"],
+    absent: ["tuckerbox init", "Dock"],
+  },
+  drawer: {
+    main: `import { View } from "gpui-kit";
+import { DrawerView } from "./drawer.js";
+const p = { at: { found: true, root: "/work/shop" }, counts: { running: 2, needs: 1, total: 6 }, repo: "shop" };
+export default class Main extends View {
+  init(_p, cx) { this.v = new DrawerView(p); this.v.init(p, cx); }
+  render(cx) { return this.v.render(cx); }
+}`,
+    fixture: "null",
+    want: ["shop", "running", "needs you"],
+  },
+  "drawer-no-config": {
+    main: `import { View } from "gpui-kit";
+import { DrawerView } from "./drawer.js";
+const p = { at: { found: false, root: "" }, counts: null, repo: "" };
+export default class Main extends View {
+  init(_p, cx) { this.v = new DrawerView(p); this.v.init(p, cx); }
+  render(cx) { return this.v.render(cx); }
+}`,
+    fixture: "null",
+    want: [],
+    absent: ["running", "Tuckerbox", "tuckerbox-drawer"],
   },
   card: {
     main: `import { View } from "gpui-kit";
@@ -88,11 +110,13 @@ for (const [name, v] of Object.entries(views)) {
     catch (e) { console.error(`${name}: herdr-app check failed\n${e.stdout ?? ""}${e.stderr ?? ""}`); failed++; continue; }
     const missing = v.want.filter((w) => !out.includes(JSON.stringify(w).slice(1, -1)));
     if (missing.length) { console.error(`${name}: missing ${missing.map((m) => JSON.stringify(m)).join(", ")}`); failed++; }
+    const extra = (v.absent ?? []).filter((w) => out.includes(JSON.stringify(w).slice(1, -1)));
+    if (extra.length) { console.error(`${name}: should not show ${extra.map((m) => JSON.stringify(m)).join(", ")}`); failed++; }
     if (v.order) {
       const [a, b] = v.order.map((s) => out.indexOf(s));
       if (a < 0 || b < 0 || a > b) { console.error(`${name}: expected ${JSON.stringify(v.order[0])} before ${JSON.stringify(v.order[1])}`); failed++; }
     }
-    if (!missing.length) console.log(`${name}: ok`);
+    if (!missing.length && !extra.length) console.log(`${name}: ok`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

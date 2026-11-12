@@ -15,7 +15,7 @@ Defines the machine-readable board for one repository, derived from OpenSpec and
 
 #### Scenario: Not a Tuckerbox repository
 - **WHEN** `tuckerbox board --json` runs in a folder outside a git repository, or in a repository without `.tuckerbox/config.toml`
-- **THEN** it exits non-zero and prints a document with `version` and `error` holding `code` `not_a_repository` and a message, so a dashboard can offer `tuckerbox init`
+- **THEN** it exits non-zero and prints a document with `version` and `error` holding `code` `not_a_repository` and a message, so a dashboard can say there is no Tuckerbox config
 
 ### Requirement: Derived columns
 Columns SHALL be derived from OpenSpec, approval and run state, never stored. `[board] columns` SHALL select `compact` (default) or `steps`. Compact order SHALL be Proposed, Approved, In progress, Ready, Done. Steps order SHALL be Proposed, Approved, Queued, one column per workflow step in workflow order, Ready, Done. Approved SHALL appear only when `require_approval` is true. Column ids SHALL remain `proposed`, `approved`, `in_progress`, `queued`, `step:<id>`, `ready`, `done` as applicable.

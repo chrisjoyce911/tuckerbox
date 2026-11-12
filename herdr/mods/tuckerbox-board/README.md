@@ -9,15 +9,17 @@ stores no task state, writes no files and never moves a card by itself
 
 | File | What it does |
 |---|---|
-| `main.js` | Picks the view: the board, or `view: "card"` for one change's detail dialog |
-| `board.js` | The board: header (repository, running and needs-you counts), columns, cards |
+| `main.js` | Picks the view: the board, `view: "card"` for one change's detail dialog, `view: "proposal"` (a pane), `view: "drawer"` (the peek drawer) |
+| `board.js` | The board: header (repository, running and needs-you counts, Dock or Undock and Close), columns, cards |
+| `drawer.js` | The peek drawer: nothing without a Tuckerbox repository, else the repository and its running and needs-you counts; a click toggles the board window |
+| `keys.json` | The toggle key `tuckerbox herdr install --keys` merges into the person's `keys.json` |
 | `card.js` | Card detail: proposal (markdown), tasks with tick boxes, approval, last validation, dependencies, rounds with findings, history (newest first, local time), actions |
 | `model.js` | Data rules with no Herdr imports: reading the document, grouping, counts, times, polling |
 | `actions.js` | Which actions each state offers, and `commandLine()`, the one function that builds every tuckerbox command line |
 | `perform.js` | Runs an action: `exec` of the tuckerbox command on the card's machine, or the Herdr tab, pane or view for it. With the fixtures it only says what it would run |
 | `edits.js` | Edit tracking: notes the editor's pane, validates when it closes, keeps the result in memory |
 | `proposal.js` | `view: "proposal"`: a change's proposal in a pane (Open proposal) |
-| `data.js` | Runs `tuckerbox board --json` on the space's machine, or reads the fixtures |
+| `data.js` | Finds the space's Tuckerbox repository, runs `tuckerbox board --json` there on the space's machine, or reads the fixtures |
 | `ui.js` | Buttons, chips and badges, in theme colors |
 | `fixtures/` | `board.json` and `detail.json`: the board-data contract, by example |
 | `test/` | `node --test test/` (no dependencies), and `check-fixtures.mjs` |
@@ -29,7 +31,22 @@ stores no task state, writes no files and never moves a card by itself
 `herdr-app check` passes on a staged copy, and writes `version.json` there:
 the binary's version, commit and a digest of the files. Herdr's home is
 `$HERDR_APP_HOME`, else `~/.config/herdr-app`; without it nothing is
-written. `tuckerbox doctor` says whether the installed copy is the one the
+written. Two opt-in extras:
+
+- `--keys` merges `keys.json` (the toggle, `mod.open:tuckerbox-board`) into the
+  person's `keys.json`: `ctrl-shift-k`, or `cmd-shift-k` on macOS, or
+  `--key <key>`. A key bound already in any section but a `mod:` one is
+  reported and left alone.
+- `--drawer` adds the drawer, `{ "mod": "tuckerbox-board", "props": { "view": "drawer" } }`
+  with `id` `tuckerbox-drawer`, to the shown layout's root `floating` list. A
+  shipped layout is first cloned to `<name>-tuckerbox` with
+  `herdr-app do layout.clone` (Herdr must be running for that).
+
+There is no + menu entry: Herdr documents no way to choose a personal
+new-menu. Install records what it changed in `.tuckerbox-install.json` in
+Herdr's home, with each file as it was; `tuckerbox herdr uninstall` reverses
+exactly that (the old bytes when a file is still as install left it, else
+only Tuckerbox's entry) and removes the mod folder. `tuckerbox doctor` says whether the installed copy is the one the
 binary ships: the digest in `version.json`, and every shipped file's bytes
 (it names a file changed or missing; files Herdr adds, such as
 `gpui-kit.d.ts`, don't count).
@@ -56,10 +73,24 @@ the board pane that is focused while it holds the keyboard, else because it
 is the only board pane; until then, with several board panes, it counts as
 shown while any of them is. The detail dialog reads once when it opens.
 
-**Which repository:** a docked board (`space` prop, or the space of its own
-pane) reads its own space: the focused pane's folder only when that pane is
-in that space, else a terminal there, else the space's folder, always on that
-space's machine. A window follows the shown space. A `folder` prop pins it.
+**Which repository:** a `folder` prop (with `machine`, as Dock sets them)
+pins it. Otherwise the board takes its space (`space` prop, else its own
+pane's, else the shown one for a window or the drawer) and looks, on that
+space's machine, at the focused pane's folder when that pane is in the space,
+then every other pane there (the shown tab's first), then the space's folder.
+The first whose git top level has `.tuckerbox/config.toml` wins; the board
+reads at that top level. With none, there is no board: a window opened then
+closes with the toast "No Tuckerbox config in this space", the drawer draws
+nothing and there is no Dock; a board that already showed one says so.
+`git rev-parse --show-toplevel` and the config read are kept 30 s (10 s for
+no), so the copies look every second and follow a space switch at once.
+
+**Opening, hiding, docking:** `mod.open tuckerbox-board` (the toggle key,
+the drawer's click) opens the window or closes it. Dock (window header) runs
+`pane.split {direction: "right", pane, mod: "tuckerbox-board", props: {folder, machine}}`
+beside the focused terminal of the space, else the shown tab's first, else
+`tab.new` with the board as its pane, and closes the window. A docked board's
+header has Undock (opens the window, closes the pane) and Close.
 
 ## The board document
 
@@ -88,8 +119,10 @@ in the machine’s local zone, with its offset. Fields may be added; renaming or
 
 `error.code` is `not_a_repository` when the folder isn't a Tuckerbox
 repository: not inside a git repository, or no `.tuckerbox/config.toml` at
-its root (`config.ErrNoRepoConfig`). The board then says so and offers `tuckerbox init` there
-(herdr-board: Space outside a repository). Other codes are shown as they are.
+its root (`config.ErrNoRepoConfig`). The board looks for the config itself
+before it runs `tuckerbox board`, so this is rare; it then says "No Tuckerbox
+config in this space" and offers no command (herdr-board: Space without a
+Tuckerbox config). Other codes are shown as they are.
 The command still exits non-zero with an error document.
 
 Default `[board] columns = "compact"` shows Proposed, Approved (when required),
@@ -189,7 +222,6 @@ card says it wasn't validated since the edit and the detail offers Validate.
 | Tick, Untick | no queued or running run | `tuckerbox tasks <id> tick\|untick <n.m>` |
 | Open proposal | the card has an `edit_folder` | A pane with this mod's proposal view, read through `tuckerbox board --json --change` |
 | Open worktree | the card has a `worktree` | `space.select` of a space already there, else `space.new` in the worktree on the card's machine |
-| tuckerbox init | the folder isn't a Tuckerbox repository | `tuckerbox init` |
 
 Commands run with `exec` on the card's Herdr machine, in the document's
 `path` there, with arguments as a list (no shell). A change id must be
