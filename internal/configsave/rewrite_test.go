@@ -73,3 +73,41 @@ func TestLockedReadCheckWrite(t *testing.T) {
 		t.Fatalf("lost updates: %s", b)
 	}
 }
+
+func TestFileLockStableWhenParentsCreated(t *testing.T) {
+	if testing.Short() {
+		t.Skip("concurrency check")
+	}
+	root := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	state := t.TempDir()
+	path := filepath.Join(alias, "new", "folder", "config.toml")
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- WithFileLock(context.Background(), state, path, func() error {
+			if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+				return err
+			}
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	called := false
+	err := WithFileLock(ctx, state, filepath.Join(root, "new", "folder", "config.toml"), func() error { called = true; return nil })
+	close(release)
+	if firstErr := <-done; firstErr != nil {
+		t.Fatal(firstErr)
+	}
+	if err == nil || called {
+		t.Fatal("alias acquired a different lock after parent creation")
+	}
+}
