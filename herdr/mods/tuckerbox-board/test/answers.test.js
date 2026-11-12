@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, mkdtempSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, delimiter } from "node:path";
 import { execFileSync } from "node:child_process";
 import { normaliseCard, answerable } from "../model.js";
 import { invocation, commandLine, answerActions, answerText, stdinCall, detailActions, MAX_ANSWER } from "../actions.js";
@@ -173,18 +173,71 @@ test("answer text: trimmed, not empty, at most 16 KiB of UTF-8", () => {
   assert.throws(() => invocation("answer", { change: "bad id!" }, { text: "x" }));
 });
 
-test("the text reaches tuckerbox answer on standard input, untouched by the shell", { skip: process.platform === "win32" && "no sh" }, () => {
+// A stand-in tuckerbox in a new folder that records its arguments and
+// standard input in out.json there; returns { bin, out }.
+function standIn() {
   const bin = mkdtempSync(join(tmpdir(), "tb-answer-"));
   const out = join(bin, "out.json");
-  // A stand-in tuckerbox that records its arguments and standard input.
-  writeFileSync(join(bin, "tuckerbox"), `#!/bin/sh\nnode -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>require("fs").writeFileSync(process.argv[1],JSON.stringify({args:process.argv.slice(2),stdin:s})))' ${JSON.stringify(out)} "$@"\n`);
-  chmodSync(join(bin, "tuckerbox"), 0o755);
-  const text = `line one\n  "$HOME" $(echo no) \`echo no\` 'single' -n \\\\ %s %d\nlast`;
-  const inv = invocation("answer_resume", blocked(), { text });
-  const call = stdinCall(inv.argv, inv.stdin);
+  const rec = join(bin, "rec.cjs");
+  writeFileSync(rec, `let s="";process.stdin.on("data",d=>s+=d).on("end",()=>require("fs").writeFileSync(${JSON.stringify(out)},JSON.stringify({args:process.argv.slice(2),stdin:s})))\n`);
+  if (process.platform === "win32") {
+    writeFileSync(join(bin, "tuckerbox.cmd"), `@node "%~dp0rec.cjs" %*\r\n`);
+  } else {
+    writeFileSync(join(bin, "tuckerbox"), `#!/bin/sh\nexec node ${JSON.stringify(rec)} "$@"\n`);
+    chmodSync(join(bin, "tuckerbox"), 0o755);
+  }
+  return { bin, out };
+}
+
+const TRICKY = `line one\n  "$HOME" $(echo no) \`echo no\` 'single' -n \\\\ %s %d %PATH% ^& | ; é 漢字 😀\nlast`;
+const withPath = (bin) => ({ ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, Path: `${bin}${delimiter}${process.env.Path ?? process.env.PATH}` });
+
+function has(program) {
+  try { execFileSync(program, ["-NoProfile", "-Command", "exit 0"], { stdio: "ignore" }); return true; } catch { return false; }
+}
+
+test("the text reaches tuckerbox answer on standard input, untouched by sh", { skip: process.platform === "win32" && "no sh on Windows" }, () => {
+  const { bin, out } = standIn();
+  const inv = invocation("answer_resume", blocked({}), { text: TRICKY });
+  const call = stdinCall(inv.argv, inv.stdin, "darwin");
   assert.equal(call.command, "sh");
-  execFileSync(call.command, call.args, { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+  execFileSync(call.command, call.args, { env: withPath(bin) });
   const got = JSON.parse(readFileSync(out, "utf8"));
   assert.deepEqual(got.args, ["answer", "fix-board-safety", "--resume", "-"]);
-  assert.equal(got.stdin, text);
+  assert.equal(got.stdin, TRICKY);
+});
+
+test("a Windows machine's answer goes through PowerShell, not sh", () => {
+  const card = normaliseCard({ ...blocked(), question: blocked().question }, { on: "pc", path: "C:\\work\\shop", os: "windows" });
+  assert.equal(card.os, "windows");
+  const inv = invocation("answer", card, { text: TRICKY });
+  assert.equal(inv.os, "windows");
+  const call = stdinCall(inv.argv, inv.stdin, inv.os);
+  assert.equal(call.command, "powershell");
+  const script = call.args.at(-1);
+  // Nothing for Windows' command line or PowerShell to read in the text.
+  assert.ok(!script.includes('"'), script);
+  assert.ok(!script.includes("$(echo"), script);
+  const b64 = /FromBase64String\('([A-Za-z0-9+/=]*)'\)/.exec(script)[1];
+  assert.equal(Buffer.from(b64, "base64").toString("utf8"), TRICKY.trim());
+  assert.match(script, /\| & 'tuckerbox' 'answer' 'fix-board-safety' '-'; exit \$LASTEXITCODE$/);
+  // The longest answer fits Windows' command line.
+  const big = stdinCall(inv.argv, "é".repeat(MAX_ANSWER / 2), "windows");
+  assert.ok(big.args.join(" ").length < 32767, `${big.args.join(" ").length} characters`);
+  // Other machines (and boards from a Tuckerbox without os) keep sh.
+  assert.equal(stdinCall(inv.argv, "x", "linux").command, "sh");
+  assert.equal(stdinCall(inv.argv, "x", "").command, "sh");
+});
+
+// powershell.exe on Windows; elsewhere pwsh where it is installed.
+const PS = process.platform === "win32" ? "powershell" : "pwsh";
+test("multiline text reaches tuckerbox answer on standard input through PowerShell", { skip: !has(PS) && `no ${PS}` }, () => {
+  const { bin, out } = standIn();
+  const inv = invocation("answer_resume", blocked({}), { text: TRICKY });
+  const call = stdinCall(inv.argv, inv.stdin, "windows");
+  execFileSync(PS, call.args, { env: withPath(bin) });
+  const got = JSON.parse(readFileSync(out, "utf8"));
+  assert.deepEqual(got.args, ["answer", "fix-board-safety", "--resume", "-"]);
+  // PowerShell ends what it pipes with a newline; tuckerbox answer trims it.
+  assert.equal(got.stdin.replace(/\r?\n$/, ""), TRICKY);
 });

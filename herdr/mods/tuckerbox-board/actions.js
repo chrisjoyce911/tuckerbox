@@ -99,7 +99,10 @@ export function invocation(action, card, extra = {}) {
   const place = action === "mr" ? "browser" : action === "edit" ? "pane" : action === "follow" ? "tab" : argv ? "exec" : "view";
   const out = { action, place, argv, change: card?.change ?? "", on: card?.on ?? null, cwd: card?.path || "" };
   if(action==="mr"){const link=card?.mr?.link??"";if(!/^https:\/\/[^/?#\s]+(?:[/?#]|$)/.test(link) || link.split("/")[2].includes("@"))throw new Error("merge request needs an HTTPS link");out.url=link;}
-  if (action === "answer" || action === "answer_resume") out.stdin = answerText(extra.text);
+  if (action === "answer" || action === "answer_resume") {
+    out.stdin = answerText(extra.text);
+    out.os = card?.os ?? "";
+  }
   if (action === "follow") out.title = `${card?.change} ${extra.step} log`;
   if (action === "edit") out.title = `edit ${card?.change} ${extra.file}`;
   if (action === "proposal") out.file = card?.edit_folder ? `${card.edit_folder}/openspec/changes/${card.change}/proposal.md` : "";
@@ -133,11 +136,61 @@ export function answerActions(card) {
 }
 
 // Herdr's exec gives a program no standard input, so a command that reads
-// its input from "-" runs under sh, which pipes the text in. The text is
-// sh's $1, an argument it never parses: nothing in it is quoted or run.
+// its input from "-" runs under a shell of the card's machine, which pipes
+// the text in. `os` is that machine's operating system (the board
+// document's os): Windows has no sh, so there it runs under PowerShell.
+export function stdinCall(argv, text, os = "") {
+  return os === "windows" ? powershellCall(argv, text) : shCall(argv, text);
+}
+
+// sh: the text is sh's $1, an argument it never parses: nothing in it is
+// quoted or run.
 export const STDIN_SCRIPT = 'text=$1; shift; printf \'%s\' "$text" | "$@"';
-export function stdinCall(argv, text) {
+function shCall(argv, text) {
   return { command: "sh", args: ["-c", STDIN_SCRIPT, "sh", String(text), ...argv] };
+}
+
+// PowerShell (powershell.exe, on every Windows): the text goes in the
+// script as base64 of its UTF-8, which has no quote, space or $ for
+// PowerShell or Windows' command line to read, and the script pipes it,
+// as UTF-8, into the command. The script has no double quote, which
+// Windows' command line would take apart. 16 KiB of text is about 22,000
+// characters of base64, inside Windows' 32,767-character command line.
+export function powershellCall(argv, text) {
+  const b64 = base64(utf8(String(text)));
+  const lit = (a) => `'${String(a).replace(/'/g, "''")}'`;
+  const script = [
+    "$OutputEncoding = New-Object System.Text.UTF8Encoding $false",
+    `$t = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64}'))`,
+    `$t | & ${argv.map(lit).join(" ")}`,
+    "exit $LASTEXITCODE",
+  ].join("; ");
+  return { command: "powershell", args: ["-NoProfile", "-NonInteractive", "-Command", script] };
+}
+
+function utf8(s) {
+  if (typeof TextEncoder === "function") return new TextEncoder().encode(s);
+  const out = [];
+  for (const ch of s) {
+    let c = ch.codePointAt(0);
+    if (c < 0x80) out.push(c);
+    else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+    else if (c < 0x10000) out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    else out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+  }
+  return out;
+}
+
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+function base64(bytes) {
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const n = (bytes[i] << 16) | ((bytes[i + 1] ?? 0) << 8) | (bytes[i + 2] ?? 0);
+    out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63];
+    out += i + 1 < bytes.length ? B64[(n >> 6) & 63] : "=";
+    out += i + 2 < bytes.length ? B64[n & 63] : "=";
+  }
+  return out;
 }
 
 // agent-terminals: Watch from the board. A running card whose agent works in

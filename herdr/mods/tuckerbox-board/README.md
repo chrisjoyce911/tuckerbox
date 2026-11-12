@@ -124,6 +124,7 @@ in the machine’s local zone, with its offset. Fields may be added; renaming or
 | `repo` | string | Normalised remote URL (`github.com/owner/name`), or the checkout path when there is no remote. The key that matches the repository across machines |
 | `path` | string | The repository checkout on this machine. Board actions run here |
 | `machine` | string | This machine's name |
+| `os` | string | The operating system Tuckerbox runs on there (Go's `GOOS`, such as `darwin`, `linux`, `windows`). The answer actions pipe their text in with PowerShell on `windows`, with `sh` elsewhere |
 | `require_approval` | bool | The repository's `require_approval`; `false` means no Approved column and Start on Proposed cards |
 | `steps` | list of strings | Workflow step ids in order, used for Re-run in either layout |
 | `columns` | list | In board order, see below |

@@ -17,8 +17,9 @@ const ACTION_MS = 120000;
 
 async function tuckerbox(inv) {
   try {
-    // An answer's text goes on standard input (stdinCall: under sh).
-    const call = inv.stdin != null ? stdinCall(inv.argv, inv.stdin) : { command: "tuckerbox", args: inv.argv.slice(1) };
+    // An answer's text goes on standard input (stdinCall: under sh, or
+    // PowerShell on a Windows machine).
+    const call = inv.stdin != null ? stdinCall(inv.argv, inv.stdin, inv.os) : { command: "tuckerbox", args: inv.argv.slice(1) };
     const r = await exec(call.command, call.args, { cwd: inv.cwd || undefined, on: inv.on, timeout: ACTION_MS });
     return { code: r.code ?? 0, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
   } catch (e) {

@@ -3,6 +3,7 @@
   "repo": "github.com/example/shop",
   "path": "/work/shop",
   "machine": "studio",
+  "os": "darwin",
   "require_approval": true,
   "steps": [
     "plan",

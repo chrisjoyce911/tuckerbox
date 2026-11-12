@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -64,7 +65,7 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 		return nil, err
 	}
 	refs := refApprovals(ctx, repo.Root)
-	doc := &Document{Version: Version, Ship: string(cfg.Ship), Repo: key, Path: repo.Root, Machine: history.Machine(), RequireApproval: cfg.RequireApproval, Columns: columns(cfg), Cards: []Card{}}
+	doc := &Document{Version: Version, Ship: string(cfg.Ship), Repo: key, Path: repo.Root, Machine: history.Machine(), OS: runtime.GOOS, RequireApproval: cfg.RequireApproval, Columns: columns(cfg), Cards: []Card{}}
 	doc.Steps = make([]string, 0, len(cfg.Steps))
 	for _, step := range cfg.Steps {
 		doc.Steps = append(doc.Steps, step.ID)

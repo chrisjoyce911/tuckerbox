@@ -12,11 +12,14 @@ import (
 const Version = 1
 
 type Document struct {
-	Ship            string   `json:"ship"`
-	Version         int      `json:"version"`
-	Repo            string   `json:"repo"`
-	Path            string   `json:"path"`
-	Machine         string   `json:"machine"`
+	Ship    string `json:"ship"`
+	Version int    `json:"version"`
+	Repo    string `json:"repo"`
+	Path    string `json:"path"`
+	Machine string `json:"machine"`
+	// OS is the operating system Tuckerbox runs on there (Go's GOOS):
+	// the board picks how to run a command on that machine by it.
+	OS              string   `json:"os"`
 	RequireApproval bool     `json:"require_approval"`
 	Steps           []string `json:"steps"`
 	Columns         []Column `json:"columns"`

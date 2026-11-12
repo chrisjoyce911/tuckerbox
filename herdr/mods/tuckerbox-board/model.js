@@ -116,6 +116,9 @@ export function normaliseCard(c, src = {}) {
     question: normaliseQuestion(c?.question),
     on: src.on ?? null,
     path: src.path ?? "",
+    // The operating system of the card's machine (Go's GOOS), which says
+    // how a command with standard input runs there (stdinCall).
+    os: src.os ?? "",
   };
 }
 
@@ -125,13 +128,14 @@ export function normaliseBoard(doc, src = {}) {
   if (!doc || typeof doc !== "object") return { error: { code: "bad_output", message: "tuckerbox board printed no JSON document" } };
   if (doc.error) return { error: { code: str(doc.error.code) || "error", message: str(doc.error.message) || String(doc.error) } };
   const path = str(doc.path);
-  const s = { on: src.on ?? null, path };
+  const s = { on: src.on ?? null, path, os: str(doc.os) };
   return {
     version: num(doc.version),
     ship:str(doc.ship)||"local",
     repo: str(doc.repo) || path,
     path,
     machine: str(doc.machine),
+    os: s.os,
     require_approval: doc.require_approval !== false,
     steps: list(doc.steps).map(str),
     columns: list(doc.columns).map((c) => ({ id: str(c?.id), kind: str(c?.kind), step: str(c?.step), name: str(c?.name) || str(c?.id) })),
