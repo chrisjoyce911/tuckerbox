@@ -1,6 +1,7 @@
 package version
 
 import (
+	"encoding/json"
 	"runtime"
 	"strings"
 	"testing"
@@ -37,5 +38,21 @@ func TestString(t *testing.T) {
 	}
 	if !strings.HasPrefix(i.String(), "tuckerbox ") {
 		t.Error("missing prefix")
+	}
+}
+
+func TestJSON(t *testing.T) {
+	i := Info{Version: "v1.2.3", Commit: "abc1234", GoVersion: "go1.23.0", OS: "windows", Arch: "amd64"}
+	want := `{"version":"v1.2.3","commit":"abc1234","go":"go1.23.0","os":"windows","arch":"amd64"}` + "\n"
+	got, err := i.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Errorf("JSON() = %q, want %q", got, want)
+	}
+	var back Info
+	if err := json.Unmarshal(got, &back); err != nil || back != i {
+		t.Errorf("round trip = %+v, %v", back, err)
 	}
 }

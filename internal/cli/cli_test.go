@@ -3,7 +3,10 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os/exec"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -58,6 +61,68 @@ func TestVersionRejectsArgs(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "takes no arguments") {
 		t.Errorf("stderr: %s", errOut)
+	}
+}
+
+// Scenario: JSON output.
+func TestVersionJSON(t *testing.T) {
+	oldV, oldC := version.Version, version.Commit
+	t.Cleanup(func() { version.Version, version.Commit = oldV, oldC })
+	version.Version, version.Commit = "v0.1.0", "abc1234"
+
+	for _, cmd := range []string{"version", "--version"} {
+		a, out, errOut := app()
+		if code := a.Run([]string{cmd, "--json"}); code != 0 {
+			t.Fatalf("%s --json: exit %d, stderr: %s", cmd, code, errOut)
+		}
+		if !strings.HasSuffix(out.String(), "}\n") || strings.Count(out.String(), "\n") != 1 {
+			t.Errorf("%s --json: want one JSON object and a newline, got %q", cmd, out)
+		}
+		dec := json.NewDecoder(bytes.NewReader(out.Bytes()))
+		var got map[string]any
+		if err := dec.Decode(&got); err != nil {
+			t.Fatalf("%s --json: %v\n%s", cmd, err, out)
+		}
+		if dec.More() {
+			t.Errorf("%s --json: more than one JSON value:\n%s", cmd, out)
+		}
+		want := map[string]string{
+			"version": "v0.1.0",
+			"commit":  "abc1234",
+			"go":      runtime.Version(),
+			"os":      runtime.GOOS,
+			"arch":    runtime.GOARCH,
+		}
+		if len(got) != len(want) {
+			t.Errorf("%s --json: fields %v, want exactly %v", cmd, got, want)
+		}
+		for k, v := range want {
+			if s, ok := got[k].(string); !ok || s != v {
+				t.Errorf("%s --json: %s = %#v, want %q", cmd, k, got[k], v)
+			}
+		}
+	}
+}
+
+// Scenario: Unknown flag.
+func TestVersionUnknownFlag(t *testing.T) {
+	for _, args := range [][]string{
+		{"version", "--yaml"},
+		{"version", "--json", "--yaml"},
+		{"version", "--json", "--json"},
+		{"version", "--json=true"},
+	} {
+		a, out, errOut := app()
+		if code := a.Run(args); code != 2 {
+			t.Errorf("%v: exit %d, want 2", args, code)
+		}
+		bad := args[len(args)-1]
+		if !strings.Contains(errOut.String(), strconv.Quote(bad)) {
+			t.Errorf("%v: stderr does not name %s: %s", args, bad, errOut)
+		}
+		if out.Len() != 0 {
+			t.Errorf("%v: stdout not empty: %s", args, out)
+		}
 	}
 }
 
