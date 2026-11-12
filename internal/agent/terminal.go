@@ -383,6 +383,7 @@ func (t Terminal) Run(ctx context.Context, s Step, opts Options) (Outcome, error
 	// turnOver: the turn with or after the accepted result has ended, so
 	// the agent waits for the person and is ended after TurnGrace.
 	turnOver := false
+	graceFor, graceAfter := opts.ResultGrace, "its result"
 	lastLook := time.Time{}
 loop:
 	for {
@@ -393,8 +394,8 @@ loop:
 			end()
 			break loop
 		case <-graceC:
-			logLine(log, "step %s round %d: agent still running %s after its result; ending terminal %s",
-				s.Step, s.Round, opts.ResultGrace, name)
+			logLine(log, "step %s round %d: agent still running %s after %s; ending terminal %s",
+				s.Step, s.Round, graceFor, graceAfter, name)
 			end()
 			break loop
 		case <-tick.C:
@@ -402,15 +403,15 @@ loop:
 			case accept():
 				// A result in the turn's final message means the turn is
 				// over; one in the result file may come mid-turn.
-				grace := opts.ResultGrace
 				if o.Source == messageLabel {
-					grace, turnOver = opts.TurnGrace, true
+					graceFor, graceAfter, turnOver = opts.TurnGrace, "its turn ended", true
 				}
-				graceC = time.After(grace)
+				graceC = time.After(graceFor)
 			case o.Result != nil && !turnOver && mw.turnEndedSince(resultTime(o.ResultPath)):
 				turnOver = true
 				logLine(log, "step %s round %d: the agent's turn ended after its result", s.Step, s.Round)
-				graceC = time.After(opts.TurnGrace)
+				graceFor, graceAfter = opts.TurnGrace, "its turn ended"
+				graceC = time.After(graceFor)
 			}
 			if time.Since(lastLook) < opts.TermPoll {
 				continue

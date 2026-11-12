@@ -279,7 +279,7 @@ func TestResultFileThenTurnEnds(t *testing.T) {
 		t.Errorf("the agent was ended %s after the start, want soon after its turn ended", took)
 	}
 	log := readFile(t, o.LogPath)
-	for _, want := range []string{"accepted result: done", "the agent's turn ended after its result", "fakeagent: wrote the result file"} {
+	for _, want := range []string{"accepted result: done", "the agent's turn ended after its result", "agent still running 300ms after its turn ended", "fakeagent: wrote the result file"} {
 		if !strings.Contains(log, want) {
 			t.Errorf("log lacks %q:\n%s", want, log)
 		}
