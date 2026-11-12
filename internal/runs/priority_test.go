@@ -69,12 +69,28 @@ func (f *queueFixture) setPriority(c string, v int64) {
 }
 
 // waitAdmit runs WaitSlot for q in the background.
-func waitAdmit(ctx context.Context, q *Queue, common string, max int) <-chan *Slot {
+func waitAdmit(t *testing.T, ctx context.Context, q *Queue, common string, max int) <-chan *Slot {
+	ctx, cancel := context.WithCancel(ctx)
 	ch := make(chan *Slot, 1)
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		s, _ := WaitSlot(ctx, common, max, q, 5*time.Millisecond, nil)
 		ch <- s
 	}()
+	// Stop polling and wait before the test's temporary directory goes:
+	// Windows can't remove a lock file the goroutine still has open.
+	t.Cleanup(func() {
+		cancel()
+		<-done
+		select {
+		case s := <-ch:
+			if s != nil {
+				s.Release()
+			}
+		default:
+		}
+	})
 	return ch
 }
 
@@ -140,7 +156,7 @@ func TestReorderAsASlotFrees(t *testing.T) {
 	qb, qc := f.join("b", 1), f.join("c", 2)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	b, c := waitAdmit(ctx, qb, f.common, 1), waitAdmit(ctx, qc, f.common, 1)
+	b, c := waitAdmit(t, ctx, qb, f.common, 1), waitAdmit(t, ctx, qc, f.common, 1)
 	noSlot(t, "b while a runs", b, 50*time.Millisecond)
 
 	// The move holds the sidecar lock for its writes; A ends meanwhile.
@@ -243,7 +259,7 @@ func TestSlotFreesDuringARenumber(t *testing.T) {
 	defer cancel()
 	chans := map[string]<-chan *Slot{}
 	for i, id := range ids {
-		chans[id] = waitAdmit(ctx, f.join(id, int64(i+1)), f.common, 1)
+		chans[id] = waitAdmit(t, ctx, f.join(id, int64(i+1)), f.common, 1)
 	}
 	// Stop the waiters that are still waiting, and wait for them to return,
 	// before the temporary folders are removed: a waiter still writing its
