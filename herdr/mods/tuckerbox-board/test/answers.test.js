@@ -141,6 +141,36 @@ test("Answer alone, and an empty answer is refused before anything runs", async 
   assert.equal(globalThis.__runs[0].stdin, "use plan B");
 });
 
+// A card opened from the board (CardView.init, as the board opens it) keeps
+// its machine's operating system: a Windows card's answer goes through
+// PowerShell even while the detail read is pending, and after it fails.
+test("a Windows card opened from the board answers through PowerShell before and without its detail", async () => {
+  const card = normaliseCard({ ...blocked(), question: blocked().question }, { on: "pc", path: "C:\\work\\shop", os: "windows" });
+  const board = { columns: [{ id: "step:build", kind: "step", step: "build", name: "Build" }], steps: ["build"], require_approval: true, path: "C:\\work\\shop", os: "windows" };
+  for (const read of ["pending", "failed"]) {
+    let release;
+    globalThis.__next = read === "pending" ? new Promise((r) => { release = r; }) : Promise.reject(new Error("pc is offline"));
+    globalThis.__next.catch?.(() => {});
+    const view = new CardView();
+    const cx = { ...context(), focus_handle: () => ({ focus() {} }), timer: { after: (_ms, fn) => fn(cx), every() {} } };
+    view.init({ change: card.change, card, board: { ...board, os: "" } }, cx);
+    assert.equal(view.card.os, "windows", `${read}: card lost its os on opening`);
+    if (read === "failed") { await settle(cx); assert.match(view.error, /offline/); }
+    view.detail = { change: card.change, proposal: "", specs: [], tasks: [], rounds: [], groups: [], history: [], ticks: [] };
+    view.answerBox = { v: "", value() { return this.v; }, set_value(v) { this.v = v; } };
+    globalThis.__runs = [];
+    view.answerBox.set_value("use plan B");
+    const acx = context();
+    view.details().clicks["act-answer"](null, acx);
+    const inv = globalThis.__runs[0] ?? (await settle(acx), globalThis.__runs[0]);
+    assert.ok(inv, `${read}: nothing ran`);
+    assert.equal(inv.os, "windows", `${read}: answer would run under sh`);
+    assert.equal(stdinCall(inv.argv, inv.stdin, inv.os).command, "powershell");
+    assert.equal(inv.on, "pc");
+    release?.({ error: { message: "gone" } });
+  }
+});
+
 test("a waiting terminal agent's card takes an answer, without resume; other cards take none", () => {
   const waiting = normaliseCard({
     change: "add-login", column: "step:review", state: "running", step: "review", round: 1, approval: { state: "approved" },

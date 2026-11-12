@@ -18,7 +18,10 @@ export class CardView extends View {
     const pr = props() ?? p ?? {};
     this.change = pr.change ?? "";
     this.board = pr.board ?? { columns: [], require_approval: true };
-    this.card = pr.card ? normaliseCard(pr.card, { on: cardAt(pr.card, this.board).on, path: pr.card.path ?? this.board.path ?? "" }) : null;
+    // Keep the card's machine, checkout and operating system: the answer
+    // actions pick their standard-input transport from os (stdinCall) and
+    // may run before, or without, the detail read below.
+    this.card = pr.card ? normaliseCard(pr.card, { on: cardAt(pr.card, this.board).on, path: pr.card.path ?? this.board.path ?? "", os: pr.card.os || this.board.os || "" }) : null;
     this.detail = pr.detail ?? null;   // a test harness may hand it in
     this.error = null;
     this.notice = null;
@@ -51,7 +54,7 @@ export class CardView extends View {
       else {
         this.error = null;
         const card = d.cards.find((c) => c.change === this.change);
-        if (card) this.card = { ...card, on: at.on, path: d.path || at.cwd };
+        if (card) this.card = { ...card, on: at.on, path: d.path || at.cwd, os: card.os || d.os || this.card?.os || "" };
         this.board = { ...this.board, ship:d.ship,columns: d.columns, steps: d.steps, require_approval: d.require_approval, path: d.path };
         this.detail = d.detail && d.detail.change === this.change ? d.detail : null;
         if (!this.detail) this.error = `No detail for ${this.change} in what tuckerbox printed.`;
