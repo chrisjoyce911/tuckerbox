@@ -69,6 +69,17 @@ func DependencyLookup(ctx context.Context, repo Repo, cfg *config.Config) deps.L
 	return l.lookup
 }
 
+// DependencyLookupFrom is DependencyLookup over runs already read with
+// LocalRuns, so a pass reads each run.json once.
+func DependencyLookupFrom(local map[string]LocalRun, cfg *config.Config) deps.Lookup {
+	l := &depLookup{runs: map[string]Run{}}
+	l.archiveOnly = cfg.Ship != "" && cfg.Ship != config.ShipLocal
+	for id, r := range local {
+		l.runs[id] = r.Run.Effective(r.Active)
+	}
+	return l.lookup
+}
+
 // ActiveAt lists the active changes at rev: the folders in openspec/changes
 // other than archive, sorted.
 func ActiveAt(ctx context.Context, repo Repo, rev string) ([]string, error) {
