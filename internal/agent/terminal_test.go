@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -564,5 +565,107 @@ func TestAgentTurnCommand(t *testing.T) {
 		if got := readFile(t, msgPath); got != c.want {
 			t.Errorf("style %d: message %q, want %q", c.style, got, c.want)
 		}
+	}
+}
+
+// setFault sets a fake hc fault file (see testdata/fakehc); "" clears it.
+func (f *termFixture) setFault(name, value string) {
+	f.t.Helper()
+	p := filepath.Join(f.env.HCDir, name)
+	if value == "" {
+		_ = os.Remove(p)
+		return
+	}
+	testenv.WriteFile(f.t, p, value)
+}
+
+// A stop whose hc kill fails, or whose terminal does not go within the end
+// timeout, is not a stop: Run returns an *EndError, so the run keeps the
+// terminal's name and slot and does not record stopped while the agent
+// may live.
+func TestStopWhenTheTerminalWontEnd(t *testing.T) {
+	for _, mode := range []string{"fail", "ignore"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newTermFixture(t)
+			f.env.SetPlan(t, map[string]testenv.Action{"build": {WaitFor: filepath.Join(f.env.Home, "never")}})
+			s := f.step("build", "builder", 1, interactiveFake())
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			opts := termOpts
+			opts.EndTimeout = 300 * time.Millisecond
+			opts.OnTerminal = func(_, addr string) {
+				if addr == "" {
+					return
+				}
+				go func() {
+					time.Sleep(200 * time.Millisecond)
+					f.setFault("kill-mode", mode)
+					cancel()
+				}()
+			}
+			start := time.Now()
+			_, err := f.be.Run(ctx, s, opts)
+			var ee *EndError
+			if !errors.As(err, &ee) || ee.Name != s.Term.Name {
+				t.Fatalf("Run returned %v, want an *EndError for %s", err, s.Term.Name)
+			}
+			if time.Since(start) > 20*time.Second {
+				t.Errorf("Run took %s to give up", time.Since(start))
+			}
+			if !f.get(s.Term.Name).Live() {
+				t.Fatal("the fault did not keep the terminal live")
+			}
+			log := readFile(t, s.State.Log("build"))
+			if !strings.Contains(log, "may still be live") || strings.Contains(log, "finished: exit") {
+				t.Errorf("log:\n%s", log)
+			}
+			f.setFault("kill-mode", "")
+			if err := f.hc.End(context.Background(), s.Term.Name, 10*time.Second); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// A result was accepted but the terminal would not end after the grace:
+// the step is not finished, so the workflow cannot move on beside a live
+// agent.
+func TestResultButTheTerminalWontEnd(t *testing.T) {
+	f := newTermFixture(t)
+	f.env.SetPlan(t, map[string]testenv.Action{"build": {}}) // reports and stays
+	f.setFault("kill-mode", "fail")
+	defer f.setFault("kill-mode", "")
+	s := f.step("build", "builder", 1, interactiveFake())
+	opts := termOpts
+	opts.EndTimeout = 300 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	o, err := f.be.Run(ctx, s, opts)
+	var ee *EndError
+	if !errors.As(err, &ee) {
+		t.Fatalf("Run returned %v, want an *EndError", err)
+	}
+	if o.Result == nil {
+		t.Error("the result was not accepted before the terminal was ended")
+	}
+}
+
+// Launch intent: the run's state names the terminal before hc run starts
+// it, so a run process that dies while hc starts it leaves a terminal it
+// can find.
+func TestTerminalNamedBeforeStart(t *testing.T) {
+	f := newTermFixture(t)
+	f.env.SetPlan(t, map[string]testenv.Action{"build": {ExitAfter: true}})
+	s := f.step("build", "builder", 1, interactiveFake())
+	type call struct {
+		name, addr string
+		runs       int
+	}
+	var got []call
+	opts := termOpts
+	opts.OnTerminal = func(name, addr string) { got = append(got, call{name, addr, len(f.runCalls())}) }
+	f.run(s, opts)
+	if len(got) != 2 || got[0] != (call{s.Term.Name, "", 0}) || got[1].addr == "" || got[1].runs != 1 {
+		t.Errorf("OnTerminal calls %+v, want the name before hc run, then the address", got)
 	}
 }

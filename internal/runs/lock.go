@@ -2,6 +2,8 @@ package runs
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -93,9 +95,53 @@ func Active(path string) bool {
 // that process dies the OS frees the slot's run lock but not its agent
 // lock, so the slot stays taken (formal/liveslots.tla, OrphanHoldsSlot).
 // Admission takes a slot only when both are free (WithinLimitLive).
+//
+// Whoever takes a slot's run lock writes a fresh token to its owner file,
+// <n>.owner, before it tests the agent lock. An agent's terminal passes its
+// run's token to agent-hold, which, once it holds the agent lock, starts
+// the agent only if the owner file still holds that token. An agent-hold
+// that starts late, after its run process died and another run was
+// admitted to the slot, so finds another token and refuses: the admission
+// wrote it before it found the agent lock free.
 type Slot struct {
 	N int
-	f *flock.Flock
+	// Owner is the token this run wrote to the slot's owner file.
+	Owner string
+	f     *flock.Flock
+}
+
+// SlotOwnerFile is slot n's owner file.
+func SlotOwnerFile(common string, n int) string {
+	return filepath.Join(SlotDir(common), strconv.Itoa(n)+".owner")
+}
+
+// SlotOwner returns the token in slot n's owner file, or "".
+func SlotOwner(common string, n int) string {
+	data, err := os.ReadFile(SlotOwnerFile(common, n))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// claimSlot writes a fresh token to slot n's owner file. The caller holds
+// the slot's run lock.
+func claimSlot(common string, n int) (string, error) {
+	var b [12]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	token := strconv.Itoa(os.Getpid()) + "-" + hex.EncodeToString(b[:])
+	p := SlotOwnerFile(common, n)
+	tmp := p + ".tmp-" + token
+	if err := os.WriteFile(tmp, []byte(token+"\n"), 0o644); err != nil {
+		return "", fmt.Errorf("claiming slot %d: %w", n, err)
+	}
+	if err := os.Rename(tmp, p); err != nil {
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("claiming slot %d: %w", n, err)
+	}
+	return token, nil
 }
 
 // SlotDir is the slot lock directory under the repository's common
@@ -132,6 +178,13 @@ func TrySlot(common string, max int) (*Slot, error) {
 		if !ok {
 			continue
 		}
+		// Claim first, then test: an agent-hold that takes the agent lock
+		// after this test finds this token, not its run's.
+		owner, err := claimSlot(common, n)
+		if err != nil {
+			_ = f.Unlock()
+			return nil, err
+		}
 		free, err := agentLockFree(common, n)
 		if err != nil {
 			_ = f.Unlock()
@@ -141,7 +194,7 @@ func TrySlot(common string, max int) (*Slot, error) {
 			_ = f.Unlock()
 			continue
 		}
-		return &Slot{N: n, f: f}, nil
+		return &Slot{N: n, Owner: owner, f: f}, nil
 	}
 	return nil, nil
 }
@@ -161,7 +214,8 @@ func agentLockFree(common string, n int) (bool, error) {
 
 // TakeOwnSlot takes the run lock of slot n, the slot whose agent lock a
 // live agent being adopted holds (liveslots.tla, Adopt). It needs no free
-// slot and does not test the agent lock. An admission testing that slot
+// slot and does not test the agent lock, and keeps the slot's claim (see
+// Slot). An admission testing that slot
 // holds its run lock only for a moment; TakeOwnSlot waits it out, polling.
 // It gives up, returning nil, when live reports the agent gone, or with
 // ctx's error when ctx ends.
@@ -176,7 +230,19 @@ func TakeOwnSlot(ctx context.Context, common string, n int, poll time.Duration, 
 			return nil, fmt.Errorf("locking slot %d: %w", n, err)
 		}
 		if ok {
-			return &Slot{N: n, f: f}, nil
+			// The slot's claim stays the one the agent's run wrote, so an
+			// agent-hold of the adopted terminal that has yet to check it
+			// still finds its own; an admission that claimed the slot in the
+			// meantime found the agent lock held and let go. With no claim
+			// left, a fresh one.
+			owner := SlotOwner(common, n)
+			if owner == "" {
+				if owner, err = claimSlot(common, n); err != nil {
+					_ = f.Unlock()
+					return nil, err
+				}
+			}
+			return &Slot{N: n, Owner: owner, f: f}, nil
 		}
 		if !live() {
 			return nil, nil

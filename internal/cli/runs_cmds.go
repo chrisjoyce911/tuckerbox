@@ -585,6 +585,14 @@ func (a App) stop(args []string) int {
 	if err != nil {
 		return a.errf("stop", "%v", err)
 	}
+	if r.Orphaned(false) {
+		// The run process could not end its agent's terminal: it left the
+		// run running with the terminal recorded. Try again with the lock.
+		fmt.Fprintf(a.Stderr, "tuckerbox stop: %s: the run process did not end its agent's terminal (%s); trying again\n", r.Change, oneLine(r.Reason))
+		if code, ok := a.stopOrphan(pos[0], l.State); ok {
+			return code
+		}
+	}
 	v := r.Effective(false)
 	fmt.Fprintf(a.Stdout, "%s: %s at step %s (resume with tuckerbox resume %s)\n", v.Change, v.State, v.Step, v.Change)
 	return 0

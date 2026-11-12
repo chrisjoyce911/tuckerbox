@@ -67,7 +67,10 @@ type Options struct {
 	// (headless).
 	OnStart func(pid int)
 	// OnTerminal is called with the terminal's name and address once the
-	// agent's terminal is started or adopted (terminal backend).
+	// agent's terminal is started or adopted (terminal backend). Before a
+	// new terminal starts it is called with its name and no address, so
+	// the run's state names the terminal before the agent can outlive the
+	// run process.
 	OnTerminal func(name, address string)
 	// OnAgentState is called when the agent's state changes: AgentWorking
 	// or AgentWaiting (terminal backend).
@@ -75,6 +78,10 @@ type Options struct {
 	// TermPoll is how often the terminal backend asks herdr-core whether
 	// the agent's terminal still lives (default 2 seconds).
 	TermPoll time.Duration
+	// EndTimeout is how long the terminal backend waits for an ended
+	// terminal to go before it reports that it would not end (default 30
+	// seconds).
+	EndTimeout time.Duration
 }
 
 // Outcome is what happened when a step's agent ran.
@@ -361,6 +368,9 @@ func withDefaults(o Options) Options {
 	}
 	if o.TermPoll <= 0 {
 		o.TermPoll = 2 * time.Second
+	}
+	if o.EndTimeout <= 0 {
+		o.EndTimeout = endTimeout
 	}
 	return o
 }

@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
+
 	"github.com/chrisjoyce911/tuckerbox/internal/agent"
 	"github.com/chrisjoyce911/tuckerbox/internal/history"
 	"github.com/chrisjoyce911/tuckerbox/internal/runs"
@@ -151,6 +153,10 @@ func TestTerminalRun(t *testing.T) {
 	}
 	if st := f.termStatus("add-login"); st.State != "running" || st.Terminal != r.Terminal.Address || st.AgentBackend != "terminal" || st.NotWatched {
 		t.Errorf("status %+v", st)
+	}
+	// agent-hold is given the run's claim on its slot.
+	if argv := f.terminalArgv(r.Terminal.Name); !hasPair(argv, "--owner", runs.SlotOwner(f.common(), 0)) || runs.SlotOwner(f.common(), 0) == "" {
+		t.Errorf("terminal program %v lacks --owner %q", argv, runs.SlotOwner(f.common(), 0))
 	}
 	f.open("build")
 	f.waitState("add-login", "ready", "")
@@ -604,10 +610,299 @@ func TestDoctorTurnHookCheck(t *testing.T) {
 	a.Run([]string{"doctor"})
 	for _, want := range []string{
 		"turn hook: claude: claude --help does not list --settings",
-		"turn hook: codex ok (notify through -c)",
+		"turn hook: codex: unverified: agent-turn reads the notify hook payload Tuckerbox expects and codex --help lists --config",
+		"only seen in a real turn",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("doctor lacks %q:\n%s", want, out.String())
 		}
+	}
+	if strings.Contains(out.String(), "turn hook: codex ok") {
+		t.Errorf("doctor claims codex's hook works without a real turn:\n%s", out.String())
+	}
+}
+
+// common is the repository's common Tuckerbox directory (slot locks).
+func (f *cliFixture) common() string { return filepath.Join(f.repo, ".git", "tuckerbox") }
+
+// terminalArgv is the program the fake hc's terminal called name runs.
+func (f *cliFixture) terminalArgv(name string) []string {
+	f.t.Helper()
+	data, err := os.ReadFile(filepath.Join(f.env.HCDir, name+".json"))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	var rec struct{ Argv []string }
+	if err := json.Unmarshal(data, &rec); err != nil {
+		f.t.Fatal(err)
+	}
+	return rec.Argv
+}
+
+func hasPair(argv []string, flag, value string) bool {
+	for i := 0; i+1 < len(argv); i++ {
+		if argv[i] == flag && argv[i+1] == value {
+			return true
+		}
+	}
+	return false
+}
+
+// fault sets a fake hc fault file (see testdata/fakehc); "" clears it.
+func (f *cliFixture) fault(name, value string) {
+	f.t.Helper()
+	p := filepath.Join(f.env.HCDir, name)
+	if value == "" {
+		_ = os.Remove(p)
+		return
+	}
+	testenv.WriteFile(f.t, p, value)
+}
+
+// After a crash with max_parallel = 1, the orphaned agent holds the only
+// slot's agent lock. A rerun (a new round, not an adoption) ends that
+// terminal under the change lock before it is admitted, rather than
+// waiting forever for the slot its own old agent holds.
+func TestRerunAfterACrashEndsTheOldAgent(t *testing.T) {
+	f := newTermCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}, MaxParallel: 1})
+	f.plan(map[string]testenv.Action{
+		"build:1": {WaitFor: f.gate("never")},
+		"build":   {ExitAfter: true},
+	})
+	f.start("add-login")
+	f.waitAgent("add-login", "build")
+	waitFor(t, "the round 1 agent", func() bool { return len(f.startsOf("add-login")) == 1 })
+	f.kill("add-login")
+	if _, err := runs.HoldAgentLock(f.common(), 0, 0); err == nil {
+		t.Fatal("slot 0's agent lock is free while the orphaned agent lives")
+	}
+
+	res := f.tb("rerun", "add-login", "build")
+	if res.code != 0 {
+		t.Fatalf("rerun: exit %d\n%s%s", res.code, res.stdout, res.stderr)
+	}
+	if !strings.Contains(res.stdout+res.stderr, "ending the agent left in terminal") {
+		t.Errorf("rerun does not say the old agent was ended:\n%s%s", res.stdout, res.stderr)
+	}
+	f.waitState("add-login", "ready", "")
+	got := f.startsOf("add-login")
+	if len(got) != 3 || got[0] != "add-login build 1" || got[1] != "add-login build 2" || got[2] != "add-login review 2" {
+		t.Errorf("agent starts %v, want build 1, then build 2 and review 2", got)
+	}
+}
+
+// Crash at the first boundary: the run process dies while hc is starting
+// the agent's terminal, before it hears the address. run.json named the
+// terminal before hc run, so status shows the agent not watched and
+// resume adopts it in the same round.
+func TestCrashWhileTheTerminalStarts(t *testing.T) {
+	f := newTermCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}})
+	f.plan(map[string]testenv.Action{"build": {WaitFor: f.gate("build"), ExitAfter: true}})
+	f.fault("run-delay", "3s")
+	f.start("add-login")
+	var name string
+	waitFor(t, "run.json to name the terminal before hc run answers", func() bool {
+		r := f.runOf("add-login")
+		if r.State == runs.Running && r.Terminal != nil && r.Terminal.Address == "" {
+			name = r.Terminal.Name
+			return true
+		}
+		return false
+	})
+	waitFor(t, "the terminal to be live", func() bool {
+		term, _ := f.hc().Get(context.Background(), name)
+		return term.Live()
+	})
+	f.fault("run-delay", "")
+	f.kill("add-login")
+	if r := f.runOf("add-login"); r.Terminal == nil || r.Terminal.Address != "" {
+		t.Fatalf("the run process heard the address before it was killed (%+v); the test missed the boundary", r.Terminal)
+	}
+	if st := f.termStatus("add-login"); st.State != "running" || !st.NotWatched {
+		t.Errorf("status after the crash %+v", st)
+	}
+
+	if res := f.tb("resume", "add-login"); res.code != 0 {
+		t.Fatalf("resume: %s%s", res.stdout, res.stderr)
+	}
+	waitFor(t, "the adopted terminal's address", func() bool {
+		r := f.runOf("add-login")
+		return r.Terminal != nil && r.Terminal.Address != "" && runs.Active(mustState(t, f.worktreeOf("add-login")).RunLock())
+	})
+	if r := f.runOf("add-login"); r.Round != 1 {
+		t.Errorf("round %d after resume, want 1 (adopted)", r.Round)
+	}
+	f.open("build")
+	f.waitState("add-login", "ready", "")
+	if got := f.startsOf("add-login"); len(got) != 2 || got[0] != "add-login build 1" {
+		t.Errorf("agent starts %v, want build once and review", got)
+	}
+}
+
+// Crash at the second boundary: a resume that adopts the orphaned agent
+// writes queued, then dies while it waits for its slot's run lock (held
+// for a moment by an admission). The run still names its terminal and
+// slot: status shows it not watched, and the next resume adopts it.
+func TestCrashWhileAdoptionTakesTheSlot(t *testing.T) {
+	f := newTermCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}, MaxParallel: 1})
+	f.plan(map[string]testenv.Action{"build": {WaitFor: f.gate("build"), ExitAfter: true}})
+	f.start("add-login")
+	f.waitAgent("add-login", "build")
+	f.kill("add-login")
+
+	// An admission testing slot 0 holds its run lock.
+	admission := flock.New(runs.SlotLock(f.common(), 0))
+	if ok, err := admission.TryLock(); !ok || err != nil {
+		t.Fatalf("slot 0's run lock: %v %v", ok, err)
+	}
+	defer admission.Unlock()
+	if res := f.tb("resume", "add-login"); res.code != 0 {
+		t.Fatalf("resume: %s%s", res.stdout, res.stderr)
+	}
+	waitFor(t, "the adopting resume to wait for its slot", func() bool {
+		return runs.Active(mustState(t, f.worktreeOf("add-login")).RunLock()) && f.runOf("add-login").State == runs.Queued
+	})
+	f.kill("add-login")
+	r := f.runOf("add-login")
+	if r.State != runs.Queued || r.Terminal == nil || r.Slot == nil || *r.Slot != 0 || r.Round != 1 {
+		t.Fatalf("run after the adoption crashed: %s round %d terminal %+v slot %v", r.State, r.Round, r.Terminal, r.Slot)
+	}
+	if st := f.termStatus("add-login"); st.State != "running" || !st.NotWatched {
+		t.Errorf("status %+v", st)
+	}
+	_ = admission.Unlock()
+
+	if res := f.tb("resume", "add-login"); res.code != 0 {
+		t.Fatalf("second resume: %s%s", res.stdout, res.stderr)
+	}
+	waitFor(t, "the adopting run in slot 0", func() bool {
+		r := f.runOf("add-login")
+		return r.State == runs.Running && r.Slot != nil && *r.Slot == 0
+	})
+	if r := f.runOf("add-login"); r.Round != 1 {
+		t.Errorf("round %d, want 1 (adopted)", r.Round)
+	}
+	f.open("build")
+	f.waitState("add-login", "ready", "")
+	if got := f.startsOf("add-login"); len(got) != 2 || got[0] != "add-login build 1" {
+		t.Errorf("agent starts %v, want build once (adopted) and review", got)
+	}
+}
+
+// Stop when the run process cannot end its agent's terminal (hc kill
+// fails): nothing is recorded stopped, the run keeps its terminal and
+// slot, and a later stop, once hc works, ends the agent.
+func TestStopWhenTheTerminalWontEnd(t *testing.T) {
+	f := newTermCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}})
+	f.plan(map[string]testenv.Action{"build": {WaitFor: f.gate("never")}})
+	f.start("add-login")
+	f.waitAgent("add-login", "build")
+	name := f.runOf("add-login").Terminal.Name
+
+	f.fault("kill-mode", "fail")
+	res := f.tb("stop", "add-login")
+	if res.code == 0 || !strings.Contains(res.stderr, "fake kill failure") {
+		t.Errorf("stop with a failing hc kill: exit %d\n%s%s", res.code, res.stdout, res.stderr)
+	}
+	r := f.runOf("add-login")
+	if r.State != runs.Running || r.Terminal == nil || r.Terminal.Name != name || r.Slot == nil {
+		t.Errorf("run after the failed stop: %s terminal %+v slot %v", r.State, r.Terminal, r.Slot)
+	}
+	if term, _ := f.hc().Get(context.Background(), name); !term.Live() {
+		t.Fatal("the fault did not keep the terminal live")
+	}
+	if st := f.termStatus("add-login"); st.State != "running" || !st.NotWatched {
+		t.Errorf("status %+v", st)
+	}
+	events, err := history.Read(history.File(mustState(t, f.worktreeOf("add-login"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range events {
+		if e.Kind == history.Stopped {
+			t.Errorf("stopped recorded while the agent lives: %+v", e)
+		}
+	}
+
+	f.fault("kill-mode", "")
+	if res := f.tb("stop", "add-login"); res.code != 0 || !strings.Contains(res.stdout, "ended the agent's terminal") {
+		t.Fatalf("second stop: exit %d\n%s%s", res.code, res.stdout, res.stderr)
+	}
+	if r := f.runOf("add-login"); r.State != runs.Stopped || r.Terminal != nil {
+		t.Errorf("run %s terminal %+v", r.State, r.Terminal)
+	}
+	if term, _ := f.hc().Get(context.Background(), name); term.Live() {
+		t.Error("the agent's terminal is still live")
+	}
+}
+
+// A late agent-hold: its run took slot 0 and started the terminal, but
+// died before agent-hold took the agent lock, and another run was then
+// admitted to slot 0 (both of its locks were free). agent-hold finds the
+// slot claimed by that other run and does not start its agent; the
+// admitted run's own agent then can. Had agent-hold taken the agent lock
+// first, the admission would have found it held instead.
+func TestLateAgentHoldAfterTheSlotWasReassigned(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses sh")
+	}
+	common := t.TempDir()
+	ran := filepath.Join(t.TempDir(), "ran")
+	hold := func(owner string) cmdResult {
+		return tbIn(t, common, "agent-hold", "--slot", "0", "--common", common, "--owner", owner, "--",
+			"sh", "-c", `echo "$0" >> "$1"`, owner, ran)
+	}
+
+	a, err := runs.TrySlot(common, 1)
+	if err != nil || a == nil {
+		t.Fatalf("admitting a: %v %v", a, err)
+	}
+	a.Release() // a's run process dies; its terminal's agent-hold has not run yet
+	b, err := runs.TrySlot(common, 1)
+	if err != nil || b == nil {
+		t.Fatalf("admitting b with both of slot 0's locks free: %v %v", b, err)
+	}
+	defer b.Release()
+	if a.Owner == b.Owner {
+		t.Fatal("two admissions claimed the slot with one token")
+	}
+	res := hold(a.Owner)
+	if res.code == 0 || !strings.Contains(res.stderr, "given to another run") {
+		t.Errorf("late agent-hold: exit %d %s", res.code, res.stderr)
+	}
+	if _, err := os.Stat(ran); err == nil {
+		t.Fatal("the late agent-hold started its agent beside the admitted run's")
+	}
+	if res := hold(b.Owner); res.code != 0 {
+		t.Errorf("the admitted run's agent-hold: exit %d %s", res.code, res.stderr)
+	}
+	if data, _ := os.ReadFile(ran); strings.TrimSpace(string(data)) != b.Owner {
+		t.Errorf("agents that ran: %q, want only b's", data)
+	}
+
+	// The other order: a's agent-hold takes the agent lock while the
+	// slot is still a's; a's run process then dies, and admission finds
+	// slot 0 taken by the orphaned agent.
+	b.Release()
+	c, err := runs.TrySlot(common, 1)
+	if err != nil || c == nil {
+		t.Fatal(err)
+	}
+	gate := filepath.Join(t.TempDir(), "gate")
+	started := filepath.Join(t.TempDir(), "started")
+	done := make(chan cmdResult, 1)
+	go func() {
+		done <- tbIn(t, common, "agent-hold", "--slot", "0", "--common", common, "--owner", c.Owner, "--",
+			"sh", "-c", `touch "$0"; while [ ! -e "$1" ]; do sleep 0.05; done`, started, gate)
+	}()
+	waitFor(t, "c's agent to start", func() bool { _, err := os.Stat(started); return err == nil })
+	c.Release()
+	if s, _ := runs.TrySlot(common, 1); s != nil {
+		s.Release()
+		t.Error("admission took slot 0 while c's orphaned agent holds its agent lock")
+	}
+	testenv.WriteFile(t, gate, "")
+	if res := <-done; res.code != 0 {
+		t.Errorf("c's agent-hold: exit %d %s", res.code, res.stderr)
 	}
 }

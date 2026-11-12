@@ -230,11 +230,12 @@ func (r *Run) Effective(active bool) Run {
 const NotWatched = "not watched: the run process ended while its agent works in a terminal; tuckerbox resume adopts it, tuckerbox stop ends it"
 
 // Orphaned reports whether the run's process died while a step's agent
-// ran in a terminal: run.json says running with a terminal, and nobody
+// ran in a terminal: run.json says running (or queued, by a resume that
+// died while taking the agent's slot back) with a terminal, and nobody
 // holds the change lock. Whether that terminal still lives is herdr-core's
 // to say.
 func (r *Run) Orphaned(active bool) bool {
-	return !active && r.State == Running && r.Terminal != nil
+	return !active && (r.State == Running || r.State == Queued) && r.Terminal != nil
 }
 
 // View is Effective for a run whose agent may outlive its process:
@@ -244,6 +245,7 @@ func (r *Run) Orphaned(active bool) bool {
 func (r *Run) View(active, agentLive bool) (v Run, watched bool) {
 	if r.Orphaned(active) && agentLive {
 		v = *r
+		v.State = Running
 		v.Reason = NotWatched
 		v.Pid, v.AgentPid = 0, 0
 		return v, false

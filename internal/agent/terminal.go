@@ -50,7 +50,27 @@ type TermInfo struct {
 	// tuckerbox agent-hold takes in the terminal.
 	Common string
 	Slot   int
+	// Owner is the run process's claim on its slot (runs.SlotOwner):
+	// agent-hold starts the agent only while the slot's owner file still
+	// names it, so an agent-hold that starts after its run process died
+	// and the slot went to another change does not launch.
+	Owner string
 }
+
+// EndError means an agent's terminal was asked to end and did not, or
+// could not be asked: the agent may still be live. The step's outcome is
+// not final, and the run must keep what it needs to find the terminal
+// again (its name and slot) rather than record stopped or move on.
+type EndError struct {
+	Name string
+	Err  error
+}
+
+func (e *EndError) Error() string {
+	return fmt.Sprintf("the agent's terminal %s did not end: %v", e.Name, e.Err)
+}
+
+func (e *EndError) Unwrap() error { return e.Err }
 
 // TerminalName is the herdr-core name of a change's agent terminal: "tb-"
 // and the first 12 hex digits of a SHA-256 of the repository's identity
@@ -120,6 +140,9 @@ func HoldArgv(exe string, ti TermInfo, env []string, inner []string) []string {
 	if ti.Common != "" {
 		argv = append(argv, "--common", ti.Common)
 	}
+	if ti.Owner != "" {
+		argv = append(argv, "--owner", ti.Owner)
+	}
 	for _, e := range env {
 		argv = append(argv, "--env", e)
 	}
@@ -153,6 +176,8 @@ func stepEnv(s Step, briefPath, resultPath string) []string {
 // terminal's history appended to the step's log. A turn without one
 // leaves the step running with the agent waiting for the person
 // (AgentWaiting). Cancelling ctx (stop) ends the terminal. A terminal
+// that would not end, on stop or after a result, gives an *EndError: the
+// agent may live on, so the step is not over. A terminal
 // that ends without a valid result gives an Outcome without one.
 func (t Terminal) Run(ctx context.Context, s Step, opts Options) (Outcome, error) {
 	opts = withDefaults(opts)
@@ -197,8 +222,8 @@ func (t Terminal) Run(ctx context.Context, s Step, opts Options) (Outcome, error
 	if cur.Live() && !adopt {
 		logLine(log, "step %s round %d: ending terminal %s left from step %s round %s",
 			s.Step, s.Round, name, cur.Labels[LabelStep], cur.Labels[LabelRound])
-		if err := t.HC.End(ctx, name, endTimeout); err != nil {
-			return o, fmt.Errorf("step %s: ending terminal %s: %w", s.Step, name, err)
+		if err := t.HC.End(ctx, name, opts.EndTimeout); err != nil {
+			return o, fmt.Errorf("step %s: %w", s.Step, &EndError{Name: name, Err: err})
 		}
 	}
 
@@ -229,6 +254,12 @@ func (t Terminal) Run(ctx context.Context, s Step, opts Options) (Outcome, error
 			{LabelRound, strconv.Itoa(s.Round)},
 			{LabelRun, s.Term.RunID},
 		}}
+		// Launch intent: the run's state names the terminal before it can
+		// start, so a run process that dies while hc starts it leaves a
+		// terminal that resume can adopt and stop can end.
+		if opts.OnTerminal != nil {
+			opts.OnTerminal(name, "")
+		}
 		logLine(log, "step %s round %d started in terminal %s: %s", s.Step, s.Round, name, strings.Join(quoteArgs(argv), " "))
 		term, err := t.HC.Start(ctx, start)
 		if err != nil {
@@ -277,11 +308,15 @@ func (t Terminal) Run(ctx context.Context, s Step, opts Options) (Outcome, error
 		return false
 	}
 
+	// end ends the terminal and waits until it is gone. A terminal that
+	// would not end makes Run return an *EndError: the agent may be live.
+	var endErr error
 	end := func() {
-		ectx, cancel := context.WithTimeout(context.Background(), endTimeout+5*time.Second)
+		ectx, cancel := context.WithTimeout(context.Background(), opts.EndTimeout+5*time.Second)
 		defer cancel()
-		if err := t.HC.End(ectx, name, endTimeout); err != nil {
+		if err := t.HC.End(ectx, name, opts.EndTimeout); err != nil {
 			logLine(log, "step %s round %d: ending terminal %s: %v", s.Step, s.Round, name, err)
+			endErr = &EndError{Name: name, Err: err}
 		}
 	}
 	tick := time.NewTicker(opts.Poll)
@@ -331,6 +366,10 @@ loop:
 	o.ExitCode = -1
 	if term, err := t.HC.Get(context.Background(), name); err == nil && term != nil && term.Exit != nil {
 		o.ExitCode = *term.Exit
+	}
+	if endErr != nil {
+		logLine(log, "step %s round %d: the agent's terminal %s may still be live; the step is not finished", s.Step, s.Round, name)
+		return o, fmt.Errorf("step %s: %w", s.Step, endErr)
 	}
 	t.appendHistory(log, s, name)
 	logLine(log, "step %s round %d finished: exit %d, status %s", s.Step, s.Round, o.ExitCode, o.Status())

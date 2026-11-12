@@ -21,6 +21,13 @@
 // <name>.in. Each call is appended to FAKEHC_DIR/calls.log as one JSON
 // array of its arguments. A lock file makes run's name check and start
 // atomic, as herdr-core's server does. Terminals are Unix only.
+//
+// Faults, for tests, are files in FAKEHC_DIR read at each call:
+//
+//	kill-mode    "fail": kill fails without ending anything; "ignore": kill
+//	             says it ended the terminal but leaves it live
+//	run-delay    a Go duration: run waits that long after its terminal has
+//	             started, before it answers
 package main
 
 import (
@@ -271,14 +278,30 @@ func run(args []string) {
 	must(err)
 	r.Pid = pid
 	writeRecord(r)
+	if d, err := time.ParseDuration(fault("run-delay")); err == nil {
+		time.Sleep(d)
+	}
 	data, _ := json.Marshal(map[string]any{"address": r.Address, "name": r.Name, "cwd": r.Cwd, "state": "live"})
 	fmt.Println(string(data))
+}
+
+// fault returns the test fault file's content, or "".
+func fault(name string) string {
+	data, _ := os.ReadFile(filepath.Join(dir(), name))
+	return strings.TrimSpace(string(data))
 }
 
 func kill(name string) {
 	r, err := readRecord(name)
 	if err != nil {
 		notFound(name)
+	}
+	switch fault("kill-mode") {
+	case "fail":
+		hcError(1, "server", "fake kill failure")
+	case "ignore":
+		fmt.Printf(`{"killed":%q}`+"\n", r.Address)
+		return
 	}
 	if r.State == "live" {
 		end(r)

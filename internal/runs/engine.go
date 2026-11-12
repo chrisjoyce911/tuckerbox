@@ -232,7 +232,8 @@ type adoption struct {
 
 // adoptable returns the live agent a Resume request adopts, or nil: the
 // run's process died (we hold the lock) while it was running a step in a
-// terminal, and a live terminal of that name has the run's change, step
+// terminal, or while an earlier resume was taking that agent's slot back
+// (queued), and a live terminal of that name has the run's change, step
 // and round, and the run recorded its slot.
 func (e *Engine) adoptable(ctx context.Context, req Request, ws Workspace) *adoption {
 	b, ok := e.backend().(agent.Adopter)
@@ -240,7 +241,7 @@ func (e *Engine) adoptable(ctx context.Context, req Request, ws Workspace) *adop
 		return nil
 	}
 	rs, err := ReadRun(ws.State.RunFile())
-	if err != nil || rs.State != Running || rs.Terminal == nil || rs.Slot == nil {
+	if err != nil || (rs.State != Running && rs.State != Queued) || rs.Terminal == nil || rs.Slot == nil {
 		return nil
 	}
 	t, err := b.LiveAgent(ctx, rs.Terminal.Name)
@@ -252,6 +253,32 @@ func (e *Engine) adoptable(ctx context.Context, req Request, ws Workspace) *adop
 		return nil
 	}
 	return &adoption{Name: rs.Terminal.Name, Backend: b}
+}
+
+// endLeftover ends a live agent terminal of the change that this run does
+// not adopt, and waits until it is gone, before the run is admitted. The
+// caller holds the change lock, so such a terminal's run process died: its
+// agent still holds its slot's agent lock, and with max_parallel = 1 the
+// run would otherwise wait for that slot forever (formal/terminals.tla,
+// Launch: adopt or end the live agent first).
+func (e *Engine) endLeftover(ctx context.Context, change, name string) error {
+	b, ok := e.backend().(agent.Adopter)
+	if !ok {
+		return nil
+	}
+	t, err := b.LiveAgent(ctx, name)
+	if err != nil {
+		return fmt.Errorf("change %s: looking for its agent's terminal %s: %w", change, name, err)
+	}
+	if t == nil {
+		return nil
+	}
+	e.logf(change, "ending the agent left in terminal %s (step %s round %s) before this run starts",
+		name, t.Labels[agent.LabelStep], t.Labels[agent.LabelRound])
+	if err := b.EndAgent(ctx, name); err != nil {
+		return fmt.Errorf("change %s: %w", change, &agent.EndError{Name: name, Err: err})
+	}
+	return nil
 }
 
 // backend is the backend that runs step agents: e.Backend, or headless.
@@ -367,8 +394,16 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	if err != nil {
 		return nil, err
 	}
+	termName := agent.TerminalName(e.Repo.Identity(ctx), req.Change)
+	if adopt == nil {
+		if err := e.endLeftover(ctx, req.Change, termName); err != nil {
+			return nil, err
+		}
+		// Nothing of an earlier process's agent is left to find.
+		rs.Terminal, rs.Slot, rs.AgentState = nil, nil, ""
+	}
 	e.term = agent.TermInfo{
-		Name:   agent.TerminalName(e.Repo.Identity(ctx), req.Change),
+		Name:   termName,
 		Space:  filepath.Base(e.Repo.Main),
 		RunID:  strconv.FormatInt(rs.Created.UnixNano(), 10),
 		Common: e.Repo.Common,
@@ -492,6 +527,7 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	defer slot.Release()
 	e.workflowSlot = slot
 	e.term.Slot = slot.N
+	e.term.Owner = slot.Owner
 	rs.Slot = &slot.N
 	if err := e.save(ws, rs); err != nil {
 		return rs, err
@@ -667,6 +703,10 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 			Worktree:    ws.Path, State: ws.State, Base: rs.Base,
 			Earlier: rs.Earlier(), Scope: rs.Scope, Term: e.term,
 		}, opts)
+		var endErr *agent.EndError
+		if errors.As(err, &endErr) {
+			return e.unwatched(ws, rs, endErr)
+		}
 		rs.AgentPid, rs.Terminal, rs.AgentState = 0, nil, ""
 		switch {
 		case err != nil:
@@ -760,6 +800,25 @@ func (e *Engine) ship(ctx context.Context, ws Workspace, rs *Run) (*Run, error) 
 	// Recorded in the same run.json write that makes the run ready.
 	rs.Complete = len(left) == 0
 	return e.finish(ws, rs, Ready, "")
+}
+
+// unwatched leaves the run as a run process that died would: running,
+// with its terminal and slot recorded, because its agent's terminal would
+// not end and may still be live. Nothing is recorded stopped and the
+// workflow does not move on until the terminal is known to have ended:
+// tuckerbox stop takes the lock and tries again, and resume adopts the
+// agent or ends it (formal/terminals.tla, StoppedMeansNoAgent).
+func (e *Engine) unwatched(ws Workspace, rs *Run, err *agent.EndError) (*Run, error) {
+	rs.State, rs.Reason = Running, err.Error()
+	rs.Pid, rs.AgentPid = 0, 0
+	if rs.Terminal == nil {
+		rs.Terminal = &TerminalRef{Name: err.Name}
+	}
+	e.logf(rs.Change, "%v; leaving the run for tuckerbox stop or resume", err)
+	if serr := e.save(ws, rs); serr != nil {
+		return rs, serr
+	}
+	return rs, err
 }
 
 // finish records the run's final state for this process. The caller's

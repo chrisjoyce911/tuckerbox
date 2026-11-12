@@ -104,23 +104,28 @@ func (a App) agentTurnFrom(args []string, stdin io.Reader) int {
 
 // agentHold is the hidden command an agent's terminal runs:
 //
-//	tuckerbox agent-hold --slot <n> [--common <dir>] [--env K=V]... -- <argv>
+//	tuckerbox agent-hold --slot <n> [--common <dir>] [--owner <token>] [--env K=V]... -- <argv>
 //
 // It takes slot n's agent lock, refusing if another agent holds it, runs
 // argv as its child with the extra environment, and exits with its exit
 // status. The OS frees the lock when it exits, so the slot stays taken
 // exactly as long as the agent lives (formal/liveslots.tla).
+//
+// With --owner, once it holds the agent lock it starts the agent only if
+// the slot's owner file still holds that token: the run that started the
+// terminal still owns the slot. A late agent-hold whose run died and
+// whose slot was given to another change refuses (runs.Slot).
 func (a App) agentHold(args []string) int {
-	usage := "usage: tuckerbox agent-hold --slot <n> [--common <dir>] [--env K=V]... -- <program> [args...]"
+	usage := "usage: tuckerbox agent-hold --slot <n> [--common <dir>] [--owner <token>] [--env K=V]... -- <program> [args...]"
 	slot := -1
-	var common string
+	var common, owner string
 	var env, argv []string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--":
 			argv = args[i+1:]
 			i = len(args)
-		case "--slot", "--common", "--env":
+		case "--slot", "--common", "--owner", "--env":
 			if i+1 >= len(args) {
 				return a.usageErr("agent-hold", usage)
 			}
@@ -134,6 +139,8 @@ func (a App) agentHold(args []string) int {
 				slot = n
 			case "--common":
 				common = v
+			case "--owner":
+				owner = v
 			case "--env":
 				env = append(env, v)
 			}
@@ -165,6 +172,11 @@ func (a App) agentHold(args []string) int {
 		return a.errf("agent-hold", "%v", err)
 	}
 	defer hold.Release()
+	if owner != "" {
+		if got := runs.SlotOwner(common, slot); got != owner {
+			return a.errf("agent-hold", "slot %d was given to another run after this agent's run took it; not starting %s", slot, argv[0])
+		}
+	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	cmd.Env = append(os.Environ(), env...)
@@ -195,20 +207,25 @@ func (a App) agentHold(args []string) int {
 }
 
 // turnHookChecks are doctor's turn-hook self-checks, one per built-in
-// agent CLI: the payload its hook gets, and the flag that installs it.
+// agent CLI: the payload its hook gets, the flag that installs it, and the
+// hook's name.
 var turnHookChecks = []struct {
-	cli, flag, how string
-	style          agent.HookStyle
+	cli, flag, hook string
+	style           agent.HookStyle
 }{
-	{"claude", "--settings", "Stop hook through --settings", agent.HookClaude},
-	{"codex", "--config", "notify through -c", agent.HookCodex},
+	{"claude", "--settings", "Stop hook", agent.HookClaude},
+	{"codex", "--config", "notify hook", agent.HookCodex},
 }
 
 // turnHookDoctorLines are doctor's turn-hook self-checks for each
 // installed agent CLI: agent-turn, as the CLI's hook runs it, must get a
-// sample final message from a payload in that CLI's format, and the CLI's
-// --help must list the flag the hook is passed with. They never fail
-// doctor; a CLI whose hook format changed leaves terminal steps waiting.
+// sample final message from a payload in the format Tuckerbox expects
+// from that CLI, and the CLI's --help must list the flag the hook is
+// passed with. Whether the installed CLI really runs the hook with that
+// payload is only seen in a real turn, which costs a model call, so doctor
+// says that part is unverified rather than claiming the hook works. They
+// never fail doctor; a CLI whose hook format changed leaves terminal steps
+// waiting for the person.
 func (a App) turnHookDoctorLines() []string {
 	look := a.DoctorEnv.LookPath
 	if look == nil {
@@ -224,7 +241,9 @@ func (a App) turnHookDoctorLines() []string {
 			lines = append(lines, fmt.Sprintf("turn hook: %s: %s", c.cli, why))
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("turn hook: %s ok (%s)", c.cli, c.how))
+		lines = append(lines, fmt.Sprintf("turn hook: %s: unverified: agent-turn reads the %s payload Tuckerbox expects and %s --help lists %s, "+
+			"but whether this %s runs the hook with that payload is only seen in a real turn (a step whose turn gives no message waits for you)",
+			c.cli, c.hook, c.cli, c.flag, c.cli))
 	}
 	return lines
 }

@@ -151,7 +151,7 @@ command = ["myagent", "--prompt-file", "{brief_file}"]
 interactive = ["myagent", "--on-turn-end", "{turnhook}", "{brief}"]
 ```
 
-The agent outlives Tuckerbox's run process. If that process dies, `tuckerbox status` shows the run `running (not watched)`; `tuckerbox resume` (or autopilot's crash resume) adopts the live agent in the same round, and `tuckerbox stop` ends it. The agent keeps its parallel slot while it lives, so no other change starts in its place. `tuckerbox logs` reads a live agent's terminal, and the step's log keeps its session afterwards. `doctor` checks each installed CLI's turn hook.
+The agent outlives Tuckerbox's run process. If that process dies, `tuckerbox status` shows the run `running (not watched)`; `tuckerbox resume` (or autopilot's crash resume) adopts the live agent in the same round, and `tuckerbox stop` ends it. A `run` or `rerun` that starts a new round ends that agent first. A run is recorded `stopped` only once its agent's terminal has ended; if herdr-core can't end it, the run stays `running (not watched)` and `stop` can be tried again. The agent keeps its parallel slot while it lives, so no other change starts in its place. `tuckerbox logs` reads a live agent's terminal, and the step's log keeps its session afterwards. `doctor` checks the turn-hook format Tuckerbox expects and the flag each installed CLI takes it with; whether a CLI version really runs the hook is only seen in a real turn, and doctor says so.
 
 `doctor` exits non-zero only when a required tool (`git` or `openspec`) is missing. Agent CLIs are optional. It does not yet check whether an agent is signed in, and says `sign-in not checked`.
 
