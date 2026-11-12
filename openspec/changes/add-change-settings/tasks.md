@@ -48,16 +48,16 @@
 
 ## 5. Board (settings-board)
 
-- [ ] 5.1 `board --json`: per-step `settings` with sources (recorded values for a running step) and `machines` on every active card; update the board JSON snapshot
-- [ ] 5.2 Test "Card with an override"
-- [ ] 5.3 Test "Running step started before an edit"
-- [ ] 5.4 `board --json --change`: `choices` from the allow-list, with the keys that void approval
-- [ ] 5.5 Test "Choices"
-- [ ] 5.6 Board mod: settings section in card detail, pickers with allowed values and "repository default", running `tuckerbox set`; none while queued or running
-- [ ] 5.7 Node test "Pick a model"
-- [ ] 5.8 Node test "No pickers while running"
-- [ ] 5.9 Board mod: confirm before an `agent` or `permissions` pick on an approved card
-- [ ] 5.10 Node test "Change agent on an approved card"
+- [x] 5.1 `board --json`: per-step `settings` with sources (recorded values for a running step) and `machines` on every active card; update the board JSON snapshot
+- [x] 5.2 Test "Card with an override"
+- [x] 5.3 Test "Running step started before an edit"
+- [x] 5.4 `board --json --change`: `choices` from the allow-list, with the keys that void approval
+- [x] 5.5 Test "Choices"
+- [x] 5.6 Board mod: settings section in card detail, pickers with allowed values and "repository default", running `tuckerbox set`; none while queued or running
+- [x] 5.7 Node test "Pick a model"
+- [x] 5.8 Node test "No pickers while running"
+- [x] 5.9 Board mod: confirm before an `agent` or `permissions` pick on an approved card
+- [x] 5.10 Node test "Change agent on an approved card"
 
 ## 6. Integration
 
