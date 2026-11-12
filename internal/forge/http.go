@@ -18,6 +18,10 @@ const maxResponse = 8 << 20
 
 // APIError includes only masked response text. Callers may inspect status to
 // recover duplicate opens, authentication failures and stale merge pins.
+type RequestError struct{ Message string }
+
+func (e *RequestError) Error() string { return e.Message }
+
 type APIError struct {
 	Status  int
 	Message string
@@ -106,7 +110,7 @@ func (h *HTTP) Do(ctx context.Context, method, endpoint string, input, output an
 	}
 	resp, err := h.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("forge request failed: %s", h.Mask(err.Error()))
+		return nil, &RequestError{Message: "forge request failed: " + h.Mask(err.Error())}
 	}
 	defer resp.Body.Close()
 	h.recordLimit(resp.Header)

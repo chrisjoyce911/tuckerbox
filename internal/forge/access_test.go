@@ -282,3 +282,35 @@ func TestSignedJobLogDownloadNeverGetsCredentials(t *testing.T) {
 		t.Fatal(calls)
 	}
 }
+
+func TestRetryAfterAndGitLabRateFloorPreventRequests(t *testing.T) {
+	for _, retryAfter := range []bool{false, true} {
+		t.Run(fmt.Sprint(retryAfter), func(t *testing.T) {
+			calls := 0
+			s := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if retryAfter {
+					w.Header().Set("Retry-After", "120")
+					w.WriteHeader(429)
+				} else {
+					w.Header().Set("RateLimit-Limit", "100")
+					w.Header().Set("RateLimit-Remaining", "5")
+					w.Header().Set("RateLimit-Reset", fmt.Sprint(time.Now().Add(12*time.Minute).Unix()))
+					fmt.Fprint(w, `{}`)
+				}
+			}))
+			defer s.Close()
+			h, err := NewHTTP(s.URL, Token{}, s.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = h.Do(context.Background(), "GET", "/state", nil, nil)
+			if _, err := h.Do(context.Background(), "GET", "/state", nil, nil); err == nil || calls != 1 {
+				t.Fatal(calls, err)
+			}
+			if time.Until(h.RetryAt()) < time.Minute {
+				t.Fatal(h.RetryAt())
+			}
+		})
+	}
+}

@@ -18,10 +18,11 @@ import (
 
 // Step is everything needed to run one step's agent once.
 type Step struct {
-	Change string
-	Step   string
-	Role   string
-	Round  int
+	ShippingFeedback bool
+	Change           string
+	Step             string
+	Role             string
+	Round            int
 	// Agent is the resolved agent definition (see Resolve).
 	Agent  Template
 	Model  string
@@ -158,7 +159,7 @@ func Run(ctx context.Context, s Step, opts Options) (Outcome, error) {
 	brief := Brief{
 		Change: s.Change, Step: s.Step, Role: s.Role, Round: s.Round,
 		Root: s.Worktree, ResultPath: o.ResultPath, Base: s.Base, Earlier: s.Earlier,
-		Scope: s.Scope,
+		Scope: s.Scope, ShippingFeedback: s.ShippingFeedback,
 	}
 	if err := brief.Write(o.BriefPath); err != nil {
 		return o, fmt.Errorf("step %s: brief: %w", s.Step, err)

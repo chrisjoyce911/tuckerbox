@@ -161,7 +161,7 @@ func TestProtectionPendingMissingCIAndClosedMR(t *testing.T) {
 				wantState = "merged"
 			case "review waiting":
 				api.threads = []forge.Thread{{ID: "thread1", Comments: []forge.Comment{{ID: "comment1", Author: "writer", Writer: true}}}}
-				wantReason = "waiting for approval timed out"
+				wantReason = "review findings need a fix step"
 			}
 			out := e.Run(context.Background(), false)
 			if out.State != wantState || out.Reason != wantReason || api.mergeCalls != 0 {
