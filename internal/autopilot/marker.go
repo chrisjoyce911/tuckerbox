@@ -15,7 +15,14 @@ type Marker struct {
 	Pid     int       `json:"pid"`
 	Machine string    `json:"machine"`
 	Started time.Time `json:"started"`
+	// Terminal is the herdr-core terminal autopilot runs in, from
+	// TUCKERBOX_TERMINAL; empty in a person's own shell.
+	Terminal string `json:"terminal,omitempty"`
 }
+
+// TerminalEnv names the herdr-core terminal autopilot runs in. The top
+// bar's Start sets it, so the bar can tell its own autopilot apart.
+const TerminalEnv = "TUCKERBOX_TERMINAL"
 
 // Files are the lock and marker of a repository's autopilot, in
 // the shared tuckerbox folder of its git common directory.

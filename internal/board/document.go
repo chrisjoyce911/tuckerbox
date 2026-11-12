@@ -142,7 +142,11 @@ type Choices struct {
 type Autopilot struct {
 	Running bool   `json:"running"`
 	Pid     int    `json:"pid,omitempty"`
+	Machine string `json:"machine,omitempty"`
 	Started string `json:"started,omitempty"`
+	// Terminal is the herdr-core terminal it runs in, when it runs in
+	// one (add-herdr-topbar: Autopilot in the board document).
+	Terminal string `json:"terminal,omitempty"`
 }
 type Detail struct {
 	Change   string  `json:"change"`

@@ -168,7 +168,10 @@ export function normaliseBoard(doc, src = {}) {
     os: s.os,
     require_approval: doc.require_approval !== false,
     // tuckerbox autopilot for the repository on the board's machine.
-    autopilot: { running: doc.autopilot?.running === true, pid: num(doc.autopilot?.pid), started: str(doc.autopilot?.started) },
+    autopilot: {
+      running: doc.autopilot?.running === true, pid: num(doc.autopilot?.pid), machine: str(doc.autopilot?.machine),
+      started: str(doc.autopilot?.started), terminal: str(doc.autopilot?.terminal),
+    },
     steps: list(doc.steps).map(str),
     columns: list(doc.columns).map((c) => ({ id: str(c?.id), kind: str(c?.kind), step: str(c?.step), name: str(c?.name) || str(c?.id) })),
     cards: list(doc.cards).map((c) => normaliseCard(c, s)),
