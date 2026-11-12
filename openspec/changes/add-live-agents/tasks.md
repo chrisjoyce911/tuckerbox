@@ -80,7 +80,7 @@
 ## 5. Integration
 
 - [ ] 5.1 End to end on a machine with herdr-core: a change's build runs in a terminal tab, the card shows its task moving as it ticks, Watch focuses it, the person answers a question in the tab, the result is accepted, and `stop`/`resume` after killing the run process adopt the live agent
-- [ ] 5.2 End to end headless: the same change runs as before with activity on the card, blocks with a question, is answered with `tuckerbox answer --resume`, and finishes
+- [x] 5.2 End to end headless: the same change runs as before with activity on the card, blocks with a question, is answered with `tuckerbox answer --resume`, and finishes
 - [ ] 5.3 `go vet ./...`, `go test -race ./...`, `node --test herdr/mods/tuckerbox-board/test/*.test.js`, `CGO_ENABLED=0 go build ./...` and `scripts/tla-check.sh` pass on Linux, macOS and Windows CI
 
 ## Workflow follow-up
