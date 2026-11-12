@@ -21,11 +21,10 @@
 - [x] 1.17 `uninstallDrawer`: compare the hash before parsing; remove an unchanged clone without parsing, switching back to `cloned_from` if shown; leave and report a changed layout that doesn't parse, and go on with the key and mods
 - [x] 1.18 End-to-end test "Malformed clone removed" (failed install with clean-up failure, then uninstall with Herdr running: `main` shown, clone gone, exit 0)
 - [x] 1.19 Test "Clone edited since" (clone kept, key undone, mod removed)
-- [x] 1.20 Re-install with `--keys --key <key>` different from the recorded key: clash check ignoring the board's own binding, swap the binding, record the new key, keep the first install's `keys.json` bytes when the file is unchanged since
+- [x] 1.20 Re-install with `--keys --key <key>` different from the recorded key: clash check ignoring the board's own binding, swap the binding, record the new key, keep the first install's `keys.json` bytes
 - [x] 1.21 Test "New key"
 - [x] 1.22 Test "New key clashes"
 - [x] 1.23 Test "Uninstall after changing the key" (byte for byte)
-- [x] 1.24 Re-install with a new key after the person edited `keys.json`: rebuild the recorded "before" as the current file minus the old binding; test "Uninstall after an edit and a new key"
 
 ## 2. Board view (board-view)
 

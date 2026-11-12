@@ -82,7 +82,7 @@ When the drawer step fails after cloning and removing the clone fails too, the r
 
 ### Re-install with another key
 
-The record already keeps `keys.json` from before the first install and the key it added. A re-install with a different `--key` checks the new key for clashes (ignoring the board's own old binding), removes the old binding, adds the new one, and replaces the recorded key. The recorded "before" bytes stay those from the first install, so uninstall still restores the file byte for byte if the person changed nothing else. If the file changed since the last install, the recorded "before" becomes the file as it was just before the re-install minus the board's old binding, so uninstall keeps the person's edits.
+The record already keeps `keys.json` from before the first install and the key it added. A re-install with a different `--key` checks the new key for clashes (ignoring the board's own old binding), removes the old binding, adds the new one, and replaces the recorded key. The recorded "before" bytes stay those from the first install, so uninstall still restores the file byte for byte if the person changed nothing else.
 
 ### Main checkout
 
