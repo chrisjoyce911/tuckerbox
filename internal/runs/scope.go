@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
@@ -26,6 +28,45 @@ func readTasks(p string) ([]scope.Task, error) {
 		return nil, err
 	}
 	return scope.Parse(string(data)), nil
+}
+
+// ArchivedChange returns change's folder under openspec/changes/archive
+// in root (named <date>-<change>, the latest if there are several), or ""
+// when there is none.
+func ArchivedChange(root, change string) string {
+	dir := filepath.Join(root, "openspec", "changes", "archive")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	name := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}-` + regexp.QuoteMeta(change) + `$`)
+	var found []string
+	for _, e := range entries {
+		if e.IsDir() && name.MatchString(e.Name()) {
+			found = append(found, e.Name())
+		}
+	}
+	if len(found) == 0 {
+		return ""
+	}
+	sort.Strings(found)
+	return filepath.Join(dir, found[len(found)-1])
+}
+
+// readChangeTasks reads change's tasks in the worktree at root. When the
+// change's folder is gone and the change is in the archive there (a step
+// archived it on its branch), it reads the archived tasks.md and reports
+// archived.
+func readChangeTasks(root, change string) (tasks []scope.Task, archived bool, err error) {
+	active := filepath.Dir(TasksFile(root, change))
+	if _, err := os.Stat(active); errors.Is(err, fs.ErrNotExist) {
+		if folder := ArchivedChange(root, change); folder != "" {
+			tasks, err := readTasks(filepath.Join(folder, "tasks.md"))
+			return tasks, true, err
+		}
+	}
+	tasks, err = readTasks(TasksFile(root, change))
+	return tasks, false, err
 }
 
 // ScopeFor returns the scope a Start with spec gives the change, judged

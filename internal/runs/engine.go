@@ -610,17 +610,31 @@ func (e *Engine) steps(ctx context.Context, ws Workspace, rs *Run, i int, stopRe
 // branch and nothing is pushed.
 func (e *Engine) ship(ctx context.Context, ws Workspace, rs *Run) (*Run, error) {
 	// The worktree's tasks.md, read while this run holds the change lock:
-	// tuckerbox tasks and edit write it only under that lock.
-	tasks, err := readTasks(TasksFile(ws.Path, rs.Change))
+	// tuckerbox tasks and edit write it only under that lock. A change a
+	// step archived on its branch is read from the archive and is complete.
+	tasks, archived, err := readChangeTasks(ws.Path, rs.Change)
 	if err != nil {
 		return e.finish(ws, rs, Failed, "reading tasks.md: "+err.Error())
 	}
-	if rs.Scope != nil {
-		if reason := scopeReason(scope.Check(rs.Scope, tasks)); reason != "" {
-			return e.finish(ws, rs, Blocked, reason)
+	// Shipping to a forge ticks CI tasks once CI is green, so they don't
+	// hold the run back; in local mode they count as before.
+	toForge := e.Config.Ship != "" && e.Config.Ship != config.ShipLocal
+	var left []string
+	if !archived {
+		if rs.Scope != nil {
+			unticked, missing := scope.Check(rs.Scope, tasks)
+			if toForge {
+				unticked = scope.WithoutCI(unticked, tasks)
+			}
+			if reason := scopeReason(unticked, missing); reason != "" {
+				return e.finish(ws, rs, Blocked, reason)
+			}
+		}
+		left = scope.Unticked(tasks)
+		if toForge {
+			left = scope.UntickedBeforeShip(tasks)
 		}
 	}
-	left := scope.Unticked(tasks)
 	switch shipDecision(e.Config.Ship, rs.Scope != nil, len(left) == 0) {
 	case outcomeBlocked:
 		return e.finish(ws, rs, Blocked, "tasks not ticked: "+strings.Join(left, ", "))

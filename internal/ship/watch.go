@@ -186,6 +186,19 @@ func (e *Engine) watch(ctx context.Context, claim *Claim) Outcome {
 			fingerprint = ""
 			continue
 		}
+		if ci == "green" {
+			pushed, out := e.tickCI(ctx, claim)
+			if out.State != "" {
+				return out
+			}
+			if pushed {
+				// The tick commit is the new head: wait for its CI.
+				lastChange = e.now()
+				interval = 30 * time.Second
+				fingerprint = ""
+				continue
+			}
+		}
 		switch {
 		case e.Config.Ship == config.ShipMR && (ci == "green" || ci == "none"):
 			return Outcome{State: "ready"}

@@ -165,6 +165,12 @@ func (b Brief) Render() (string, error) {
 			break
 		}
 	}
+	for _, t := range tasks {
+		if t.CI {
+			s.WriteString("\nTasks marked `(ci)`, or that say they pass on CI, are ticked when shipping finds CI green on the merge request: make the work ready for CI but don't tick them.\n")
+			break
+		}
+	}
 	s.WriteString("\n")
 
 	if b.Scope != nil {
