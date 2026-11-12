@@ -14,14 +14,14 @@
 
 ## 3. Change edits (change-edits)
 
-- [ ] 3.1 Resolve where edits happen: the change's worktree on this machine, else the repository checkout; print the folder; never commit
-- [ ] 3.2 `tuckerbox edit <change> proposal|design|model|tasks|spec:<capability>`; editor from machine `editor`, else `$VISUAL`, else `$EDITOR`; reject `editor` in repository config
-- [ ] 3.3 Run the editor as a child in the same process group; validate strictly when it exits and exit with the result
-- [ ] 3.4 `tuckerbox validate <change> [--json]` wrapping `openspec validate <change> --strict`
-- [ ] 3.5 `tuckerbox tasks <change> tick|untick <n.m>`: change one checkbox byte, keep line endings, refuse unknown numbers, no-op when already in that state
-- [ ] 3.6 Take the change's run lock in edit (while the editor is open), tasks, approve and unapprove; refuse while a run is queued or running and name its state
-- [ ] 3.7 `run` and `resume` refuse with "being edited" when an edit holds the lock (adds to `change-runs`' "Change already running" refusal)
-- [ ] 3.8 Tests for each change-edits scenario, including a byte-for-byte tick test on a CRLF tasks.md and a lock test with a run process
+- [x] 3.1 Resolve where edits happen: the change's worktree on this machine, else the repository checkout; print the folder; never commit
+- [x] 3.2 `tuckerbox edit <change> proposal|design|model|tasks|spec:<capability>`; editor from machine `editor`, else `$VISUAL`, else `$EDITOR`; reject `editor` in repository config
+- [x] 3.3 Run the editor as a child in the same process group; validate strictly when it exits and exit with the result
+- [x] 3.4 `tuckerbox validate <change> [--json]` wrapping `openspec validate <change> --strict`
+- [x] 3.5 `tuckerbox tasks <change> tick|untick <n.m>`: change one checkbox byte, keep line endings, refuse unknown numbers, no-op when already in that state
+- [x] 3.6 Take the change's run lock in edit (while the editor is open), tasks, approve and unapprove; refuse while a run is queued or running and name its state
+- [x] 3.7 `run` and `resume` refuse with "being edited" when an edit holds the lock (adds to `change-runs`' "Change already running" refusal)
+- [x] 3.8 Tests for each change-edits scenario, including a byte-for-byte tick test on a CRLF tasks.md and a lock test with a run process
 
 ## 4. Approval (change-approval)
 

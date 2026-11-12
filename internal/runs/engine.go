@@ -170,13 +170,14 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	// Pick: the change lock, taken atomically.
 	lock, err := TryChangeLock(ws.State.RunLock())
 	if errors.Is(err, ErrLocked) {
-		pid, _ := readPid(ws.State.PidFile())
-		return nil, &ActiveError{Change: req.Change, Worktree: ws.Path, Pid: pid}
+		return nil, LockedError(req.Change, ws.Path, ws.State)
 	}
 	if err != nil {
 		return nil, err
 	}
 	defer lock.Release()
+	// We hold the lock, so an edit marker is from an edit that died.
+	RemoveEditMarker(ws.State)
 	if err := ws.State.Ensure(); err != nil {
 		return nil, err
 	}

@@ -25,6 +25,10 @@ Commands:
   resume <change>           Continue a stopped or blocked run
   rerun <change> <step>     Start a run again from a step
   history <change> [--json] Show a run's events, oldest first
+  edit <change> <file>      Open proposal, design, model, tasks or
+                            spec:<capability> in your editor, then validate
+  validate <change> [--json]  Validate a change strictly
+  tasks <change> tick|untick <n.m>  Tick or untick one task in tasks.md
   version [--json]          Print the version, commit, Go version and platform
   doctor                    Check that git, openspec and the agent CLIs are installed
   check                     Validate .tuckerbox/config.toml with machine config
@@ -99,6 +103,12 @@ func (a App) Run(args []string) int {
 		return a.rerun(rest)
 	case "history":
 		return a.history(rest)
+	case "edit":
+		return a.edit(rest)
+	case "validate":
+		return a.validate(rest)
+	case "tasks":
+		return a.tasks(rest)
 	default:
 		fmt.Fprintf(a.Stderr, "tuckerbox: unknown command %q\n\n%s", cmd, usage)
 		return 2
