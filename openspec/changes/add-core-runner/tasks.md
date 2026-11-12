@@ -2,9 +2,9 @@
 
 ## 1. Repository and build
 
-- [ ] 1.1 Go module, `cmd/tuckerbox`, `internal/` layout, Apache-2.0 or MIT licence (decide), README and AGENTS.md
-- [ ] 1.2 CI that runs `go vet`, `go test -race` and builds on macOS, Linux and Windows, plus `tla:check` for `formal/`
-- [ ] 1.3 `tuckerbox version`, `tuckerbox doctor` (reports missing `git`, `openspec` and agent CLIs, and signed-out agents)
+- [x] 1.1 Go module, `cmd/tuckerbox`, `internal/` layout, Apache-2.0 licence, README and AGENTS.md
+- [x] 1.2 CI that runs `go vet`, `go test -race` and builds on macOS, Linux and Windows, plus `tla:check` for `formal/`
+- [x] 1.3 `tuckerbox version`, `tuckerbox doctor` (reports missing `git`, `openspec` and agent CLIs; agent sign-in is reported as "sign-in not checked" until a check without side effects exists)
 
 ## 2. Config (repo-config)
 
