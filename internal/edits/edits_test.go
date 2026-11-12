@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/runs"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 	"github.com/chrisjoyce911/tuckerbox/internal/testenv"
@@ -416,5 +417,71 @@ func TestEditMarkerStale(t *testing.T) {
 	var ae *runs.ActiveError
 	if err := runs.LockedError("add-login", "/w", st); !errors.As(err, &ae) {
 		t.Errorf("%v", err)
+	}
+}
+
+// The first-run window: a run has made (or reused) the change's worktree at
+// its configured path and holds the lock, but has written no run state yet.
+// The edit must still find the worktree and be refused by its lock. A
+// worktree made before any run is found the same way.
+func TestLocateBeforeRunState(t *testing.T) {
+	repo := newRepo(t)
+	ctx := context.Background()
+	wt := filepath.Join(filepath.Dir(repo), "repo-worktrees", "add-login")
+	testenv.Git(t, repo, "worktree", "add", "-q", "-b", "add-login", wt)
+	if r, err := filepath.EvalSymlinks(wt); err == nil {
+		wt = r
+	}
+	for _, from := range []string{repo, wt} {
+		p, err := Locate(ctx, from, "add-login")
+		if err != nil || !p.Worktree || !sameDir(p.Dir, wt) || p.State == "" {
+			t.Fatalf("from %s: %+v %v", from, p, err)
+		}
+	}
+	p, _ := Locate(ctx, wt, "add-login")
+	runLock, err := runs.TryChangeLock(p.State.RunLock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runLock.Release()
+	called := false
+	err = WithChangeLock(ctx, p, "tuckerbox edit design", func() error { called = true; return nil })
+	var ar *ActiveRunError
+	if !errors.As(err, &ar) || called {
+		t.Fatalf("edit during the first-run window: %v (called %v)", err, called)
+	}
+
+	// A configured path is honoured; a worktree elsewhere is not the change's.
+	other := config.Worktree{Path: "../elsewhere/{change}"}
+	if p, err := LocateWith(ctx, repo, "add-login", other); err != nil || p.Worktree {
+		t.Errorf("other pattern: %+v %v", p, err)
+	}
+}
+
+func sameDir(a, b string) bool {
+	fa, err1 := os.Stat(a)
+	fb, err2 := os.Stat(b)
+	return err1 == nil && err2 == nil && os.SameFile(fa, fb)
+}
+
+// A longer fence holds a shorter one: the inner ``` doesn't end it, and a
+// ~~~ doesn't end a ``` fence.
+func TestSetTaskNestedFences(t *testing.T) {
+	for _, content := range []string{
+		"# Tasks\n\n````markdown\n```\n- [ ] 1.1 example only\n```\n````\n\n- [ ] 2.1 Real\n",
+		"# Tasks\n\n```\n~~~\n- [ ] 1.1 example only\n~~~\n```\n\n- [ ] 2.1 Real\n",
+		"# Tasks\n\n~~~~\n~~~ not a close\n- [ ] 1.1 example only\n~~~~\n\n- [ ] 2.1 Real\n",
+	} {
+		p := writeTasks(t, content)
+		var nt *ErrNoTask
+		if _, err := SetTask(p, "1.1", true); !errors.As(err, &nt) {
+			t.Errorf("1.1 in a fence: %v\n%s", err, content)
+		}
+		if changed, err := SetTask(p, "2.1", true); err != nil || !changed {
+			t.Errorf("2.1 after the fence: %v %v\n%s", changed, err, content)
+		}
+		if got := read(t, p); got != strings.Replace(content, "- [ ] 2.1", "- [x] 2.1", 1) {
+			t.Errorf("file %q", got)
+		}
 	}
 }

@@ -60,7 +60,7 @@ func SetTask(path, n string, checked bool) (changed bool, err error) {
 // findTask returns the offset of task n's checkbox character.
 func findTask(data []byte, n string) (int, error) {
 	found, count := -1, 0
-	fence := false
+	var fence []byte // the open fence's run of ` or ~, or nil
 	off := 0
 	for off < len(data) {
 		end := bytes.IndexByte(data[off:], '\n')
@@ -68,10 +68,17 @@ func findTask(data []byte, n string) (int, error) {
 		if end >= 0 {
 			line = data[off : off+end]
 		}
-		trimmed := bytes.TrimLeft(line, " \t")
-		if bytes.HasPrefix(trimmed, []byte("```")) || bytes.HasPrefix(trimmed, []byte("~~~")) {
-			fence = !fence
-		} else if !fence {
+		run, rest := fenceRun(line)
+		switch {
+		case fence == nil && run != nil:
+			fence = run
+		case fence != nil:
+			// A closing fence: the same character, at least as long, and
+			// nothing after it but spaces.
+			if run != nil && run[0] == fence[0] && len(run) >= len(fence) && len(bytes.TrimSpace(rest)) == 0 {
+				fence = nil
+			}
+		default:
 			if m := taskLine.FindSubmatchIndex(line); m != nil && string(line[m[4]:m[5]]) == n {
 				found = off + m[2]
 				count++
@@ -89,6 +96,24 @@ func findTask(data []byte, n string) (int, error) {
 		return found, nil
 	}
 	return 0, fmt.Errorf("task %s appears %d times in tasks.md; fix the numbering first", n, count)
+}
+
+// fenceRun returns the run of three or more ` or ~ a code fence line
+// starts with (after indentation), and the rest of the line; nil when the
+// line is not a fence.
+func fenceRun(line []byte) (run, rest []byte) {
+	t := bytes.TrimLeft(line, " \t")
+	if len(t) < 3 || (t[0] != '`' && t[0] != '~') {
+		return nil, nil
+	}
+	n := 0
+	for n < len(t) && t[n] == t[0] {
+		n++
+	}
+	if n < 3 {
+		return nil, nil
+	}
+	return t[:n], t[n:]
 }
 
 // writeKeepingMode replaces path with data through a temporary file and a
