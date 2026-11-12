@@ -133,8 +133,10 @@ Agents report by ending with a small JSON result as their final message; Tuckerb
 
 ```toml
 [agents.myagent]
-command = ["myagent", "--prompt-file", "{brief}", "--last-message", "{lastmessage}"]
+command = ["myagent", "--prompt-file", "{brief_file}", "--last-message", "{lastmessage}"]
 ```
+
+`{brief}` is the brief's text and `{brief_file}` the brief file's path; a custom agent passes one of them. Agents get the brief in their command, so they need no read outside their worktree. When the command would be longer than 24,000 characters as a Windows command line (on every platform), Claude and Codex read the brief on standard input instead, and a custom agent's `{brief}` becomes an instruction to read the brief file. Logs and run state show the brief as `<brief: N chars, <file>>`.
 
 `doctor` exits non-zero only when a required tool (`git` or `openspec`) is missing. Agent CLIs are optional. It does not yet check whether an agent is signed in, and says `sign-in not checked`.
 

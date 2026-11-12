@@ -230,6 +230,11 @@ func (b Brief) Write(p string) error {
 	if err != nil {
 		return err
 	}
+	return writeBrief(p, text)
+}
+
+// writeBrief writes a rendered brief to file p, creating its directory.
+func writeBrief(p, text string) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}

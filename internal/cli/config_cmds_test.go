@@ -91,6 +91,41 @@ func TestCheckReportsFileAndKey(t *testing.T) {
 	}
 }
 
+// agent-launch, scenario Agent with neither: a custom agent whose command
+// passes neither {brief} nor {brief_file} fails tuckerbox check; one that
+// passes either is accepted.
+func TestCheckAgentWithNeither(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		ok      bool
+	}{
+		{`["omp", "--cwd", "{workdir}"]`, false},
+		{`["omp", "{brief}"]`, true},
+		{`["omp", "--prompt-file", "{brief_file}"]`, true},
+	} {
+		a, root, _, errOut := configApp(t)
+		path := filepath.Join(root, config.RepoFile)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		data := config.Starter + "\n[agents.omp]\ncommand = " + tc.command + "\n"
+		if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		code := a.Run([]string{"check"})
+		if tc.ok {
+			if code != 0 {
+				t.Errorf("%s: check exit %d: %s", tc.command, code, errOut)
+			}
+			continue
+		}
+		want := "agents.omp.command: must pass {brief} (the brief's text) or {brief_file} (the brief file's path)"
+		if code == 0 || !strings.Contains(errOut.String(), want) {
+			t.Errorf("%s: check exit %d, stderr lacks %q:\n%s", tc.command, code, want, errOut)
+		}
+	}
+}
+
 func TestCheckAndInitRejectArgs(t *testing.T) {
 	for _, cmd := range []string{"check", "init"} {
 		a, _, _, _ := configApp(t)

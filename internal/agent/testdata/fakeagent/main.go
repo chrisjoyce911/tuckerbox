@@ -1,10 +1,14 @@
 // Command fakeagent stands in for an agent CLI in tests. Its first argument
-// is a mode; it reads the step from the TUCKERBOX_* environment.
+// is a mode, unless FAKEAGENT_MODE sets it (so it can run with a built-in
+// agent's arguments); it reads the step from the TUCKERBOX_* environment.
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,11 +16,16 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: fakeagent <mode> [args...]")
-		os.Exit(2)
+	mode, args := os.Getenv("FAKEAGENT_MODE"), []string{}
+	if mode == "" {
+		if len(os.Args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: fakeagent <mode> [args...]")
+			os.Exit(2)
+		}
+		mode, args = os.Args[1], os.Args[2:]
+	} else {
+		args = os.Args[1:]
 	}
-	mode := os.Args[1]
 	resultPath := os.Getenv("TUCKERBOX_RESULT")
 	change := os.Getenv("TUCKERBOX_CHANGE")
 	step := os.Getenv("TUCKERBOX_STEP")
@@ -80,14 +89,14 @@ func main() {
 	case "lastmessage":
 		// codex -o <path>: the CLI writes the final message to the file;
 		// stdout holds nothing usable.
-		if len(os.Args) < 3 {
+		if len(args) < 1 {
 			fmt.Fprintln(os.Stderr, "lastmessage needs a path")
 			os.Exit(2)
 		}
 		event(map[string]any{"type": "thread.started"})
 		r := result(round, "done")
 		r["summary"] = "from the last-message file"
-		must(os.WriteFile(os.Args[2], []byte(asJSON(r)+"\n"), 0o644))
+		must(os.WriteFile(args[0], []byte(asJSON(r)+"\n"), 0o644))
 	case "both-same":
 		write(result(round, "done"))
 		fmt.Println(asJSON(result(round, "done")))
@@ -105,10 +114,31 @@ func main() {
 	case "argv":
 		// Record what we were started with, as the result's summary.
 		wd, _ := os.Getwd()
-		info, _ := json.Marshal(map[string]any{"args": os.Args[2:], "wd": wd})
+		info, _ := json.Marshal(map[string]any{"args": args, "wd": wd})
 		r := result(round, "done")
 		r["summary"] = string(info)
 		write(r)
+	case "report":
+		// Report the arguments, with long ones as their length and hash, and
+		// what came on standard input, in the final message. It opens no
+		// file: it reads neither the brief file nor the state folder.
+		in, err := io.ReadAll(os.Stdin)
+		must(err)
+		short := make([]string, len(args))
+		for i, a := range args {
+			short[i] = digest(a)
+		}
+		info, _ := json.Marshal(map[string]any{"args": short, "stdin": digest(string(in))})
+		r := result(round, "done")
+		r["summary"] = string(info)
+		// Like codex -o, write the final message to the -o file if given.
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] == "-o" {
+				must(os.WriteFile(args[i+1], []byte(asJSON(r)+"\n"), 0o644))
+				return
+			}
+		}
+		fmt.Println(asJSON(r))
 	case "stale-then-done":
 		write(result(round-1, "done"))
 		time.Sleep(700 * time.Millisecond)
@@ -143,6 +173,15 @@ func main() {
 		fmt.Fprintln(os.Stderr, "unknown mode", mode)
 		os.Exit(2)
 	}
+}
+
+// digest is s itself when short, else its length in bytes and SHA-256.
+func digest(s string) string {
+	if len(s) <= 200 {
+		return s
+	}
+	sum := sha256.Sum256([]byte(s))
+	return fmt.Sprintf("%d bytes sha256:%s", len(s), hex.EncodeToString(sum[:]))
 }
 
 func must(err error) {
