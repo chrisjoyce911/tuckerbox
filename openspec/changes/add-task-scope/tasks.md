@@ -36,7 +36,12 @@
 - [ ] 2.21 Test: First group in merge mode (unit test of the ship decision here; end-to-end in `add-forge-shipping`)
 - [ ] 2.22 Test: Last group in mr mode (unit test of the ship decision here; end-to-end in `add-forge-shipping`)
 - [ ] 2.23 Test: Dependents in merge mode (archive on the base required; end-to-end in `add-forge-shipping`)
-- [ ] 2.24 `formal/scope.tla` passes and `formal/scope_broken_split.tla` is rejected by `scripts/tla-check.sh`
+- [ ] 2.24 Ship tasks: `(ship)` prefix; left out of scopes, `next` and `complete`; refuse a scope of only ship tasks; say in the brief not to tick them
+- [ ] 2.25 In `mr`/`merge`, a run without a scope that isn't complete after its last step is `blocked` with the unticked tasks
+- [ ] 2.26 Test: Final group with an archive task
+- [ ] 2.27 Test: Scope of a ship task
+- [ ] 2.28 Test: Whole-change run leaves a task (unit test of the decision here; end-to-end in `add-forge-shipping`)
+- [ ] 2.29 `formal/scope.tla` passes and `formal/scope_broken_split.tla` is rejected by `scripts/tla-check.sh`
 
 ## 3. Brief (agent-launch)
 
@@ -65,4 +70,4 @@
 
 - [ ] 6.1 README: `--tasks`, `next`, and that approval covers the whole change
 - [ ] 6.2 `go vet ./...`, `go test -race ./...` and `scripts/tla-check.sh` pass
-- [ ] 6.3 Archive after `add-herdr-board`, once the implementation is accepted; fold the board, history and mod requirements into `board-data`, `run-history` and `herdr-board`
+- [ ] 6.3 (ship) Archive after `add-herdr-board`, once the implementation is accepted; fold the board, history and mod requirements into `board-data`, `run-history` and `herdr-board`

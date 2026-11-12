@@ -41,7 +41,11 @@ small.
 - **Partial runs don't ship:** in `mr` or `merge` mode (`add-forge-shipping`),
   a scoped run whose change isn't complete ends `ready` and never archives,
   pushes, opens a merge request or merges. There, only an archive on the
-  base branch releases dependents.
+  base branch releases dependents. A run without a scope that isn't
+  complete is `blocked` there, naming the unticked tasks.
+- **Ship tasks:** a task starting with `(ship)`, such as "Archive this
+  change", is done by shipping: never in a scope, not counted toward
+  complete, and ticked in the archive commit.
 - `status`, history and board cards show the scope. A new history event,
   `scope_started`, marks a run starting again for a new scope.
 - The board's card detail gets **Run group…**: pick a group with unticked

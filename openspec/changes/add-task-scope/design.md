@@ -160,6 +160,28 @@ do that, so the rule is in this change, not left to a later one:
   or go on to ship?") is a function of `complete` and the ship mode, and is
   unit tested here.
 
+### Ship tasks
+Most tasks.md files end with a task such as "Archive this change once
+accepted". No step can honestly tick it before shipping, and shipping only
+starts once the change is complete. Without a rule, the last group could
+never ship. So a task whose text starts with `(ship)` is a ship task:
+- it is never in a scope or `next`, and doesn't count toward `complete`
+- the brief tells steps not to tick it
+- in `mr` and `merge` modes, the ship stage ticks it in the archive commit,
+  the commit that does the archiving
+- in `local` mode it stays for the person, as today
+
+A marker in the text was chosen over a heading or a sidecar list: it
+travels with the task, and OpenSpec ignores it. Ticks don't change the
+approval hash, so the archive commit's tick keeps the approval.
+
+### Whole-change runs that leave tasks unticked
+A run without a scope keeps today's rule in `local` mode: ready when the
+last step is done. In `mr` and `merge` modes, an incomplete change must not
+ship, and a `ready` run would just be started again and refused, pass
+after pass. So it becomes `blocked`, naming the unticked tasks: a state a
+person sees and `add-autopilot` reports.
+
 ## Risks / Trade-offs
 
 - **Task numbers move.** If a step renumbers tasks.md, the stored numbers
