@@ -1,2 +1,7 @@
 title = "Autopilot"
 depends_on = ["add-task-scope", "add-priority", "add-forge-shipping", "add-operating-modes"]
+
+[approval]
+hash = "sha256:1b90e266edf7d8b7023fc5e449a696d027c83650822147662fa6bdef408437d3"
+by = "Chris Joyce"
+at = 2026-11-12T19:06:55+10:00

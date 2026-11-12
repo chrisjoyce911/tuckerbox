@@ -1,2 +1,7 @@
 title = "Change settings"
 depends_on = ["add-herdr-board"]
+
+[approval]
+hash = "sha256:3dd1cee075673e3cfff08d3f6f7ac172d481dd2d85a9c03b6350b48caab02b20"
+by = "Chris Joyce"
+at = 2026-11-12T19:07:23+10:00
