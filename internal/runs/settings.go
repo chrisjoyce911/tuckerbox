@@ -3,6 +3,7 @@ package runs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path"
@@ -10,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
-	"github.com/chrisjoyce911/tuckerbox/internal/deps"
 	"github.com/chrisjoyce911/tuckerbox/internal/history"
 	"github.com/chrisjoyce911/tuckerbox/internal/settings"
 )
@@ -41,18 +41,17 @@ func sidecarRel(change string) string {
 	return path.Join("openspec", "changes", change, settings.FileName)
 }
 
-// readSidecar returns change's tuckerbox.toml where sp says the run starts
-// from: the worktree's file, else the file in commit sp.Rev. nil means the
-// change has none there.
-func readSidecar(ctx context.Context, root, change string, sp StartPoint) ([]byte, error) {
+// readAt returns the file rel (relative to the repository root) where sp
+// says the run starts from: the worktree's file, else the file in commit
+// sp.Rev. nil means there is none there.
+func readAt(ctx context.Context, root, rel string, sp StartPoint) ([]byte, error) {
 	if sp.Worktree != "" {
-		data, err := os.ReadFile(filepath.Join(deps.ChangesDir(sp.Worktree), change, settings.FileName))
+		data, err := os.ReadFile(filepath.Join(sp.Worktree, filepath.FromSlash(rel)))
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
 		}
 		return data, err
 	}
-	rel := sidecarRel(change)
 	if out, err := git(ctx, root, "ls-tree", "--name-only", sp.Rev, "--", rel); err != nil {
 		return nil, err
 	} else if out == "" {
@@ -65,21 +64,61 @@ func readSidecar(ctx context.Context, root, change string, sp StartPoint) ([]byt
 	return []byte(data + "\n"), nil
 }
 
+// readSidecar returns change's tuckerbox.toml where sp says the run starts
+// from. nil means the change has none there.
+func readSidecar(ctx context.Context, root, change string, sp StartPoint) ([]byte, error) {
+	return readAt(ctx, root, sidecarRel(change), sp)
+}
+
+// where says what sp is, for messages.
+func where(sp StartPoint) string {
+	if sp.Worktree != "" {
+		return "in its worktree " + sp.Worktree
+	}
+	return "at " + sp.Ref + " (" + shortRev(sp.Rev) + ")"
+}
+
+// startConfig is cfg with the [overrides] allow-list read from the
+// repository config where sp says the run starts from, the same files the
+// run gate judges, rather than from the checkout cfg was loaded from.
+// Everything else, machine profiles and their remote grants included,
+// stays as cfg has it. A start point without a repository config allows
+// no overrides.
+func startConfig(ctx context.Context, cfg *config.Config, root string, sp StartPoint) (*config.Config, error) {
+	rel := filepath.ToSlash(config.RepoFile)
+	data, err := readAt(ctx, root, rel, sp)
+	if err != nil {
+		return nil, err
+	}
+	c := *cfg
+	c.Overrides = nil
+	if data == nil {
+		return &c, nil
+	}
+	o, ps := config.RepoOverrides(rel, data)
+	if len(ps) > 0 {
+		return nil, fmt.Errorf("repository config %s: %w", where(sp), ps)
+	}
+	c.Overrides = o
+	return &c, nil
+}
+
 // CheckOverrides refuses change (with an *OverridesError) when its step
-// overrides, read where sp says the run starts from, are not allowed by
-// cfg: the same files the approval run gate judges. root is the
-// repository checkout, for reading a commit.
+// overrides are not allowed by the [overrides] allow-list, both read
+// where sp says the run starts from: the same files the approval run gate
+// judges. cfg supplies everything else, such as machine profiles. root is
+// the repository checkout, for reading a commit.
 func CheckOverrides(ctx context.Context, cfg *config.Config, root, change string, sp StartPoint) error {
+	scfg, err := startConfig(ctx, cfg, root, sp)
+	if err != nil {
+		return err
+	}
 	data, err := readSidecar(ctx, root, change, sp)
 	if err != nil {
 		return err
 	}
-	if _, ps := settings.Judge(cfg, data); len(ps) > 0 {
-		where := "in its worktree " + sp.Worktree
-		if sp.Worktree == "" {
-			where = "at " + sp.Ref + " (" + shortRev(sp.Rev) + ")"
-		}
-		return &OverridesError{Change: change, Where: where, Problems: ps}
+	if _, ps := settings.Judge(scfg, data); len(ps) > 0 {
+		return &OverridesError{Change: change, Where: where(sp), Problems: ps}
 	}
 	return nil
 }
@@ -95,11 +134,16 @@ func shortRev(rev string) string {
 // change's overrides, read now, over the config's step. It returns the
 // step to run and what to record, or a reason the step may not start.
 func (e *Engine) stepSettings(ctx context.Context, ws Workspace, change string, st config.Step) (config.Step, *history.Settings, string) {
-	data, err := readSidecar(ctx, e.Repo.Root, change, StartPoint{Worktree: ws.Path})
+	sp := StartPoint{Worktree: ws.Path}
+	cfg, err := startConfig(ctx, e.Config, e.Repo.Root, sp)
+	if err != nil {
+		return st, nil, "step " + st.ID + " not started: " + err.Error()
+	}
+	data, err := readSidecar(ctx, e.Repo.Root, change, sp)
 	if err != nil {
 		return st, nil, "reading the change's settings: " + err.Error()
 	}
-	sc, all := settings.Judge(e.Config, data)
+	sc, all := settings.Judge(cfg, data)
 	// Only what stops this step; the run's start judged the rest.
 	var ps []settings.Problem
 	for _, p := range all {
@@ -111,7 +155,7 @@ func (e *Engine) stepSettings(ctx context.Context, ws Workspace, change string, 
 		oe := &OverridesError{Change: change, Where: "in its worktree " + ws.Path, Problems: ps}
 		return st, nil, "step " + st.ID + " not started: " + oe.Error()
 	}
-	eff := settings.Resolve(e.Config, st, sc.Steps[st.ID])
+	eff := settings.Resolve(cfg, st, sc.Steps[st.ID])
 	run := eff.Apply(st)
 	if run.Permissions != "" {
 		// As for a repository step: only a profile this machine defines,
@@ -141,11 +185,16 @@ func (e *Engine) plannedAgent(ws Workspace, change, step string) string {
 	if !ok {
 		return ""
 	}
-	data, err := readSidecar(context.Background(), e.Repo.Root, change, StartPoint{Worktree: ws.Path})
+	sp := StartPoint{Worktree: ws.Path}
+	cfg, err := startConfig(context.Background(), e.Config, e.Repo.Root, sp)
 	if err != nil {
 		return st.Agent
 	}
-	sc, ps := settings.Judge(e.Config, data)
+	data, err := readSidecar(context.Background(), e.Repo.Root, change, sp)
+	if err != nil {
+		return st.Agent
+	}
+	sc, ps := settings.Judge(cfg, data)
 	if len(ps) > 0 {
 		return st.Agent
 	}

@@ -417,3 +417,29 @@ func resolveOverrides(r *file, add addFunc) *Overrides {
 	}
 	return o
 }
+
+// RepoOverrides reads the [overrides] allow-list from data, the contents
+// of a repository config file at path (as one checkout or commit has it),
+// for judging a change's overrides against that copy rather than the
+// loaded config's. It returns nil when the file has no [overrides] table.
+// Problems are reported only when the file cannot be decoded or the
+// table itself is invalid; the rest of the file is not judged here.
+func RepoOverrides(path string, data []byte) (*Overrides, Problems) {
+	f := parse(path, string(data), true)
+	if f.broken {
+		return nil, f.problems
+	}
+	var ps Problems
+	for _, p := range f.problems {
+		if p.Key == "overrides" || strings.HasPrefix(p.Key, "overrides.") {
+			ps = append(ps, p)
+		}
+	}
+	o := resolveOverrides(f, func(file, key, format string, args ...any) {
+		ps = append(ps, Problem{File: file, Key: key, Message: fmt.Sprintf(format, args...)})
+	})
+	if len(ps) > 0 {
+		return nil, ps
+	}
+	return o, nil
+}

@@ -96,3 +96,25 @@ func TestStarterOverridesExample(t *testing.T) {
 		t.Errorf("overrides: %+v", cfg.Overrides)
 	}
 }
+
+// RepoOverrides reads only the [overrides] table of a repository config
+// copy (a worktree's or a commit's): other keys, even unknown ones, are not
+// its business, but an undecodable file or an invalid table is refused.
+func TestRepoOverrides(t *testing.T) {
+	o, ps := RepoOverrides(".tuckerbox/config.toml", []byte("future_key = 1\n\n[overrides]\nagents = [\"codex\"]\nefforts = [\"high\"]\n\n[overrides.models]\ncodex = [\"gpt-5\"]\n"))
+	if len(ps) != 0 || o == nil || !slices.Equal(o.Agents, []string{"codex"}) || !slices.Equal(o.Efforts, []string{"high"}) || !slices.Equal(o.Models["codex"], []string{"gpt-5"}) {
+		t.Errorf("got %+v %v", o, ps)
+	}
+	if o, ps := RepoOverrides("c.toml", []byte("max_parallel = 2\n")); o != nil || len(ps) != 0 {
+		t.Errorf("no table: got %+v %v", o, ps)
+	}
+	if o, ps := RepoOverrides("c.toml", []byte("[overrides]\nagents = [\"codex\", \"codex\"]\n")); o != nil || len(ps) == 0 || !strings.Contains(ps.Error(), "listed twice") {
+		t.Errorf("invalid table: got %+v %v", o, ps)
+	}
+	if o, ps := RepoOverrides("c.toml", []byte("[overrides\n")); o != nil || len(ps) == 0 {
+		t.Errorf("broken file: got %+v %v", o, ps)
+	}
+	if o, ps := RepoOverrides("c.toml", []byte("[overrides]\nagents = \"codex\"\n")); o != nil || len(ps) == 0 {
+		t.Errorf("wrong type: got %+v %v", o, ps)
+	}
+}

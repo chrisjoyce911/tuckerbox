@@ -133,8 +133,12 @@ func TestProfileNotGrantedHere(t *testing.T) {
 
 // change-settings, scenario Allow-list narrowed later: changes set agent
 // codex while the repository allowed it; then the repository removes it.
-// run refuses before making a worktree, and resume and rerun refuse before
-// the run state changes, each naming the override.
+// The allow-list is read where each run starts from, as the run gate
+// judges, never from the invoking checkout: here the checkout still allows
+// codex (uncommitted), while the commit a new worktree would use and
+// fix-login's worktree do not. run refuses before making a worktree, and
+// resume and rerun refuse before the run state changes, each naming the
+// override.
 func TestAllowListNarrowedLater(t *testing.T) {
 	f := newCLI(t, testenv.RepoOptions{Changes: []string{"add-login", "fix-login"}, Extra: "\n[overrides]\nagents = [\"codex\"]\n"})
 	f.machineConfig(fakeCodex())
@@ -149,7 +153,17 @@ func TestAllowListNarrowedLater(t *testing.T) {
 	}
 	before := f.runOf("fix-login")
 
+	cfgPath := filepath.Join(f.repo, ".tuckerbox", "config.toml")
+	permissive := readFile(t, cfgPath)
 	f.setRepoConfig("agents = [\"codex\"]", "agents = [\"claude\"]")
+	narrowed := readFile(t, cfgPath)
+	// The checkout goes back to allowing codex, uncommitted; the worktree
+	// takes the narrowed config, as a merge of the base would bring it.
+	testenv.WriteFile(t, cfgPath, permissive)
+	testenv.WriteFile(t, filepath.Join(f.worktreeOf("fix-login"), ".tuckerbox", "config.toml"), narrowed)
+	if res := f.tb("check"); res.code != 0 {
+		t.Fatalf("the checkout's config should allow codex: exit %d: %s", res.code, res.stderr)
+	}
 	want := `steps.build.agent: agent "codex" is not allowed; allowed agents: claude`
 
 	f.refused(f.tb("run", "add-login"), want)
@@ -158,7 +172,8 @@ func TestAllowListNarrowedLater(t *testing.T) {
 
 	for _, args := range [][]string{
 		{"resume", "fix-login"}, {"resume", "--foreground", "fix-login"},
-		{"rerun", "fix-login", "build"}, {"run", "fix-login"},
+		{"rerun", "fix-login", "build"}, {"rerun", "--foreground", "fix-login", "build"},
+		{"run", "fix-login"}, {"run", "--foreground", "fix-login"},
 	} {
 		f.refused(f.tb(args...), want)
 	}
