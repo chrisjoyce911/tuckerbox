@@ -92,8 +92,8 @@ Repositories are matched by normalised remote URL: scheme, `.git` and the `user@
 | Resume | `tuckerbox resume <id>` |
 | Re-run step | `tuckerbox rerun <id> <step>` |
 | Follow log | `run("tab.new", …)` with `tuckerbox logs <id> <step> --follow`, on the card's machine |
-| Open proposal | `pane.split` with a markdown viewer |
-| Open worktree | Herdr's built-in `worktree` mod with `action: "open"` |
+| Open proposal | `pane.split` with the board mod's proposal view, read through `tuckerbox board --json --change` |
+| Open worktree | `space.select` of the space already in the worktree, else `space.new` there on the card's machine (what the built-in `worktree` mod's Open does, without its picker) |
 
 ### Edits go through `tuckerbox edit`, not straight to the editor
 The board could open `$EDITOR` in a pane itself. Instead the pane runs `tuckerbox edit <id> <file>`, which starts the editor as its child. That gives three things:
@@ -159,7 +159,7 @@ It defaults to `true`, and only the repository config may set it. A machine that
 `add-core-runner` must be archived first, as already planned.
 
 ### Where the mod lives
-The mod lives at `herdr/mods/tuckerbox-board/` in this repo, and its version matches the binary. `tuckerbox herdr install` copies it into `~/.config/herdr-app/mods/` and runs `herdr-app check`. `tuckerbox doctor` warns when the installed mod is older than the binary.
+The mod lives at `herdr/mods/tuckerbox-board/` in this repo, and its version matches the binary. `tuckerbox herdr install` copies it into `~/.config/herdr-app/mods/` and runs `herdr-app check`. `tuckerbox doctor` warns when the installed mod is not the one the binary ships (older, or changed by hand), by a digest `tuckerbox herdr install` records in the mod's `version.json`.
 
 ## Risks / Trade-offs
 

@@ -14,11 +14,23 @@ stores no task state, writes no files and never moves a card by itself
 | `card.js` | Card detail: proposal (markdown), tasks with tick boxes, approval, last validation, dependencies, rounds with findings, history (newest first, local time), actions |
 | `model.js` | Data rules with no Herdr imports: reading the document, grouping, counts, times, polling |
 | `actions.js` | Which actions each state offers, and `commandLine()`, the one function that builds every tuckerbox command line |
-| `perform.js` | Runs an action. Not wired yet (add-herdr-board 6.4 to 6.6): it shows the command it would run |
+| `perform.js` | Runs an action: `exec` of the tuckerbox command on the card's machine, or the Herdr tab, pane or view for it. With the fixtures it only says what it would run |
+| `edits.js` | Edit tracking: notes the editor's pane, validates when it closes, keeps the result in memory |
+| `proposal.js` | `view: "proposal"`: a change's proposal in a pane (Open proposal) |
 | `data.js` | Runs `tuckerbox board --json` on the space's machine, or reads the fixtures |
 | `ui.js` | Buttons, chips and badges, in theme colors |
 | `fixtures/` | `board.json` and `detail.json`: the board-data contract, by example |
 | `test/` | `node --test test/` (no dependencies), and `check-fixtures.mjs` |
+
+## Installing
+
+`tuckerbox herdr install` copies this folder (without `test/` and
+`package.json`) into the Herdr app's `mods/tuckerbox-board`, after
+`herdr-app check` passes on a staged copy, and writes `version.json` there:
+the binary's version, commit and a digest of the files. Herdr's home is
+`$HERDR_APP_HOME`, else `~/.config/herdr-app`; without it nothing is
+written. `tuckerbox doctor` says whether the installed copy is the one the
+binary ships, by that digest.
 
 ## Trying it
 
@@ -131,7 +143,22 @@ of `started`, `queued`, `step_started`, `step_finished`, `handoff`,
 ## Actions
 
 Every button calls `invocation()` in `actions.js`, which calls
-`commandLine()`. Until 6.4 to 6.6 wire them, `perform.js` shows the command.
+`commandLine()`; `perform.js` runs it. A command's error is shown as it is
+(stderr first); on success its output is shown, so approve's and tick's
+"not committed" note reaches the person. After a success every board copy
+reads again at once: cards move only when tuckerbox says so.
+
+Tabs and panes open on the shown space's machine when it is the card's
+(`tab.new` in that space, `terminal.open` to the right of the focused pane),
+else as a new space on the card's machine, since Herdr keeps tabs and splits
+on their space's machine.
+
+**Edit and validate:** Herdr's `run()` returns no ids, so the board notes
+the panes before opening the editor and takes the first new terminal pane
+within 6 s as the editor's. When it goes, the board runs `tuckerbox validate
+<id> --json` and shows the result on the card and in its detail, in memory
+only. If no pane appears, the card says it wasn't validated since the edit
+and the detail offers Validate.
 
 | Action | Offered | Command |
 |---|---|---|
@@ -145,8 +172,8 @@ Every button calls `invocation()` in `actions.js`, which calls
 | Edit | no queued or running run (a Herdr pane) | `tuckerbox edit <id> proposal\|design\|model\|tasks\|spec:<capability>` |
 | Validate | after an edit, if the pane's close can't be seen | `tuckerbox validate <id> --json` |
 | Tick, Untick | no queued or running run | `tuckerbox tasks <id> tick\|untick <n.m>` |
-| Open proposal | the card has an `edit_folder` | Herdr pane, no command |
-| Open worktree | the card has a `worktree` | Herdr's `worktree` mod, no command |
+| Open proposal | the card has an `edit_folder` | A pane with this mod's proposal view, read through `tuckerbox board --json --change` |
+| Open worktree | the card has a `worktree` | `space.select` of a space already there, else `space.new` in the worktree on the card's machine |
 | tuckerbox init | the folder isn't a Tuckerbox repository | `tuckerbox init` |
 
 Commands run with `exec` on the card's Herdr machine, in the document's
