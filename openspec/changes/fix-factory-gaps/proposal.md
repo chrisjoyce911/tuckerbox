@@ -46,6 +46,12 @@ Four gaps showed up on 2026-11-12 while autopilot ran this repository:
   conflict is left, pushes with the lease and waits for CI again. Each such
   round counts against `[shipping] max_rounds`. It blocks with
   `merge conflict` (needs you) when the fixer can't resolve it.
+- **No agent waits on the owner.** Tasks only a person can do are marked
+  `(owner)`. Autopilot does not start a step when only owner tasks (and
+  `(ci)`/`(ship)` tasks) are left: the run is blocked with `owner tasks:
+  <numbers>` and the card says what is needed. Autopilot also no longer
+  restarts a run that blocked or failed when nothing has changed since
+  (seen 2026-11-13: an agent waited three hours on hand checks).
 - **CI never cancels runs on `main`.** Pushes to the default branch get a
   concurrency group per commit; pull requests keep cancelling superseded
   runs.
@@ -61,6 +67,9 @@ Four gaps showed up on 2026-11-12 while autopilot ran this repository:
 - `ship-conflicts`: detecting and resolving merge conflicts while
   shipping. Narrows `forge-shipping`'s `Branch behind the base` (in
   `add-forge-shipping`, not archived).
+
+- `owner-tasks`: the `(owner)` task marker, no runs for owner tasks only,
+  no restart of an unchanged block.
 
 ### Modified Capabilities
 
