@@ -11,16 +11,19 @@ import (
 const Version = 1
 
 type Document struct {
-	Ship            string   `json:"ship"`
-	Version         int      `json:"version"`
-	Repo            string   `json:"repo"`
-	Path            string   `json:"path"`
-	Machine         string   `json:"machine"`
-	RequireApproval bool     `json:"require_approval"`
-	Steps           []string `json:"steps"`
-	Columns         []Column `json:"columns"`
-	Cards           []Card   `json:"cards"`
-	Detail          *Detail  `json:"detail,omitempty"`
+	Ship            string `json:"ship"`
+	Version         int    `json:"version"`
+	Repo            string `json:"repo"`
+	Path            string `json:"path"`
+	Machine         string `json:"machine"`
+	RequireApproval bool   `json:"require_approval"`
+	// Autopilot says whether tuckerbox autopilot runs for the repository
+	// on this machine (add-autopilot).
+	Autopilot Autopilot `json:"autopilot"`
+	Steps     []string  `json:"steps"`
+	Columns   []Column  `json:"columns"`
+	Cards     []Card    `json:"cards"`
+	Detail    *Detail   `json:"detail,omitempty"`
 }
 type Column struct {
 	ID   string `json:"id"`
@@ -77,6 +80,16 @@ type Card struct {
 	Position int    `json:"position,omitempty"`
 	// Scope is the card's run's task scope; absent for the whole change.
 	Scope *scope.Scope `json:"scope,omitempty"`
+	// NeedsYou says why the card needs a person; absent when it doesn't.
+	NeedsYou string `json:"needs_you,omitempty"`
+}
+
+// Autopilot is tuckerbox autopilot for the board's repository on this
+// machine: running only while its lock is held.
+type Autopilot struct {
+	Running bool   `json:"running"`
+	Pid     int    `json:"pid,omitempty"`
+	Started string `json:"started,omitempty"`
 }
 type Detail struct {
 	Change   string  `json:"change"`

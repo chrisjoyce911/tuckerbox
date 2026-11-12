@@ -224,3 +224,20 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 		time.Sleep(50 * time.Millisecond)
 	}
 }
+
+// Passes take changes in admission order (add-priority): a ranked change
+// comes before unranked ones, and lends its rank to what it depends on.
+func TestAutopilotAdmissionOrder(t *testing.T) {
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"a", "b", "c", "d"}, MaxParallel: 4, RequireApproval: true})
+	testenv.WriteFile(t, filepath.Join(f.changeDir("d"), "tuckerbox.toml"), "priority = 1000\n")
+	testenv.WriteFile(t, filepath.Join(f.changeDir("c"), "tuckerbox.toml"), "priority = 2000\ndepends_on = [\"b\"]\n")
+	f.commit("priorities")
+	f.approveAll("a", "b", "c", "d")
+	res := f.pass("--dry-run")
+	// d (1000), then b (inherits 2000 from c; c waits on b, so it isn't
+	// startable), then a.
+	want := "would start d --tasks next\nwould start b --tasks next\nwould start a --tasks next\n"
+	if res.stdout != want {
+		t.Errorf("order:\n%s\nwant:\n%s", res.stdout, want)
+	}
+}

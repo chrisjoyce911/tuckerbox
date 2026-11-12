@@ -7,47 +7,19 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"time"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/approval"
 	"github.com/chrisjoyce911/tuckerbox/internal/autopilot"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/history"
+	"github.com/chrisjoyce911/tuckerbox/internal/priority"
 	"github.com/chrisjoyce911/tuckerbox/internal/runs"
 )
 
 // autopilotWatch is how often autopilot reads the repository's run states
 // to notice a run ending between full passes.
 var autopilotWatch = 5 * time.Second
-
-// AutopilotMarker is autopilot.json: who holds autopilot.lock. It counts
-// only while that lock is held.
-type AutopilotMarker struct {
-	Pid     int       `json:"pid"`
-	Machine string    `json:"machine"`
-	Started time.Time `json:"started"`
-}
-
-// AutopilotFiles are the lock and marker of a repository's autopilot, in
-// the shared tuckerbox folder of its git common directory.
-func AutopilotFiles(common string) (lock, marker string) {
-	return filepath.Join(common, "autopilot.lock"), filepath.Join(common, "autopilot.json")
-}
-
-// ReadAutopilot returns the running autopilot of the repository whose
-// tuckerbox folder is common, or nil when none holds the lock.
-func ReadAutopilot(common string) *AutopilotMarker {
-	lock, marker := AutopilotFiles(common)
-	if !runs.Active(lock) {
-		return nil
-	}
-	m := &AutopilotMarker{}
-	if data, err := os.ReadFile(marker); err == nil {
-		_ = json.Unmarshal(data, m)
-	}
-	return m
-}
 
 // autopilot: tuckerbox autopilot [--once] [--dry-run]
 func (a App) autopilot(args []string) int {
@@ -68,10 +40,10 @@ func (a App) autopilot(args []string) int {
 	if !cfg.RequireApproval {
 		return a.errf("autopilot", "autopilot needs approval to be required, and this repository sets require_approval = false; approval is the one gate it keeps")
 	}
-	lockPath, markerPath := AutopilotFiles(repo.Common)
+	lockPath, markerPath := autopilot.Files(repo.Common)
 	lock, err := runs.TryChangeLock(lockPath)
 	if errors.Is(err, runs.ErrLocked) {
-		m := ReadAutopilot(repo.Common)
+		m := autopilot.ReadMarker(repo.Common)
 		if m != nil && m.Pid > 0 {
 			return a.errf("autopilot", "autopilot is already running for this repository (pid %d on %s, since %s)", m.Pid, m.Machine, displayTime(m.Started))
 		}
@@ -81,7 +53,7 @@ func (a App) autopilot(args []string) int {
 		return a.errf("autopilot", "%v", err)
 	}
 	defer lock.Release()
-	data, _ := json.Marshal(AutopilotMarker{Pid: os.Getpid(), Machine: history.Machine(), Started: time.Now()})
+	data, _ := json.Marshal(autopilot.Marker{Pid: os.Getpid(), Machine: history.Machine(), Started: time.Now()})
 	if err := os.WriteFile(markerPath, data, 0o644); err != nil {
 		return a.errf("autopilot", "%v", err)
 	}
@@ -111,9 +83,16 @@ func (a App) autopilot(args []string) int {
 		Start: func(_ context.Context, req autopilot.Request) error {
 			return a.spawnQuiet(repo.Root, req.Args())
 		},
+		Order: func(_ context.Context, ids []string) ([]string, error) {
+			return admissionOrder(repo, ids)
+		},
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), stopSignals...)
 	defer stop()
+	// prev is the run states before the last pass, or as last seen, so a
+	// run the pass started that ends before the next read still counts as
+	// ending.
+	prev := runStates(ctx, repo)
 	if _, err := p.Pass(ctx); err != nil {
 		fmt.Fprintf(a.Stderr, "tuckerbox autopilot: %v\n", err)
 		if once {
@@ -125,8 +104,12 @@ func (a App) autopilot(args []string) int {
 	}
 	fmt.Fprintf(a.Stdout, "autopilot: watching %s (a pass every %s; Ctrl-C stops autopilot, not the runs)\n", repo.Root, cfg.Autopilot.Interval)
 	last := time.Now()
-	busy := busySet(ctx, repo)
-	t := time.NewTicker(autopilotWatch)
+	watch := autopilotWatch
+	// Tests read faster; nothing else sets this.
+	if d, err := time.ParseDuration(os.Getenv("TUCKERBOX_TEST_AUTOPILOT_WATCH")); err == nil && d > 0 {
+		watch = d
+	}
+	t := time.NewTicker(watch)
 	defer t.Stop()
 	for {
 		select {
@@ -135,33 +118,38 @@ func (a App) autopilot(args []string) int {
 			return 0
 		case <-t.C:
 		}
-		now := busySet(ctx, repo)
+		now := runStates(ctx, repo)
 		ended := false
-		for id := range busy {
-			if !now[id] {
+		for id, st := range now {
+			if old, ok := prev[id]; (!ok || old.state != st.state || !old.since.Equal(st.since)) && !st.busy {
 				ended = true
 			}
 		}
-		busy = now
 		if !ended && time.Since(last) < cfg.Autopilot.Interval {
+			prev = now
 			continue
 		}
 		last = time.Now()
+		prev = now
 		if _, err := p.Pass(ctx); err != nil && ctx.Err() == nil {
 			fmt.Fprintf(a.Stderr, "tuckerbox autopilot: %v\n", err)
 		}
-		busy = busySet(ctx, repo)
 	}
 }
 
-// busySet is the changes whose runs are queued or running now.
-func busySet(ctx context.Context, repo runs.Repo) map[string]bool {
-	out := map[string]bool{}
+// runState is what autopilot's watch compares between reads.
+type runState struct {
+	state runs.State
+	since time.Time
+	busy  bool
+}
+
+// runStates reads the repository's run states on this machine.
+func runStates(ctx context.Context, repo runs.Repo) map[string]runState {
+	out := map[string]runState{}
 	local, _ := runs.LocalRuns(ctx, repo)
 	for id, l := range local {
-		if l.Busy() {
-			out[id] = true
-		}
+		out[id] = runState{state: l.Run.State, since: l.Run.Since, busy: l.Busy()}
 	}
 	return out
 }
@@ -202,4 +190,28 @@ func approvalAt(ctx context.Context, repo runs.Repo, cfg *config.Config, change,
 	}
 	st, err := approval.JudgeWith(rev, entry)
 	return st.State, sp.Rev, err
+}
+
+// admissionOrder puts ids in add-priority's admission order (priority,
+// inherited from dependents, then id), read under the sidecar lock as the
+// slot queue reads it.
+func admissionOrder(repo runs.Repo, ids []string) ([]string, error) {
+	reqs := make([]priority.Request, len(ids))
+	for i, id := range ids {
+		reqs[i] = priority.Request{ID: id}
+	}
+	var all []priority.Change
+	err := runs.WithSidecarLock(repo.Common, func() error {
+		var err error
+		all, err = priority.Load(repo.Root)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(ids))
+	for _, r := range priority.Admission(reqs, all) {
+		out = append(out, r.ID)
+	}
+	return out, nil
 }
