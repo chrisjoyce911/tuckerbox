@@ -458,9 +458,23 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 		})
 		switch {
 		case ctx.Err() != nil:
+			// Stopped before the agent was adopted: it still works in its
+			// terminal. End it, and know it is gone, before recording
+			// stopped; one that would not end leaves the run as found.
+			if s != nil {
+				s.Release()
+			}
+			ectx, ecancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			err := adopt.Backend.EndAgent(ectx, adopt.Name)
+			ecancel()
+			if err != nil {
+				return e.unwatched(ws, rs, &agent.EndError{Name: adopt.Name, Err: err})
+			}
 			return e.finish(ws, rs, Stopped, stopReason(stopReq, "while taking its slot back"))
 		case err != nil:
-			return e.finish(ws, rs, Failed, "taking slot "+strconv.Itoa(n)+" back: "+err.Error())
+			// The agent may still work in its terminal: keep its name and
+			// slot so that stop and resume find it.
+			return e.unwatched(ws, rs, &agent.EndError{Name: adopt.Name, Err: fmt.Errorf("taking slot %d back: %w", n, err)})
 		case s == nil:
 			// The agent ended before its slot was free: a new round, admitted
 			// as any other run.

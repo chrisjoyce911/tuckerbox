@@ -28,6 +28,8 @@
 //	             says it ended the terminal but leaves it live
 //	run-delay    a Go duration: run waits that long after its terminal has
 //	             started, before it answers
+//	run-reply    "garbage": run starts its terminal, then answers with
+//	             text that is not JSON
 package main
 
 import (
@@ -280,6 +282,10 @@ func run(args []string) {
 	writeRecord(r)
 	if d, err := time.ParseDuration(fault("run-delay")); err == nil {
 		time.Sleep(d)
+	}
+	if fault("run-reply") == "garbage" {
+		fmt.Println("started, probably")
+		return
 	}
 	data, _ := json.Marshal(map[string]any{"address": r.Address, "name": r.Name, "cwd": r.Cwd, "state": "live"})
 	fmt.Println(string(data))

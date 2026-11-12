@@ -669,3 +669,74 @@ func TestTerminalNamedBeforeStart(t *testing.T) {
 		t.Errorf("OnTerminal calls %+v, want the name before hc run, then the address", got)
 	}
 }
+
+// Stopped after herdr-core launched the terminal but before hc run
+// answered: the error from hc run does not mean no agent started. Run
+// finds the terminal with its own context and ends it before it reports
+// stopped; when it will not end, Run gives an *EndError so the run keeps
+// what finds the agent again.
+func TestStopWhileTheTerminalStarts(t *testing.T) {
+	for _, mode := range []string{"", "fail"} {
+		t.Run("kill="+mode, func(t *testing.T) {
+			f := newTermFixture(t)
+			f.env.SetPlan(t, map[string]testenv.Action{"build": {WaitFor: filepath.Join(f.env.Home, "never")}})
+			f.setFault("run-delay", "3s")
+			s := f.step("build", "builder", 1, interactiveFake())
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			opts := termOpts
+			opts.EndTimeout = 2 * time.Second
+			opts.OnTerminal = func(_, addr string) {
+				if addr != "" {
+					return
+				}
+				go func() {
+					// Cancel once hc run has launched the terminal and
+					// sleeps before its answer.
+					for f.get(s.Term.Name) == nil {
+						time.Sleep(20 * time.Millisecond)
+					}
+					f.setFault("kill-mode", mode)
+					cancel()
+				}()
+			}
+			o, err := f.be.Run(ctx, s, opts)
+			defer func() {
+				f.setFault("kill-mode", "")
+				_ = f.hc.End(context.Background(), s.Term.Name, 10*time.Second)
+			}()
+			if mode == "fail" {
+				var ee *EndError
+				if !errors.As(err, &ee) || ee.Name != s.Term.Name {
+					t.Fatalf("Run returned %v, want an *EndError for %s", err, s.Term.Name)
+				}
+				if !f.get(s.Term.Name).Live() {
+					t.Fatal("the fault did not keep the terminal live")
+				}
+				return
+			}
+			if err != nil || !o.Stopped {
+				t.Fatalf("Run returned stopped=%v, %v; want stopped", o.Stopped, err)
+			}
+			if term := f.get(s.Term.Name); term == nil || term.Live() {
+				t.Fatalf("terminal after stop: %+v; want it started and ended", term)
+			}
+		})
+	}
+}
+
+// hc run launched the terminal but its answer could not be read: Run finds
+// the terminal and watches it as if hc run had answered.
+func TestStartWithAnUnreadableAnswer(t *testing.T) {
+	f := newTermFixture(t)
+	f.env.SetPlan(t, map[string]testenv.Action{"build": {ExitAfter: true}})
+	f.setFault("run-reply", "garbage")
+	s := f.step("build", "builder", 1, interactiveFake())
+	o := f.run(s, termOpts)
+	if o.Result == nil || o.Result.Status != Done {
+		t.Fatalf("outcome %+v; want the agent's result", o)
+	}
+	if len(f.runCalls()) != 1 {
+		t.Errorf("hc run calls: %d, want 1", len(f.runCalls()))
+	}
+}

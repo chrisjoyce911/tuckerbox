@@ -263,9 +263,20 @@ func (t Terminal) Run(ctx context.Context, s Step, opts Options) (Outcome, error
 		logLine(log, "step %s round %d started in terminal %s: %s", s.Step, s.Round, name, strings.Join(quoteArgs(argv), " "))
 		term, err := t.HC.Start(ctx, start)
 		if err != nil {
-			logLine(log, "step %s round %d: terminal did not start: %v", s.Step, s.Round, err)
-			o.ExitCode = -1
-			return o, fmt.Errorf("step %s: starting agent %s in terminal %s: %w", s.Step, s.Agent.Name, name, err)
+			got, rerr := t.reconcileStart(ctx, s, opts, log, err)
+			switch {
+			case rerr != nil:
+				o.ExitCode = -1
+				return o, fmt.Errorf("step %s: %w", s.Step, rerr)
+			case got == nil && ctx.Err() != nil:
+				o.Stopped, o.ExitCode = true, -1
+				logLine(log, "step %s round %d: stopped while its terminal was starting; no agent is left", s.Step, s.Round)
+				return o, nil
+			case got == nil:
+				o.ExitCode = -1
+				return o, fmt.Errorf("step %s: starting agent %s in terminal %s: %w", s.Step, s.Agent.Name, name, err)
+			}
+			term = *got
 		}
 		addr = term.Address
 	}
@@ -377,6 +388,59 @@ loop:
 		o.Tail, _ = TailLog(o.LogPath, opts.TailBytes)
 	}
 	return o, nil
+}
+
+// startSettle is how long reconcileStart keeps looking for a terminal an
+// unanswered hc run may still be starting.
+const startSettle = 1500 * time.Millisecond
+
+// reconcileStart decides what an hc run that gave startErr left behind: an
+// error does not prove that no terminal started (the run was cancelled
+// after herdr-core launched it, or its answer was lost or unreadable). It
+// looks with its own context, since ctx may be cancelled.
+//
+// It returns the terminal to watch when this start's terminal exists and
+// the run goes on (ctx is live); nil when no terminal of this start is
+// live, ending it first when ctx is cancelled; and an *EndError when it
+// cannot tell or the terminal would not end, so the run keeps the name
+// and slot that find the agent again.
+func (t Terminal) reconcileStart(ctx context.Context, s Step, opts Options, log io.Writer, startErr error) (*HCTerminal, error) {
+	name := s.Term.Name
+	logLine(log, "step %s round %d: hc run gave an error: %v; checking whether terminal %s started", s.Step, s.Round, startErr, name)
+	bg, cancel := context.WithTimeout(context.Background(), opts.EndTimeout+startSettle+10*time.Second)
+	defer cancel()
+	// herdr-core answered with an error of its own: it refused the start.
+	// Otherwise the start may still be on its way: look for a while.
+	var he *HCError
+	definite := errors.As(startErr, &he) && he.Kind != "" && ctx.Err() == nil
+	deadline := time.Now().Add(startSettle)
+	for {
+		cur, err := t.HC.Get(bg, name)
+		if err != nil {
+			logLine(log, "step %s round %d: cannot tell whether terminal %s started: %v", s.Step, s.Round, name, err)
+			return nil, &EndError{Name: name, Err: fmt.Errorf("starting it gave %v, and looking for it gave %w", startErr, err)}
+		}
+		mine := cur != nil && MatchesStep(cur, s.Change, s.Step, s.Round) && cur.Labels[LabelRun] == s.Term.RunID
+		if mine && ctx.Err() == nil {
+			logLine(log, "step %s round %d: terminal %s did start (%s); watching it", s.Step, s.Round, name, cur.Address)
+			return cur, nil
+		}
+		if cur.Live() {
+			// Stopped while starting (or some other live terminal, which
+			// under the change lock cannot be another run's): end it and
+			// make sure it is gone before the run records anything.
+			logLine(log, "step %s round %d: ending terminal %s, which started as the run stopped", s.Step, s.Round, name)
+			if err := t.HC.End(bg, name, opts.EndTimeout); err != nil {
+				return nil, &EndError{Name: name, Err: err}
+			}
+			return nil, nil
+		}
+		if mine || definite || time.Now().After(deadline) {
+			logLine(log, "step %s round %d: terminal did not start: %v", s.Step, s.Round, startErr)
+			return nil, nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // prepare writes a new terminal's brief and clears the round's leftover

@@ -789,6 +789,89 @@ func TestCrashWhileAdoptionTakesTheSlot(t *testing.T) {
 	}
 }
 
+// Stop while a resume waits to take its adopted agent's slot back (another
+// process holds slot 0's run lock): the resume ends the agent's terminal,
+// and knows it is gone, before it records stopped. When the terminal will
+// not end, nothing is recorded stopped and the run keeps its terminal and
+// slot, so a later stop ends the agent.
+func TestStopWhileAdoptionTakesTheSlot(t *testing.T) {
+	for _, mode := range []string{"", "fail"} {
+		t.Run("kill="+mode, func(t *testing.T) {
+			f := newTermCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}, MaxParallel: 1})
+			f.plan(map[string]testenv.Action{"build": {WaitFor: f.gate("never")}})
+			f.start("add-login")
+			f.waitAgent("add-login", "build")
+			name := f.runOf("add-login").Terminal.Name
+			f.kill("add-login")
+
+			admission := flock.New(runs.SlotLock(f.common(), 0))
+			if ok, err := admission.TryLock(); !ok || err != nil {
+				t.Fatalf("slot 0's run lock: %v %v", ok, err)
+			}
+			defer admission.Unlock()
+			if res := f.tb("resume", "add-login"); res.code != 0 {
+				t.Fatalf("resume: %s%s", res.stdout, res.stderr)
+			}
+			waitFor(t, "the adopting resume to wait for its slot", func() bool {
+				return runs.Active(mustState(t, f.worktreeOf("add-login")).RunLock()) && f.runOf("add-login").State == runs.Queued
+			})
+
+			stopsBefore := f.stoppedEvents("add-login")
+			f.fault("kill-mode", mode)
+			res := f.tb("stop", "add-login")
+			term, _ := f.hc().Get(context.Background(), name)
+			r := f.runOf("add-login")
+			if mode == "fail" {
+				if res.code == 0 {
+					t.Errorf("stop with a failing hc kill: exit 0\n%s", res.stdout)
+				}
+				if r.State == runs.Stopped || r.Terminal == nil || r.Terminal.Name != name || r.Slot == nil || *r.Slot != 0 {
+					t.Errorf("run after the failed stop: %s terminal %+v slot %v", r.State, r.Terminal, r.Slot)
+				}
+				if !term.Live() {
+					t.Fatal("the fault did not keep the terminal live")
+				}
+				if n := f.stoppedEvents("add-login"); n != stopsBefore {
+					t.Errorf("stopped recorded while the agent lives (%d stopped events, %d before)", n, stopsBefore)
+				}
+				f.fault("kill-mode", "")
+				if res := f.tb("stop", "add-login"); res.code != 0 {
+					t.Fatalf("second stop: exit %d\n%s%s", res.code, res.stdout, res.stderr)
+				}
+				term, _ = f.hc().Get(context.Background(), name)
+				r = f.runOf("add-login")
+			} else if res.code != 0 {
+				t.Errorf("stop: exit %d\n%s%s", res.code, res.stdout, res.stderr)
+			}
+			if r.State != runs.Stopped || r.Terminal != nil {
+				t.Errorf("run %s %q terminal %+v", r.State, r.Reason, r.Terminal)
+			}
+			if term.Live() {
+				t.Error("the agent's terminal is still live after stop")
+			}
+			if n := f.liveTerminals(); n != 0 {
+				t.Errorf("%d live terminals", n)
+			}
+		})
+	}
+}
+
+// stoppedEvents counts the change's stopped history events.
+func (f *cliFixture) stoppedEvents(id string) int {
+	f.t.Helper()
+	events, err := history.Read(history.File(mustState(f.t, f.worktreeOf(id))))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	n := 0
+	for _, e := range events {
+		if e.Kind == history.Stopped {
+			n++
+		}
+	}
+	return n
+}
+
 // Stop when the run process cannot end its agent's terminal (hc kill
 // fails): nothing is recorded stopped, the run keeps its terminal and
 // slot, and a later stop, once hc works, ends the agent.
