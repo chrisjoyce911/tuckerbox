@@ -53,6 +53,8 @@ export function normaliseCard(c, src = {}) {
     edit_folder: str(c?.edit_folder),
     depends_on: list(c?.depends_on).map((d) => ({ change: str(d?.change), column: str(d?.column) })),
     archived: str(c?.archived),
+    priority: Number.isInteger(c?.priority) && c.priority > 0 ? c.priority : null,
+    position: Number.isInteger(c?.position) && c.position > 0 ? c.position : 0,
     // The run's task scope (add-task-scope), or null for the whole change.
     scope: c?.scope && str(c.scope.spec) ? { spec: str(c.scope.spec), tasks: list(c.scope.tasks).map(str) } : null,
     on: src.on ?? null,
@@ -131,7 +133,81 @@ export function group(board) {
     }
     col.cards.push(card);
   }
+  // Sorted columns list their cards in priority order: by position, cards
+  // without one after them in board order (a merged card from another
+  // machine may land in a column it wasn't sorted in).
+  for (const col of cols) {
+    if (!sortedColumn(col.id)) continue;
+    col.cards = col.cards
+      .map((c, i) => ({ c, i }))
+      .sort((a, b) => (a.c.position || Infinity) - (b.c.position || Infinity) || a.i - b.i)
+      .map((x) => x.c);
+  }
   return cols;
+}
+
+// Columns listed in priority order, where a card can be dragged to reorder
+// it (change-priority: Priority on the board, Drag to reorder). Ready and
+// Done keep their order, and cards never move between columns.
+export function sortedColumn(id) {
+  return ["proposed", "approved", "in_progress", "queued"].includes(id) || String(id ?? "").startsWith("step:");
+}
+
+// The position `tuckerbox priority <change> <n>` gets when `dragged` is
+// dropped over `over` in its column's list `cards` (in board order).
+// `below` is true when the drop is on the lower half of `over`: below it
+// means above the next card, or below the column's last card. Dropping
+// above card B: B's position if the card came from below B, else one less.
+// Below the last card L: L's position if the card came from above L, else
+// one more. Null when the drop can't reorder (another column, an unsorted
+// column, no positions, or no move). A drop on the dragged card itself, on
+// either half, is no move.
+export function dropPosition(cards, dragged, over, below = false) {
+  if (dragged === over) return null;
+  const list = Array.isArray(cards) ? cards : [];
+  const d = list.find((c) => c.change === dragged);
+  let i = list.findIndex((c) => c.change === over);
+  if (!d || i < 0 || !sortedColumn(d.column) || !d.position) return null;
+  if (below) i += 1;
+  let n;
+  if (i >= list.length) {
+    const last = list[list.length - 1];
+    if (!last.position) return null;
+    n = d.position < last.position ? last.position : last.position + 1;
+  } else {
+    const b = list[i];
+    if (!b.position) return null;
+    n = d.position > b.position ? b.position : b.position - 1;
+  }
+  return n === d.position || n < 1 ? null : n;
+}
+
+// The window rectangle of the element a mouse event is over: its window
+// position less the position within the element, and the element's size.
+export function eventBox(e) {
+  const p = e?.position, l = e?.local_position;
+  if (!p || !l) return null;
+  return { x: p.x - l.x, y: p.y - l.y, w: e.bounds?.width ?? 0, h: e.bounds?.height ?? 0 };
+}
+
+// Whether a window point is inside a rectangle from eventBox.
+export function inBox(box, point) {
+  if (!box || !point) return false;
+  return point.x >= box.x && point.x <= box.x + box.w && point.y >= box.y && point.y <= box.y + box.h;
+}
+
+// The drop target still in force with the pointer at `point`: the target
+// only while the pointer is over its card, else none. A release elsewhere
+// (outside the card, another column, off the board) cancels the drag.
+export function liveDrop(drop, point) {
+  return drop && inBox(drop.box, point) ? drop : null;
+}
+
+// The card a reorder runs for: `tuckerbox priority` writes the checkout on
+// the board's machine (change-priority: Drag to reorder), so it runs there
+// whatever machine the card's run is on.
+export function priorityCard(card, board) {
+  return { ...card, on: board?.on ?? null, path: board?.path ?? "" };
 }
 
 export function counts(board) {
@@ -439,7 +515,10 @@ function weight(card) {
 // machine's cards merged in by change id. `others` holds { machine, board }
 // with a normalised board or { error }. A machine without a checkout of the
 // repository (repo_not_found) adds nothing; any other failure names the
-// machine in `unreachable` and hides no card.
+// machine in `unreachable` and hides no card. Priority and position are the
+// board machine's: they come from its checkout and its priority order, so a
+// card taken from another machine keeps the own copy's, and a card only
+// another machine has gets none (it can't be dragged).
 export function mergeBoards(own, others = []) {
   if (!own || own.error) return own;
   const cards = own.cards.slice();
@@ -454,8 +533,9 @@ export function mergeBoards(own, others = []) {
     }
     if (b.repo !== own.repo) continue;
     for (const c of b.cards) {
-      const card = { ...c, column: fitColumn(c, own.columns) };
-      const i = at.get(card.change);
+      const i = at.get(c.change);
+      const mine = i === undefined ? null : own.cards[i] ?? null;
+      const card = { ...c, column: fitColumn(c, own.columns), priority: mine?.priority ?? null, position: mine?.position ?? 0 };
       if (i === undefined) { at.set(card.change, cards.length); cards.push(card); }
       else if (weight(card) > weight(cards[i])) cards[i] = card;
     }

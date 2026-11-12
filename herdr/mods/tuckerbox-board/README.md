@@ -139,6 +139,11 @@ config in this space" and offers no command (herdr-board: Space without a
 Tuckerbox config). Other codes are shown as they are.
 The command still exits non-zero with an error document.
 
+Proposed, Approved, In progress, and in the steps layout Queued and each
+step column, list their cards in priority order; Ready and Done keep their
+order (change-priority: Priority on the board). The mod groups cards in the
+document's order, so it sorts nothing itself.
+
 Default `[board] columns = "compact"` shows Proposed, Approved (when required),
 In progress, Ready, Done. In progress combines queued runs and every workflow
 step, including stopped, blocked and failed runs. `columns = "steps"` shows
@@ -175,6 +180,8 @@ machine default. `board.json` demonstrates steps; `detail.json` demonstrates com
 | `machine` | string | The machine the run is on (this one, for a card without a run) |
 | `edit_folder` | string | Where `tuckerbox edit` would edit: the worktree if there is one, else the checkout. Open proposal reads `<edit_folder>/openspec/changes/<change>/proposal.md` |
 | `depends_on` | list | `[{ "change", "column" }]`: each dependency with the column id it is in (`done` when archived, `""` when unknown) |
+| `priority` | number or null | The change's `priority` in the repository checkout on this machine (committed or not), or `null` for none and for archived cards |
+| `position` | number | Its place in priority order (priority, then age, then id), from 1. Absent on archived cards. The board shows it as `#n` |
 | `archived` | string | For Done cards: the archive date (`2026-11-08`). Their approval is `none`, with blank metadata and `committed: true`; no approval or commit checks are needed |
 | `error` | string | Optional diagnostic when this card could only be read partially (missing worktree/change folder, malformed metadata, unreadable files or obsolete run step). Other cards remain available. Retained fields may be incomplete; a run with an absent or unknown step stays visible in In progress (compact) or Queued (steps), with badge `queued` |
 
@@ -235,9 +242,27 @@ card says it wasn't validated since the edit and the detail offers Validate.
 | Validate | after an edit, if the pane's close can't be seen | `tuckerbox validate <id> --json` |
 | Tick, Untick | no queued or running run | `tuckerbox tasks <id> tick\|untick <n.m>` |
 | Open proposal | the card has an `edit_folder` | A pane with this mod's proposal view, read through `tuckerbox board --json --change` |
+| Reorder | drag a card within a sorted column (not into another) | `tuckerbox priority <id> <n>` |
 | Open worktree | the card has a `worktree` | `space.select` of a space already there, else `space.new` in the worktree on the card's machine |
+
+**Reorder:** a press on a card and a move of more than a few pixels starts a
+drag; releasing over a card of the same sorted column drops it above that
+card (upper half) or below it (lower half). `dropPosition()` in `model.js`
+turns that into the position: above card B, B's position if the card came
+from below B, else one less; below the column's last card L, L's position if
+it came from above L, else one more. The board then runs
+`tuckerbox priority <id> <n>` on its own machine, in its own checkout (even
+for a card whose run is on another machine), and shows its error, if any;
+the card moves only when the next read shows it. Releasing anywhere but over
+the target card (outside it, in another column, off the board), or on the
+dragged card itself, moves nothing. Priority and position always come from
+the board's own machine: a card merged in from another machine keeps the own
+copy's, and a change only another machine has gets none and can't be
+dragged. If positions changed between the read and the drop, the card may
+land one place off, and the next read shows where it is.
 
 Commands run with `exec` on the card's Herdr machine, in the document's
 `path` there, with arguments as a list (no shell). A change id must be
-lowercase letters, digits and dashes, and a task number `n.m`, or the
+lowercase letters, digits and dashes, a task number `n.m` and a position a
+whole number from 1, or the
 command isn't built. Archived (Done) cards offer nothing.

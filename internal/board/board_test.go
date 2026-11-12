@@ -348,7 +348,9 @@ func assertShape(t *testing.T, d *Document, fixture string) {
 	want, got := map[string]string{}, map[string]string{}
 	shape(original, "", want)
 	shape(actual, "", got)
+	// priority is a number or null, and position is absent on archived cards.
 	optional := map[string]bool{".cards[].archived": true, ".cards[].error": true, ".columns[].step": true,
+		".cards[].priority": true, ".cards[].position": true,
 		".cards[].scope": true, ".cards[].scope.spec": true, ".cards[].scope.tasks": true, ".cards[].scope.tasks[]": true}
 	for _, k := range []string{"result", "to", "summary", "findings", "reason", "scope", "old_scope"} {
 		optional[".detail.history[]."+k] = true
@@ -505,6 +507,63 @@ func TestStagedApprovalDiffersFromWorkingCopy(t *testing.T) {
 	testenv.WriteFile(t, dir.SidecarPath(), string(original))
 	if ok, err := committed(context.Background(), string(dir)); err != nil || ok {
 		t.Fatal(ok, err)
+	}
+}
+
+// Scenario: Board order. Two Approved cards, A at 2000 and B at 1000: B is
+// listed before A, with positions in priority order; the priorities come
+// from the checkout. Ready keeps its order.
+func TestBoardOrder(t *testing.T) {
+	testTools.Setup(t)
+	root := testTools.NewRepo(t, testenv.RepoOptions{Changes: []string{"a", "b", "c"}, RequireApproval: true})
+	for _, id := range []string{"a", "b"} {
+		if _, err := approval.Approve(approval.DirOf(root, id), "T", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for id, v := range map[string]string{"a": "2000", "b": "1000"} {
+		p := approval.DirOf(root, id).SidecarPath()
+		data, _ := os.ReadFile(p)
+		testenv.WriteFile(t, p, "priority = "+v+"\n"+string(data))
+	}
+	d := read(t, root, "")
+	var approved []string
+	for _, c := range d.Cards {
+		if c.Column == "approved" {
+			approved = append(approved, c.Change)
+		}
+	}
+	if strings.Join(approved, ",") != "b,a" {
+		t.Errorf("approved column %v", approved)
+	}
+	a, b, c := card(t, d, "a"), card(t, d, "b"), card(t, d, "c")
+	if b.Position != 1 || a.Position != 2 || c.Position != 3 || *b.Priority != 1000 || *a.Priority != 2000 || c.Priority != nil {
+		t.Errorf("positions a %d b %d c %d", a.Position, b.Position, c.Position)
+	}
+	data, _ := json.Marshal(c)
+	if !strings.Contains(string(data), `"priority":null`) || !strings.Contains(string(data), `"position":3`) {
+		t.Errorf("card json %s", data)
+	}
+}
+
+func TestSetPrioritiesKeepsUnsortedColumns(t *testing.T) {
+	cards := []Card{
+		{Change: "r2", Column: "ready"}, {Change: "p2", Column: "proposed"}, {Change: "r1", Column: "ready"},
+		{Change: "p1", Column: "proposed"}, {Change: "s", Column: "step:build"}, {Change: "x", Column: "proposed"},
+	}
+	root := t.TempDir()
+	for id, v := range map[string]string{"p1": "1", "p2": "2", "s": "3", "r1": "4", "r2": "5"} {
+		testenv.WriteFile(t, filepath.Join(root, "openspec", "changes", id, "tuckerbox.toml"), "priority = "+v+"\n")
+	}
+	setPriorities(cards, root)
+	var got []string
+	for _, c := range cards {
+		got = append(got, c.Change)
+	}
+	// Sorted cards fill the sorted slots in priority order (x has no folder,
+	// so no position, and goes last); ready cards stay where they were.
+	if strings.Join(got, ",") != "r2,p1,r1,p2,s,x" {
+		t.Errorf("cards %v", got)
 	}
 }
 

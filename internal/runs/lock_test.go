@@ -75,7 +75,7 @@ func TestQueueOrderAndDeadTickets(t *testing.T) {
 			t.Fatal(err)
 		}
 		locks[c] = l
-		q, err := JoinQueue(common, c, lockPath(c), at)
+		q, err := JoinQueue(common, "", c, lockPath(c), at)
 		if err != nil {
 			t.Fatal(err)
 		}

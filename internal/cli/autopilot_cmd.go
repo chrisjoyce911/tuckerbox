@@ -171,8 +171,14 @@ func approvalAt(ctx context.Context, repo runs.Repo, cfg *config.Config, change,
 	if err != nil {
 		return approval.None, "", err
 	}
+	// Approvals are published on the approvals ref (approval-publish); an
+	// entry there wins over the sidecar, as in the run gate.
+	entry, err := refEntry(ctx, repo.Root, change)
+	if err != nil {
+		return approval.None, "", err
+	}
 	if sp.Worktree != "" {
-		st, err := approval.Judge(approval.DirOf(sp.Worktree, change))
+		st, err := approval.JudgeWith(approval.DirOf(sp.Worktree, change), entry)
 		return st.State, "", err
 	}
 	rev, err := approval.NewRev(ctx, repo.Root, sp.Rev, change)
@@ -182,6 +188,6 @@ func approvalAt(ctx context.Context, repo runs.Repo, cfg *config.Config, change,
 	if !rev.Exists() {
 		return approval.None, sp.Rev, nil
 	}
-	st, err := approval.Judge(rev)
+	st, err := approval.JudgeWith(rev, entry)
 	return st.State, sp.Rev, err
 }
