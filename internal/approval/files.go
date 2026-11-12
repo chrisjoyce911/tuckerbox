@@ -65,7 +65,7 @@ func (d Dir) SidecarPath() string { return filepath.Join(string(d), SidecarName)
 type Rev struct {
 	Repo, Rev, Change string
 
-	files  map[string]bool
+	files map[string]bool
 }
 
 // NewRev reads which files change has at rev. A change that is not there
