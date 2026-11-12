@@ -35,9 +35,17 @@ instead of running `tuckerbox`. The fixtures have the detail of one change,
 `add-login-page`; other cards' dialogs say there is no detail for them.
 
 **Polling:** the board reads every 5 s while it is shown and every 30 s while
-Herdr keeps it hidden. A window or dialog counts as shown; a pane counts as
-shown when its space and tab are the shown ones. The detail dialog reads once
-when it opens.
+Herdr keeps it hidden. A window or dialog counts as shown. A pane counts as
+shown when its own space and tab are the shown ones and no other pane of that
+tab is zoomed. A pane copy knows its pane from Herdr's `pane` prop, else from
+the board pane that is focused while it holds the keyboard, else because it
+is the only board pane; until then, with several board panes, it counts as
+shown while any of them is. The detail dialog reads once when it opens.
+
+**Which repository:** a docked board (`space` prop, or the space of its own
+pane) reads its own space: the focused pane's folder only when that pane is
+in that space, else a terminal there, else the space's folder, always on that
+space's machine. A window follows the shown space. A `folder` prop pins it.
 
 ## The board document
 

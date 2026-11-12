@@ -2,7 +2,7 @@
 // stage (derived by tuckerbox, never stored here) holding the change cards.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { theme, props, openOverlay, closeOverlay, spaces, panes } from "herdr";
+import { theme, props, openOverlay, closeOverlay, spaces, panes, focused } from "herdr";
 import { MOD, loadBoard, where } from "./data.js";
 import { group, counts, columnName, due, isShown, ago, needsYou } from "./model.js";
 import { cardActions, invocation, actionLabel, defaultStep, ACTIONS } from "./actions.js";
@@ -26,14 +26,25 @@ export class BoardView extends View {
     });
   }
 
+  // This copy's pane: Herdr's `pane` prop, else the board pane that is
+  // focused while this copy holds the keyboard (a mod pane keeps it when clicked).
+  self() {
+    if (props()?.pane) return props().pane;
+    if (!this.pane && this.handle.is_focused()) {
+      const f = focused();
+      if (f?.pane && panes().some((p) => p.pane === f.pane && p.mod === MOD)) this.pane = f.pane;
+    }
+    return this.pane ?? null;
+  }
+
   shown() {
-    return isShown({ overlay: props()?.overlay, spaceId: props()?.space, spaces: spaces(), panes: panes(), mod: MOD });
+    return isShown({ overlay: props()?.overlay, self: this.self(), spaces: spaces(), panes: panes(), mod: MOD });
   }
 
   refresh(cx) {
     if (this.loading) return;
     this.loading = true;
-    const at = where();
+    const at = where(this.self());
     cx.spawn(async (cx) => {
       let b;
       try { b = await loadBoard(at); } catch (e) { b = { error: { code: "failed", message: String(e?.message ?? e) } }; }
@@ -175,6 +186,7 @@ export class BoardView extends View {
 
   render() {
     const tm = theme();
+    this.self();
     return v_flex().id("tuckerbox-board").size_full().bg(tm.canvas).text_color(tm.foreground)
       .track_focus(this.handle)
       .on_key_down((e, cx) => { if (e.key === "escape" && props()?.overlay) { closeOverlay(props().overlay); cx.stop_propagation(); } })

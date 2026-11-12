@@ -2,7 +2,7 @@
 // the dev flag, the fixtures next to this file. The board reads nothing else
 // (design: the mod calls the CLI, never the files).
 import { exec, readTextFile, appHome, props, spaces, panes, focused } from "herdr";
-import { parseBoard, normaliseBoard, dirFromStack } from "./model.js";
+import { parseBoard, normaliseBoard, dirFromStack, resolveWhere } from "./model.js";
 
 export const MOD = "tuckerbox-board";
 
@@ -34,18 +34,9 @@ async function readFixture(folder, name) {
   }
 }
 
-// Where the board reads: a `folder` prop, else the focused pane's live folder
-// in the shown space, else the space's folder. `on` is that space's machine.
-export function where() {
-  const p = props() ?? {};
-  const all = spaces();
-  const space = all.find((s) => s.id === p.space) ?? all.find((s) => s.active) ?? null;
-  const on = p.on ?? space?.machine ?? null;
-  if (typeof p.folder === "string" && p.folder) return { cwd: p.folder, on, space: space?.id ?? null };
-  const f = focused();
-  const tabs = new Set((space?.tabs ?? []).map((t) => t.id));
-  const pane = panes().find((x) => x.pane === f?.pane && x.cwd) ?? panes().find((x) => tabs.has(x.tab) && x.cwd);
-  return { cwd: pane?.cwd || space?.folder || "", on, space: space?.id ?? null };
+// Where the board reads, for this copy (`self`: its pane id, if known).
+export function where(self = null) {
+  return resolveWhere({ props: props() ?? {}, spaces: spaces(), panes: panes(), focused: focused(), self: self ?? props()?.pane ?? null });
 }
 
 async function tuckerbox(args, { cwd, on }) {

@@ -245,20 +245,72 @@ export function due(last, now, shown) {
   return !last || now - last >= pollInterval(shown);
 }
 
-// Whether this copy is on screen. A window or dialog is shown while open. A
-// pane is shown when its space is the active one and that space's active tab
-// holds a board pane. Herdr keeps hidden copies running, so this is a guess
-// from the live lists, erring on "shown" when the board can't tell.
-export function isShown({ overlay, spaceId, spaces, panes, mod }) {
-  if (overlay) return true;
-  const space = list(spaces).find((s) => s.id === spaceId) ?? list(spaces).find((s) => s.active);
-  if (!space) return true;
-  if (!space.active) return false;
-  const tab = list(space.tabs).find((t) => t.active);
-  if (!tab) return true;
+// Which pane is this copy's: Herdr's `pane` prop when it gives one, else the
+// one learned when this copy had the keyboard (BoardView), else the only
+// board pane there is. Null when it can't tell (none, or several).
+export function selfPane({ self, panes, mod }) {
+  if (self) return self;
   const mine = list(panes).filter((p) => p.mod === mod);
-  if (!mine.length) return true;
-  return mine.some((p) => p.tab === tab.id);
+  return mine.length === 1 ? mine[0].pane : null;
+}
+
+// The space and tab holding a pane, or null.
+export function paneHome(paneId, { spaces, panes }) {
+  const p = list(panes).find((x) => x.pane === paneId);
+  if (!p) return null;
+  for (const s of list(spaces)) {
+    const tab = list(s.tabs).find((t) => t.id === p.tab);
+    if (tab) return { space: s, tab, pane: p };
+  }
+  return null;
+}
+
+// The space a board belongs to: its `space` prop, else the space holding its
+// own pane, else (a window, a layout block) the shown space. A `space` prop
+// naming a space that is gone gives null: the board must not drift to another.
+export function boardSpace({ props, spaces, panes, self }) {
+  const all = list(spaces);
+  if (props?.space) return all.find((s) => s.id === props.space) ?? null;
+  const home = self ? paneHome(self, { spaces, panes }) : null;
+  if (home) return home.space;
+  return all.find((s) => s.active) ?? null;
+}
+
+// Where the board reads: a `folder` prop, else the focused pane's live folder
+// when that pane is in the board's own space, else the first terminal with a
+// folder in that space, else the space's folder. `on` is that space's machine,
+// so the folder and the machine always come from the same space.
+export function resolveWhere({ props, spaces, panes, focused, self }) {
+  const p = props ?? {};
+  const space = boardSpace({ props: p, spaces, panes, self });
+  const on = p.on ?? space?.machine ?? null;
+  const id = space?.id ?? null;
+  if (typeof p.folder === "string" && p.folder) return { cwd: p.folder, on, space: id };
+  if (!space) return { cwd: "", on, space: null };
+  const tabs = new Set(list(space.tabs).map((t) => t.id));
+  const inSpace = list(panes).filter((x) => tabs.has(x.tab) && x.cwd);
+  const pane = inSpace.find((x) => x.pane === focused?.pane) ?? inSpace.find((x) => tabs.has(x.tab) && list(space.tabs).find((t) => t.id === x.tab)?.active) ?? inSpace[0];
+  return { cwd: pane?.cwd || space.folder || "", on, space: id };
+}
+
+// Whether this copy is on screen. A window or dialog is shown while open. A
+// pane is shown when its space and its tab are the shown ones, and no other
+// pane of that tab is zoomed over it. Herdr keeps hidden copies running, so
+// this decides between the shown and hidden poll intervals. A copy that can't
+// tell which pane is its own (several board panes, none known) counts as
+// shown if any board pane is, until it learns its pane.
+export function isShown({ overlay, self, spaces, panes, mod }) {
+  if (overlay) return true;
+  const visible = (id) => {
+    const home = paneHome(id, { spaces, panes });
+    if (!home) return null;
+    return home.space.active && home.tab.active && (!home.tab.zoomed || home.pane.zoomed);
+  };
+  const me = selfPane({ self, panes, mod });
+  if (me) return visible(me) ?? true;
+  const mine = list(panes).filter((p) => p.mod === mod);
+  if (!mine.length) return true; // not a pane: a layout block
+  return mine.some((p) => visible(p.pane));
 }
 
 // The folder of `file` from a stack trace line such as

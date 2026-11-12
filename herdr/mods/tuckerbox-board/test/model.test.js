@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   normaliseBoard, parseBoard, group, counts, columnName, approvalBadge, newestFirst, eventText, fmtLocal,
-  taskGroups, pollInterval, due, isShown, dirFromStack, POLL_SHOWN_MS, POLL_HIDDEN_MS,
+  taskGroups, pollInterval, due, isShown, dirFromStack, resolveWhere, selfPane, POLL_SHOWN_MS, POLL_HIDDEN_MS,
 } from "../model.js";
 
 const raw = (name) => JSON.parse(readFileSync(new URL(`../fixtures/${name}`, import.meta.url), "utf8"));
@@ -159,17 +159,83 @@ test("polling: every 5 s while shown, 30 s while hidden", () => {
   assert.equal(due(10_000, 40_000, false), true);
 });
 
-test("shown: a window is, a pane only in the shown space's shown tab", () => {
-  const spaces = [
-    { id: "s1", active: true, tabs: [{ id: "a", active: true }, { id: "b", active: false }] },
-    { id: "s2", active: false, tabs: [{ id: "c", active: true }] },
-  ];
-  const mod = "tuckerbox-board";
-  assert.equal(isShown({ overlay: "o1", spaces, panes: [], mod }), true);
-  assert.equal(isShown({ spaceId: "s1", spaces, panes: [{ mod, tab: "a" }], mod }), true);
-  assert.equal(isShown({ spaceId: "s1", spaces, panes: [{ mod, tab: "b" }], mod }), false);
-  assert.equal(isShown({ spaceId: "s2", spaces, panes: [{ mod, tab: "c" }], mod }), false);
-  assert.equal(isShown({ spaceId: null, spaces: [], panes: [], mod }), true, "can't tell: shown");
+// Two spaces on two machines: A (here) with a board pane and a shell, B on
+// "mini" with a shell. Both tabs of A can hold boards.
+const MOD = "tuckerbox-board";
+const world = (o = {}) => ({
+  spaces: [
+    { id: "A", active: o.active !== "B", machine: null, folder: "/repo/a", tabs: [
+      { id: "a1", active: o.tab !== "a2", zoomed: Boolean(o.zoomed) },
+      { id: "a2", active: o.tab === "a2", zoomed: false },
+    ] },
+    { id: "B", active: o.active === "B", machine: "mini", folder: "/repo/b", tabs: [{ id: "b1", active: true, zoomed: false }] },
+  ],
+  panes: [
+    { pane: "pa-shell", tab: "a1", cwd: "/repo/a/sub", zoomed: Boolean(o.zoomed) },
+    { pane: "pa-board", tab: "a1", mod: MOD, cwd: null, zoomed: false },
+    { pane: "pa-board2", tab: "a2", mod: MOD, cwd: null, zoomed: false },
+    { pane: "pb-shell", tab: "b1", cwd: "/repo/b", zoomed: false },
+  ],
+});
+
+test("where: focus in another space doesn't move the board's repository or machine", () => {
+  const w = world();
+  // Docked with its space: focus moves to B's terminal (on mini).
+  const docked = resolveWhere({ props: { space: "A" }, ...w, focused: { pane: "pb-shell" } });
+  assert.deepEqual(docked, { cwd: "/repo/a/sub", on: null, space: "A" });
+  // B shown and focused: still A, still this computer.
+  const wb = world({ active: "B" });
+  assert.deepEqual(resolveWhere({ props: { space: "A" }, ...wb, focused: { pane: "pb-shell" } }), { cwd: "/repo/a/sub", on: null, space: "A" });
+  // A pane copy without a space prop finds its space from its own pane.
+  assert.deepEqual(resolveWhere({ props: {}, ...wb, focused: { pane: "pb-shell" }, self: "pa-board" }), { cwd: "/repo/a/sub", on: null, space: "A" });
+  // Focus inside the board's own space is followed.
+  assert.equal(resolveWhere({ props: { space: "A" }, ...w, focused: { pane: "pa-shell" } }).cwd, "/repo/a/sub");
+});
+
+test("where: a window follows the shown space, folder and machine together", () => {
+  const wb = world({ active: "B" });
+  assert.deepEqual(resolveWhere({ props: { overlay: "o1" }, ...wb, focused: { pane: "pb-shell" } }), { cwd: "/repo/b", on: "mini", space: "B" });
+  // Focus left in A while B is shown: B's own terminal, never A's folder on mini.
+  assert.deepEqual(resolveWhere({ props: { overlay: "o1" }, ...wb, focused: { pane: "pa-shell" } }), { cwd: "/repo/b", on: "mini", space: "B" });
+});
+
+test("where: a space prop that is gone gives no folder, not another space's", () => {
+  const w = world();
+  assert.deepEqual(resolveWhere({ props: { space: "gone" }, ...w, focused: { pane: "pa-shell" } }), { cwd: "", on: null, space: null });
+  assert.equal(resolveWhere({ props: { space: "A", folder: "/pinned" }, ...w, focused: null }).cwd, "/pinned");
+});
+
+test("shown: each copy by its own pane, two copies in two tabs", () => {
+  const w = world({ tab: "a1" });
+  assert.equal(isShown({ self: "pa-board", ...w, mod: MOD }), true);
+  assert.equal(isShown({ self: "pa-board2", ...w, mod: MOD }), false, "the copy in the other tab is hidden");
+  const w2 = world({ tab: "a2" });
+  assert.equal(isShown({ self: "pa-board", ...w2, mod: MOD }), false);
+  assert.equal(isShown({ self: "pa-board2", ...w2, mod: MOD }), true);
+  // Another space shown: both hidden.
+  const wb = world({ active: "B" });
+  assert.equal(isShown({ self: "pa-board", ...wb, mod: MOD }), false);
+  assert.equal(isShown({ self: "pa-board2", ...wb, mod: MOD }), false);
+});
+
+test("shown: a board behind a zoomed sibling is hidden", () => {
+  const w = world({ zoomed: true });
+  assert.equal(isShown({ self: "pa-board", ...w, mod: MOD }), false);
+  w.panes.find((p) => p.pane === "pa-board").zoomed = true;
+  w.panes.find((p) => p.pane === "pa-shell").zoomed = false;
+  assert.equal(isShown({ self: "pa-board", ...w, mod: MOD }), true, "the board itself zoomed");
+});
+
+test("shown: windows, the only board pane, and copies that can't tell", () => {
+  const w = world({ tab: "a1" });
+  assert.equal(isShown({ overlay: "o1", self: null, ...world({ active: "B" }), mod: MOD }), true);
+  const one = { ...w, panes: w.panes.filter((p) => p.pane !== "pa-board2") };
+  assert.equal(selfPane({ self: null, panes: one.panes, mod: MOD }), "pa-board");
+  assert.equal(isShown({ self: null, ...world({ active: "B" }), panes: one.panes, mod: MOD }), false, "the only board pane is ours");
+  assert.equal(selfPane({ self: null, panes: w.panes, mod: MOD }), null, "two board panes: unknown");
+  assert.equal(isShown({ self: null, ...w, mod: MOD }), true, "unknown: shown while any board pane is");
+  assert.equal(isShown({ self: null, ...world({ active: "B" }), mod: MOD }), false, "unknown: hidden when none is");
+  assert.equal(isShown({ self: null, ...w, panes: w.panes.filter((p) => !p.mod), mod: MOD }), true, "not a pane: a layout block");
 });
 
 test("the mod's folder from a stack line", () => {
