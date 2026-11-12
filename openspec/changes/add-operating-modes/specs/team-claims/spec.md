@@ -39,15 +39,37 @@ In team mode, a claim SHALL last until its merge request is merged or closed, al
 - **THEN** it refuses and says to close the merge request and delete the branch to hand the change over
 
 ### Requirement: Approvers
-In team mode, repository config `[team] approvers` SHALL list forge logins. `tuckerbox approve` SHALL record the approver's forge login. With `require_approval = true`, the run gate SHALL count an approval only when its login is listed. `tuckerbox check` SHALL fail in team mode when approval is required and the list is empty.
-
-#### Scenario: Approval by someone not listed
-- **WHEN** `[team] approvers = ["sam"]` and `alex` approved `add-login`
-- **THEN** `tuckerbox run add-login` refuses and says `alex` is not an approver
+In team mode, repository config `[team] approvers` SHALL list forge logins. `tuckerbox approve` SHALL record the approver's forge login, read from the forge. `tuckerbox check` SHALL fail in team mode when approval is required and the list is empty.
 
 #### Scenario: No approvers
 - **WHEN** `mode = "team"`, approval is required and `[team] approvers` is missing
 - **THEN** `tuckerbox check` exits non-zero and names `team.approvers`
+
+### Requirement: Approvals only from the protected base
+In team mode the run gate SHALL read the approval only from the base branch at the commit just fetched from the remote, never from a worktree, a retained change branch or the checkout. The approval's login SHALL be in `[team] approvers`, and the change's files the run will use SHALL match that approval's hashes. Otherwise the run SHALL refuse.
+
+#### Scenario: Approval by someone not listed
+- **WHEN** `[team] approvers = ["sam"]` and the base branch holds an approval of `add-login` by `alex`
+- **THEN** `tuckerbox run add-login` refuses and says `alex` is not an approver
+
+#### Scenario: Forged approval on a retained branch
+- **WHEN** a local branch `add-login` has edited proposal text and an `[approval]` with recomputed hashes and `login = "sam"`, and the base branch has no approval for `add-login`
+- **THEN** `tuckerbox run add-login` refuses, says the base branch has no approval, and creates no worktree, branch or merge request
+
+#### Scenario: Worktree edited after approval
+- **WHEN** the base branch holds `sam`'s approval of `add-login`, and its existing worktree has edited design text with an `[approval]` rewritten to match
+- **THEN** `tuckerbox run add-login` refuses and says the worktree's files don't match the approval on the base branch
+
+### Requirement: The base branch must be protected
+In team mode, `tuckerbox check` and `tuckerbox run` SHALL ask the forge whether the base branch refuses direct pushes and needs a merge request with an approving review. When it doesn't, or the forge can't say, `run` SHALL refuse with `team approvals need a protected base branch`, and `check` SHALL fail.
+
+#### Scenario: Unprotected base
+- **WHEN** `mode = "team"` and the forge allows direct pushes to `main`
+- **THEN** `tuckerbox run` refuses with `team approvals need a protected base branch` and `tuckerbox check` exits non-zero
+
+#### Scenario: Protection can't be read
+- **WHEN** the token can't read the base branch's protection rules
+- **THEN** `tuckerbox run` refuses, says the protection couldn't be confirmed, and names the permission the token needs
 
 ### Requirement: No dispatch in team mode
 In team mode, `tuckerbox dispatch` SHALL refuse and say each person starts their own runs. Tuckerbox SHALL NOT start a run on another person's machine.
