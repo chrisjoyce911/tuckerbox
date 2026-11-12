@@ -1,8 +1,8 @@
 # Tuckerbox runs this repository's own OpenSpec changes.
 # Checked with: tuckerbox check
 
-max_parallel = 2
-ship = "local"
+max_parallel = 4
+ship = "mr"           # push, open the PR, fix CI and review findings, stop at green
 
 [workflow]
 steps = ["build", "review"]
@@ -18,3 +18,15 @@ role = "reviewer"
 permissions = "review"   # machine profile; the reviewer reports in its final message, so read-only works
 on_reject = "build"
 max_rounds = 3
+
+[shipping]
+remote = "origin"
+fix_ci = "fix_ci"
+fix_review = "fix_ci"
+max_rounds = 3
+archive = true
+
+[steps.fix_ci]
+agent = "claude"
+role = "fixer"
+permissions = "edit"
