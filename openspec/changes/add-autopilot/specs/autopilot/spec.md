@@ -25,7 +25,7 @@ Autopilot SHALL make a pass at start, every `[autopilot] interval` (60 seconds b
 - **THEN** it prints both changes in admission order and starts nothing
 
 ### Requirement: What a pass starts
-A pass SHALL start a change only when it is approved, its dependencies are met, and it has no run, or a ready run whose change still has unticked tasks. It SHALL start changes in admission order until the repository's queued and running runs on this machine reach `max_parallel`.
+A pass SHALL start a change only when it is approved, its dependencies are met, and it has no run, or a ready run whose change is not complete and which it can continue (see Incomplete ready runs). It SHALL start changes in admission order until the repository's queued and running runs on this machine reach `max_parallel`.
 
 #### Scenario: Within max_parallel
 - **WHEN** `max_parallel = 2`, one run is running, and three approved changes have no run
@@ -53,6 +53,17 @@ With `[autopilot] scope = "group"`, the default, autopilot SHALL start a change 
 #### Scenario: Whole change left incomplete
 - **WHEN** `scope = "change"`, `ship = "merge"`, and a run's last step finishes with task 3.2 unticked
 - **THEN** the run is `blocked` (task-scope, `Incomplete whole-change runs`), autopilot reports it once, and no pass restarts it
+
+### Requirement: Incomplete ready runs
+A ready run whose change is not complete SHALL be continued with `--tasks next` when it has a scope, or when `[autopilot] scope = "group"`. With `scope = "change"` and no scope on the run, autopilot SHALL NOT request a start: it SHALL report once that a person must finish or re-run the change, and SHALL not retry it.
+
+#### Scenario: Whole change left ready in local mode
+- **WHEN** `scope = "change"`, `ship = "local"`, and a run without a scope finishes its last step with task 3.2 unticked, so it is `ready` and not complete
+- **THEN** autopilot reports once that `add-login` needs a person (task 3.2 not ticked), and later passes request no start for it
+
+#### Scenario: Group mode picks up the rest
+- **WHEN** `scope = "group"`, `ship = "local"`, and a run someone started without a scope is `ready` with group 3 unticked
+- **THEN** the next pass starts it with `--tasks next`, which resolves to `3`
 
 ### Requirement: Shipping is the run's
 Autopilot SHALL NOT archive, push or merge itself. In `mr` and `merge` mode, a run ships when its change is complete and stays `ready` otherwise, as task-scope and add-forge-shipping say. A change SHALL count as finished for autopilot once it is archived on the base branch.
@@ -119,7 +130,7 @@ Autopilot SHALL resume a run whose process died without recording a final state 
 - **THEN** a later crash of that run is resumed once again by autopilot
 
 ### Requirement: Asking for a person
-When a run on this machine becomes `blocked` or `failed`, autopilot leaves a crashed run, or it can't start a change's next group because its approval is stale, autopilot SHALL print one line naming the change and the reason, once per state change, and SHALL carry on with other changes.
+When a run on this machine becomes `blocked` or `failed`, autopilot leaves a crashed run or an incomplete ready run, or it can't start a change's next group because its approval is stale, autopilot SHALL print one line naming the change and the reason, once per state change, and SHALL carry on with other changes.
 
 #### Scenario: Blocked review
 - **WHEN** autopilot runs and `add-login`'s review blocks with `review limit reached`

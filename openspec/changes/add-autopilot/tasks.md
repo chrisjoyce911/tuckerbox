@@ -47,8 +47,12 @@
 - [ ] 4.3 Test: First group in merge mode
 - [ ] 4.4 Test: Last group in merge mode (with a real `(ship)` archive task in the change)
 - [ ] 4.5 Test: Whole change left incomplete
-- [ ] 4.6 Test: Fleet mode
-- [ ] 4.7 Test: Team mode
+- [ ] 4.6 Incomplete ready runs: continue with `--tasks next` when the run has a scope or in group mode; in change mode report once, request no start, mark the card `needs_you`
+- [ ] 4.7 Test: Whole change left ready in local mode (several passes, no start requested)
+- [ ] 4.8 Test: Group mode picks up the rest
+- [ ] 4.9 Test: Whole change left ready (board)
+- [ ] 4.10 Test: Fleet mode
+- [ ] 4.11 Test: Team mode
 
 ## 5. Asking for a person (autopilot, autopilot-board)
 

@@ -18,7 +18,11 @@ The board document SHALL include `autopilot`: whether it is running for the repo
 - **THEN** the document has `autopilot` with running `false`
 
 ### Requirement: Cards that need a person
-A card SHALL have `needs_you` with a reason when its run is `blocked` or `failed`, or when it has a ready run with unticked tasks and its approval is `stale`. The board header's "needs you" count SHALL count these cards.
+A card SHALL have `needs_you` with a reason when its run is `blocked` or `failed`, when it has a ready run with unticked tasks and its approval is `stale`, or when `[autopilot] scope = "change"` and it has a ready run without a scope whose change is not complete. The board header's "needs you" count SHALL count these cards.
+
+#### Scenario: Whole change left ready
+- **WHEN** `[autopilot] scope = "change"` and a ready run without a scope left task 3.2 unticked
+- **THEN** its card has `needs_you` with reason `tasks not ticked: 3.2; run it again by hand`
 
 #### Scenario: Next group waits for approval
 - **WHEN** a change's run is ready with scope `1`, group 2 is unticked, and its approval is stale

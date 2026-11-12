@@ -130,8 +130,17 @@ what happens if it isn't: a partial scoped run is `ready` and doesn't ship;
 an unscoped run that isn't complete is `blocked` in `mr` and `merge` mode;
 `(ship)` tasks such as "Archive this change" don't count and are ticked in
 the archive commit. Autopilot relies on those rules and adds none of its
-own. So with `scope = "change"`, an incomplete change becomes `blocked`,
-autopilot reports it, and no pass restarts it.
+own. So with `scope = "change"`, an incomplete change becomes `blocked` in
+`mr` and `merge` mode, autopilot reports it, and no pass restarts it.
+
+In `local` mode an incomplete whole-change run stays `ready` (today's
+rule), and starting it again with no scope is refused, since it is the same
+scope. So autopilot never asks for that start:
+- in group mode it continues the run with `--tasks next`, a new scope
+- in change mode it reports once that a person must finish or re-run the
+  change, and the card needs you
+
+It reads `complete` from `run.json`, so this costs no extra reads.
 
 ### Shipping and the end of a change
 Autopilot doesn't drive shipping. The last group's run ships by itself:
