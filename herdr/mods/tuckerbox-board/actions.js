@@ -77,7 +77,9 @@ export function commandLine(action, change, extra = {}) {
 export function invocation(action, card, extra = {}) {
   const argv = commandLine(action, card?.change, extra);
   const place = action === "edit" ? "pane" : action === "follow" ? "tab" : argv ? "exec" : "view";
-  const out = { action, place, argv, on: card?.on ?? null, cwd: card?.path || "" };
+  const out = { action, place, argv, change: card?.change ?? "", on: card?.on ?? null, cwd: card?.path || "" };
+  if (action === "follow") out.title = `${card?.change} ${extra.step} log`;
+  if (action === "edit") out.title = `edit ${card?.change} ${extra.file}`;
   if (action === "proposal") out.file = card?.edit_folder ? `${card.edit_folder}/openspec/changes/${card.change}/proposal.md` : "";
   if (action === "worktree") out.folder = card?.worktree ?? "";
   return out;
@@ -140,4 +142,68 @@ export function actionLabel(action, extra = {}) {
 // The command line as one string for people (logs, the "not wired yet" note).
 export function shown(argv) {
   return (argv ?? []).map((a) => (/^[\w@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, "'\\''")}'`)).join(" ");
+}
+
+const machineOf = (on) => on || null;
+
+// The Herdr command that shows a tab, pane or view action (6.4, 6.5):
+// { command, args } for run(). `ctx` is what Herdr shows now: `shown`, the
+// shown space ({ id, machine }); `spaces` and `panes`, the live lists; `mod`,
+// this mod's name. A tab or pane on the shown space's machine opens there;
+// on another machine it opens as a new space there, since tabs and splits
+// stay on their space's machine.
+export function herdrCall(inv, ctx = {}) {
+  const shown = ctx.shown ?? null;
+  const here = shown && machineOf(shown.machine) === machineOf(inv.on);
+  const name = inv.title || inv.argv?.slice(1, 4).join(" ") || inv.action;
+  const elsewhere = () => ({ command: "space.new", args: { name, machine: inv.on ?? "", folder: inv.cwd, argv: inv.argv } });
+  switch (inv.place) {
+    case "tab":
+      return here ? { command: "tab.new", args: { name, space: shown.id, folder: inv.cwd, argv: inv.argv } } : elsewhere();
+    case "pane":
+      return here ? { command: "terminal.open", args: { argv: inv.argv, folder: inv.cwd, place: "right", name } } : elsewhere();
+    case "view":
+      if (inv.action === "proposal") {
+        return { command: "pane.split", args: { direction: "right", mod: ctx.mod, props: { view: "proposal", change: inv.change, card: inv.card, board: inv.board } } };
+      }
+      if (inv.action === "worktree") {
+        const open = (ctx.spaces ?? []).find((s) => machineOf(s.machine) === machineOf(inv.on) && spaceAt(s, inv.folder, ctx.panes));
+        return open ? { command: "space.select", args: { id: open.id } }
+          : { command: "space.new", args: { name: inv.change, folder: inv.folder, machine: inv.on ?? "" } };
+      }
+      break;
+  }
+  throw new Error(`${inv.action} is not a Herdr view, tab or pane`);
+}
+
+const norm = (p) => String(p ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
+const inside = (p, root) => Boolean(root) && (norm(p) === norm(root) || norm(p).startsWith(`${norm(root)}/`));
+
+// A space is at a folder when it was made there or a terminal of it is there now.
+function spaceAt(space, folder, panes = []) {
+  if (!folder) return false;
+  if (inside(space.folder, folder)) return true;
+  const tabs = new Set((space.tabs ?? []).map((t) => t.id));
+  return panes.some((p) => tabs.has(p.tab) && inside(p.cwd, folder));
+}
+
+// What a finished tuckerbox command means for the board: ok, and the
+// message to show. A failure shows the command's own error (stderr first);
+// a success shows its output, which carries notes such as "not committed".
+export function outcome(r) {
+  const out = String(r?.stdout ?? "").trim();
+  const err = String(r?.stderr ?? "").trim();
+  if ((r?.code ?? 1) === 0) return { ok: true, message: [out, err].filter(Boolean).join("\n") || "done" };
+  return { ok: false, message: err || out || `exited with code ${r?.code}` };
+}
+
+// `tuckerbox validate --json`: it exits 1 for an invalid change and still
+// prints the document, so the document decides. { valid, errors: [message] }
+// or { error } when there is no document.
+export function parseValidation(r) {
+  let doc = null;
+  try { doc = JSON.parse(String(r?.stdout ?? "")); } catch { doc = null; }
+  if (!doc || typeof doc.valid !== "boolean") return { error: outcome(r).message };
+  const errors = (Array.isArray(doc.errors) ? doc.errors : []).map((e) => (typeof e === "string" ? e : [e?.path, e?.message].filter(Boolean).join(": ")));
+  return { valid: doc.valid, errors };
 }

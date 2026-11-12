@@ -7,7 +7,8 @@ import { theme, props, closeOverlay } from "herdr";
 import { loadDetail } from "./data.js";
 import { normaliseCard, columnName, newestFirst, eventText, fmtLocal, taskGroups, approvalBadge, isActive } from "./model.js";
 import { detailActions, invocation, actionLabel, defaultStep, rerunSteps, canEdit, EDIT_FILES, ACTIONS } from "./actions.js";
-import { perform } from "./perform.js";
+import { perform, validate, watchEdits, changed } from "./perform.js";
+import { editOf, editNote } from "./edits.js";
 import { button, tiny, dot, stateChip, approvalChip, progressBar, section, closeButton, note, tone } from "./ui.js";
 
 const SEVERITY_TONE = { critical: "blocked", high: "blocked", medium: "done", low: "muted", info: "dim" };
@@ -21,13 +22,21 @@ export class CardView extends View {
     this.detail = pr.detail ?? null;   // a test harness may hand it in
     this.error = null;
     this.notice = null;
-    // The last `tuckerbox validate --json` after an edit, in memory only (6.5 fills it).
+    // A harness may hand in a validation note; else it comes from edits.js.
     this.validation = pr.validation ?? null;
+    this.busy = null;
     this.step = this.card ? defaultStep(this.card, this.board) : "";
     this.handle = cx.focus_handle();
     this.handle.focus();
     // Read on open, from a timer: a spawn straight from a dialog's init can stall.
     if (!this.detail) cx.timer.after(30, (cx) => this.load(cx));
+    this.seen = changed();
+    cx.timer.every(1000, (cx) => {
+      const validating = watchEdits();
+      if (validating.length) cx.spawn(async (cx) => { await Promise.all(validating); cx.notify(); });
+      // A validation finished (here or in the board): redraw its note.
+      if (changed() !== this.seen) { this.seen = changed(); cx.notify(); }
+    });
   }
 
   load(cx) {
@@ -53,12 +62,31 @@ export class CardView extends View {
   }
 
   act(action, extra, cx) {
+    if (this.busy) return;
+    if (action === "validate") {
+      this.busy = action;
+      cx.notify();
+      cx.spawn(async (cx) => {
+        if (this.board.fixtures) this.notice = { text: `Fixtures: would run tuckerbox validate ${this.change} --json`, kind: "info" };
+        else await validate(this.card);
+        this.busy = null;
+        cx.notify();
+      });
+      return;
+    }
     let inv;
     try { inv = invocation(action, this.card, extra); }
     catch (e) { this.notice = { text: String(e?.message ?? e), kind: "error" }; cx.notify(); return; }
+    inv.card = this.card;
+    inv.board = this.board;
+    this.busy = action;
+    cx.notify();
     cx.spawn(async (cx) => {
-      const r = await perform(inv);
-      this.notice = { text: r.message, kind: r.ok || !r.wired ? "info" : "error" };
+      const r = await perform(inv, { dry: Boolean(this.board.fixtures) });
+      this.busy = null;
+      this.notice = r.message ? { text: r.message, kind: r.ok || r.dry ? "info" : "error" } : null;
+      // A pane, tab or view opens beside the board: the dialog would cover it.
+      if (r.ok && inv.place !== "exec") { this.dismiss(); return; }
       if (r.ok) this.load(cx);
       cx.notify();
     });
@@ -79,12 +107,15 @@ export class CardView extends View {
       .when(a.state === "stale", (el) => el.child(div().text_color(tone(tm, b.tone)).child("the change was edited after approval")));
   }
 
-  validationBox() {
-    const v = this.validation;
-    if (!v) return null;
-    const ok = v.valid === true;
-    const lines = (v.issues ?? v.errors ?? []).map((i) => (typeof i === "string" ? i : i.message ?? JSON.stringify(i)));
-    return note("validation", ok ? "Valid after the last edit." : ["Invalid after the last edit:", ...lines].join("\n"), ok ? "info" : "error");
+  // The last edit and its validation (edits.js, in memory), with Validate
+  // when the board couldn't watch the edit's pane, or to check again.
+  validationBox(c) {
+    const tm = theme();
+    const n = this.validation ?? editNote(editOf(c));
+    if (!n) return null;
+    return h_flex().items_start().gap(8)
+      .child(div().flex_1().child(note("validation", n.text, n.tone === "blocked" ? "error" : "info")))
+      .when(Boolean(n.validate) && canEdit(c), (el) => el.child(button("act-validate", "Validate", (_e, cx) => this.act("validate", {}, cx), { disabled: Boolean(this.busy) })));
   }
 
   tasks(c) {
@@ -169,8 +200,8 @@ export class CardView extends View {
     return v_flex().gap(6)
       .child(h_flex().flex_wrap().gap(6).items_center().children(list.map((a) => {
         const extra = a === "rerun" || a === "follow" ? { step: a === "follow" ? c.step : this.step } : {};
-        return button(`act-${a}`, actionLabel(a, extra), (_e, cx) => this.act(a, extra, cx),
-          { primary: ACTIONS[a].primary, danger: ACTIONS[a].danger });
+        return button(`act-${a}`, this.busy === a ? `${actionLabel(a, extra)}…` : actionLabel(a, extra), (_e, cx) => this.act(a, extra, cx),
+          { primary: ACTIONS[a].primary, danger: ACTIONS[a].danger, disabled: Boolean(this.busy) });
       })))
       .when(list.includes("rerun") && steps.length > 1, (el) => el.child(h_flex().items_center().gap(6).text_size(11).text_color(tm.dim)
         .child("Re-run from")
@@ -198,7 +229,7 @@ export class CardView extends View {
         .when(Boolean(c.machine), (el) => el.child(div().text_color(tm.dim).child(c.machine))))
       .when(Boolean(c.reason), (el) => el.child(div().pt(6).text_size(12).text_color(c.state === "blocked" || c.state === "failed" ? tm.blocked : tm.muted).child(c.reason)))
       .child(div().pt(8).child(this.approvalRow(c)))
-      .when(Boolean(this.validation), (el) => el.child(div().pt(8).child(this.validationBox())))
+      .when(Boolean(this.validationBox(c)), (el) => el.child(div().pt(8).child(this.validationBox(c))))
       .when(Boolean(this.error), (el) => el.child(div().pt(8).child(note("error", this.error, "error"))))
       .when(Boolean(this.notice), (el) => el.child(div().pt(8).child(note("notice", this.notice.text, this.notice.kind))))
       .child(v_flex().id("card-scroll").flex_1().min_h(0).overflow_y_scrollbar().pr(4)

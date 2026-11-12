@@ -6,7 +6,8 @@ import { theme, props, openOverlay, closeOverlay, spaces, panes, focused } from 
 import { MOD, loadBoard, where } from "./data.js";
 import { group, counts, columnName, due, isShown, ago, needsYou } from "./model.js";
 import { cardActions, invocation, actionLabel, defaultStep, ACTIONS } from "./actions.js";
-import { perform } from "./perform.js";
+import { perform, watchEdits, changed } from "./perform.js";
+import { editOf, editNote } from "./edits.js";
 import { button, tiny, dot, stateChip, approvalChip, progressBar, note, closeButton, SPINNER } from "./ui.js";
 
 const COL_W = 236;
@@ -21,7 +22,13 @@ export class BoardView extends View {
     this.handle = cx.focus_handle();
     // The first read from a timer: a spawn straight from init can stall in an overlay.
     cx.timer.after(30, (cx) => this.refresh(cx));
+    this.seen = changed();
     cx.timer.every(1000, (cx) => {
+      // Edits whose pane closed are validated here (and by any open dialog).
+      const validating = watchEdits();
+      if (validating.length) cx.spawn(async (cx) => { await Promise.all(validating); cx.notify(); });
+      // An action in this or another copy changed something: read again now.
+      if (changed() !== this.seen) { this.seen = changed(); this.last = 0; }
       if (due(this.last, Date.now(), this.shown())) this.refresh(cx);
     });
   }
@@ -59,16 +66,27 @@ export class BoardView extends View {
   }
 
   act(action, card, extra, cx) {
+    if (this.busy) return;
     let inv;
     try { inv = invocation(action, card ?? { change: "", path: this.at?.cwd ?? "", on: this.at?.on ?? null }, extra); }
     catch (e) { this.notice = { text: String(e?.message ?? e), kind: "error" }; cx.notify(); return; }
     if (action === "init") { inv.cwd = this.at?.cwd ?? ""; inv.on = this.at?.on ?? null; }
+    inv.card = card;
+    inv.board = this.boardProps();
+    this.busy = `${action}-${card?.change ?? ""}`;
+    cx.notify();
     cx.spawn(async (cx) => {
-      const r = await perform(inv);
-      this.notice = { text: r.message, kind: r.ok || !r.wired ? "info" : "error" };
+      const r = await perform(inv, { dry: Boolean(this.board?.fixtures) });
+      this.busy = null;
+      this.notice = r.message ? { text: r.message, kind: r.ok || r.dry ? "info" : "error", change: card?.change ?? "" } : null;
       if (r.ok) this.last = 0; // read again at once: the card moves when tuckerbox says so
       cx.notify();
     });
+  }
+
+  boardProps() {
+    const b = this.board ?? {};
+    return { repo: b.repo, path: b.path, require_approval: b.require_approval, columns: b.columns, on: b.on, fixtures: Boolean(b.fixtures) };
   }
 
   openCard(card) {
@@ -77,7 +95,7 @@ export class BoardView extends View {
       mod: MOD, kind: "dialog", width: 760, height: 780,
       props: {
         view: "card", change: card.change, card,
-        board: { repo: b.repo, path: b.path, require_approval: b.require_approval, columns: b.columns, on: b.on },
+        board: this.boardProps(),
         fixtures: props()?.fixtures ?? null,
       },
     });
@@ -115,13 +133,14 @@ export class BoardView extends View {
       .when(c.depends_on.length > 0 && !c.archived, (el) => el.child(div().text_size(11).text_color(tm.dim)
         .child(`after ${c.depends_on.map((d) => `${d.change} (${columnName(b, d.column)})`).join(", ")}`)))
       .when(Boolean(c.branch), (el) => el.child(div().text_size(10.5).text_color(tm.dim).truncate().child(`⎇ ${c.branch}`)))
+      .when(Boolean(editNote(editOf(c))), (el) => { const n = editNote(editOf(c)); return el.child(div().text_size(11).text_color(tm[n.tone] ?? tm.dim).child(n.text)); })
       .child(h_flex().items_center().gap(6).text_size(10.5).text_color(tm.dim)
         .child(div().child(c.archived ? `archived ${c.archived}` : c.since ? ago(c.since) : ""))
         .child(div().flex_1())
         .children(acts.map((a) => {
           const extra = a === "rerun" || a === "follow" ? { step } : {};
           return tiny(`${a}-${c.change}`, actionLabel(a, extra), (_e, cx) => this.act(a, c, extra, cx),
-            { primary: ACTIONS[a].primary, danger: ACTIONS[a].danger });
+            { primary: ACTIONS[a].primary, danger: ACTIONS[a].danger, disabled: Boolean(this.busy) });
         })));
   }
 
