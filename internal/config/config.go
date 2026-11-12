@@ -1,0 +1,199 @@
+// Package config loads, merges and validates Tuckerbox configuration.
+//
+// Two files are read:
+//
+//   - the machine config, config.toml in the tuckerbox folder of the user's
+//     config directory (see [MachinePath]), which is optional; and
+//   - the repository config, .tuckerbox/config.toml at the repository root
+//     (see [RepoFile]), which a run requires.
+//
+// A value set in the repository config overrides the machine value for the
+// same key. Some keys are reserved to the machine and are refused in a
+// repository config: permission profiles, raw agent arguments and the editor.
+// A repository can only refer to a permission profile by name, and the
+// machine decides which repositories (by remote) may use it.
+//
+// [Load] returns the merged result as a [Config], which is what later
+// packages (runs, agents) consume, together with every [Problem] found.
+package config
+
+import (
+	"path/filepath"
+	"slices"
+)
+
+// RepoDir is the folder at the repository root that holds Tuckerbox files:
+// config.toml and role prompt overrides in roles/<role>.md.
+const RepoDir = ".tuckerbox"
+
+// RepoFile is the repository config path relative to the repository root.
+var RepoFile = filepath.Join(RepoDir, "config.toml")
+
+// DefaultMaxRounds is the round limit of an on_reject loop when a step does
+// not set max_rounds.
+const DefaultMaxRounds = 3
+
+// DefaultMaxParallel is the number of changes that run at once per repository
+// when neither config sets max_parallel.
+const DefaultMaxParallel = 1
+
+// DefaultWorktreePath and DefaultBranch are the worktree location and branch
+// name patterns used when [worktree] does not set them. See [Worktree].
+const (
+	DefaultWorktreePath = "../{repo}-worktrees/{change}"
+	DefaultBranch       = "{change}"
+)
+
+// BuiltinAgents are the agents Tuckerbox defines itself. The agents package
+// owns their command templates. Machine config may override a built-in's
+// template (it appears in [Config.Agents]); repository config may not.
+var BuiltinAgents = []string{"claude", "codex"}
+
+// BuiltinRoles are the roles with a built-in prompt. A repository may add or
+// override roles with .tuckerbox/roles/<role>.md.
+var BuiltinRoles = []string{"planner", "builder", "reviewer"}
+
+// Placeholders are the names an agent command template may use, written as
+// {name} inside an argument. {brief} is required.
+//
+//   - {brief}: path of the brief file the agent reads first
+//   - {workdir}: the change's worktree
+//   - {model}: the step's model, or the agent's default model
+//   - {effort}: the step's effort, or the agent's default effort
+var Placeholders = []string{"brief", "workdir", "model", "effort"}
+
+// ShipMode says what happens when a run finishes its last step.
+type ShipMode string
+
+// ShipLocal leaves the work committed on the change's branch and pushes
+// nothing. It is the only mode in this release.
+const ShipLocal ShipMode = "local"
+
+// Config is the resolved configuration for one repository on this machine:
+// the machine config merged with the repository config, defaults filled in.
+//
+// A Config returned by [Load] together with problems may be incomplete; use
+// it only for display when problems were reported.
+type Config struct {
+	// RepoRoot is the repository (or worktree) root the config was loaded for.
+	RepoRoot string
+	// RepoPath is the repository config file that was read.
+	RepoPath string
+	// MachinePath is the machine config file that was read, or "" if there
+	// was none.
+	MachinePath string
+	// Remote is the repository remote that permission profiles were matched
+	// against, normalised by [NormalizeRemote]; "" if the repository has none.
+	Remote string
+
+	// Steps is the workflow, in run order. Every step's fields are resolved:
+	// MaxRounds is set, Agent and Role are non-empty.
+	Steps []Step
+	// MaxParallel is the most changes from this repository that run at once.
+	MaxParallel int
+	// Ship is the ship mode.
+	Ship ShipMode
+	// Worktree holds the worktree and branch settings for runs.
+	Worktree Worktree
+
+	// Agents holds the agent command templates defined in config, by name:
+	// custom agents from either file and machine overrides of built-ins. An
+	// agent named by a step is either here or in [BuiltinAgents].
+	Agents map[string]Agent
+	// Permissions holds the machine's permission profiles, by name. Only
+	// profiles from machine config ever appear here.
+	Permissions map[string]Profile
+	// Editor is the command used to open files for the user. Machine only;
+	// "" if unset.
+	Editor string
+}
+
+// Step is one step of the workflow.
+type Step struct {
+	// ID is the step's name, as listed in workflow.steps.
+	ID string
+	// Agent names the agent that runs the step: a built-in or a key of
+	// [Config.Agents].
+	Agent string
+	// Role names the role prompt: a built-in role or .tuckerbox/roles/<role>.md.
+	Role string
+	// Permissions names a machine permission profile, or "" for the agent's
+	// own defaults. When set, the profile exists in [Config.Permissions],
+	// allows this repository's remote and grants flags for Agent.
+	Permissions string
+	// Model and Effort fill the {model} and {effort} placeholders. When ""
+	// the agent's defaults apply.
+	Model, Effort string
+	// OnReject names the step to go back to when this step reports
+	// rejected, or "" if this step does not loop. It is this step or an
+	// earlier one.
+	OnReject string
+	// MaxRounds is the limit of rounds of the on_reject loop; after that many
+	// rejections the run is blocked. It is DefaultMaxRounds unless set.
+	MaxRounds int
+}
+
+// Agent is a command template for an agent CLI defined in config.
+type Agent struct {
+	// Name is the agent's name.
+	Name string
+	// Command is the program and its arguments. Arguments may hold
+	// placeholders (see [Placeholders]); Command[0] is the program.
+	Command []string
+	// Model and Effort are defaults for the {model} and {effort}
+	// placeholders when a step does not set them.
+	Model, Effort string
+	// FromRepo is true when the repository config defined the agent.
+	FromRepo bool
+}
+
+// Profile is a machine permission profile: the flags it grants each agent,
+// and the repositories that may use it.
+type Profile struct {
+	// Name is the profile's name, as steps refer to it.
+	Name string
+	// Args maps an agent name to the extra arguments the profile adds to
+	// that agent's command.
+	Args map[string][]string
+	// AllowedRemotes lists the repository remotes that may use the profile,
+	// normalised by [NormalizeRemote]. An entry may be "*" (any repository)
+	// or a path.Match pattern such as "github.com/owner/*".
+	AllowedRemotes []string
+}
+
+// Worktree holds where runs put their worktrees and what they name branches.
+// Patterns may use {change} (the change id) and {repo} (the repository
+// folder's name).
+type Worktree struct {
+	// Base is the branch new change branches start from. "" means the remote
+	// default branch after a fetch, or the local default branch if there is
+	// no remote.
+	Base string
+	// Path is the worktree location pattern. A relative path is relative to
+	// the repository root. It contains {change}.
+	Path string
+	// Branch is the branch name pattern. It contains {change}.
+	Branch string
+}
+
+// Step returns the step with the given id.
+func (c *Config) Step(id string) (Step, bool) {
+	for _, s := range c.Steps {
+		if s.ID == id {
+			return s, true
+		}
+	}
+	return Step{}, false
+}
+
+// PermissionArgs returns the extra arguments the step's permission profile
+// grants its agent, or nil when the step names no profile.
+func (c *Config) PermissionArgs(s Step) []string {
+	if s.Permissions == "" {
+		return nil
+	}
+	return slices.Clone(c.Permissions[s.Permissions].Args[s.Agent])
+}
+
+// IsBuiltinAgent reports whether name is a built-in agent.
+func IsBuiltinAgent(name string) bool { return slices.Contains(BuiltinAgents, name) }
