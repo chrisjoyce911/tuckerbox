@@ -50,6 +50,51 @@ type Request struct {
 	// the change lock. A scope other than the run's own starts a ready,
 	// stopped, blocked or failed run again from the first step.
 	Scope string
+	// Expect, when set, makes the request conditional (tuckerbox
+	// autopilot): once the change lock is held, the run must still be as
+	// the caller saw it, else Run returns a *ChangedError and changes
+	// nothing (formal/autopilot.tla, ActsOnSeenAttempt).
+	Expect *Expect
+	// By says who asked, for the history event that starts the run
+	// ("autopilot"); "" is a person.
+	By string
+}
+
+// Expect is the run state a conditional request was decided on: no run,
+// or run.json's state and since as read (not the effective state).
+type Expect struct {
+	NoRun bool
+	State State
+	Since time.Time
+}
+
+// ChangedError means a conditional request found the run changed since
+// its caller looked, or its approval rule no longer held; nothing was
+// changed.
+type ChangedError struct {
+	Change string
+	Why    string
+}
+
+func (e *ChangedError) Error() string {
+	return fmt.Sprintf("change %s changed since it was looked at (%s); nothing done", e.Change, e.Why)
+}
+
+// mismatch reports why rs (nil: no run.json) is not as x expects, or "".
+func (x *Expect) mismatch(rs *Run) string {
+	switch {
+	case x.NoRun && rs != nil:
+		return "it has a run now"
+	case x.NoRun:
+		return ""
+	case rs == nil:
+		return "its run is gone"
+	case rs.State != x.State:
+		return fmt.Sprintf("it is %s, not %s", rs.State, x.State)
+	case !rs.Since.Equal(x.Since):
+		return "its run moved on"
+	}
+	return ""
 }
 
 // Engine runs one change's workflow in this process.
@@ -79,6 +124,10 @@ type Engine struct {
 	// made, and the worktree's files again once the change lock is held,
 	// before the run state changes. Resume and Rerun are not gated.
 	Gate func(ctx context.Context, change string, at StartPoint) error
+	// ResumeGate, when set, judges a conditional (Expect) Resume under the
+	// change lock: autopilot resumes a crashed run only while the change's
+	// approval is not withdrawn (approved or stale, not none).
+	ResumeGate func(ctx context.Context, change, worktree string) error
 
 	mu      sync.Mutex
 	saved   Run
@@ -193,6 +242,23 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	defer lock.Release()
 	// We hold the lock, so an edit marker is from an edit that died.
 	RemoveEditMarker(ws.State)
+	if req.Expect != nil {
+		cur, err := ReadRun(ws.State.RunFile())
+		switch {
+		case errors.Is(err, ErrNoRun):
+			cur = nil
+		case err != nil:
+			return nil, err
+		}
+		if why := req.Expect.mismatch(cur); why != "" {
+			return nil, &ChangedError{Change: req.Change, Why: why}
+		}
+		if req.Mode == Resume && e.ResumeGate != nil {
+			if err := e.ResumeGate(ctx, req.Change, ws.Path); err != nil {
+				return nil, &ChangedError{Change: req.Change, Why: err.Error()}
+			}
+		}
+	}
 	if e.gated(req) {
 		// Under the change lock, which approve and unapprove also take:
 		// what is judged here is what the run starts with.
@@ -225,7 +291,7 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	if err := e.save(ws, rs); err != nil {
 		return nil, err
 	}
-	e.startEvents(ws, rs, req.Mode, prev)
+	e.startEvents(ws, rs, req.Mode, prev, req.By)
 	if e.StateHome != "" {
 		if err := Remember(e.StateHome, IndexEntry{Repo: e.Repo.Main, Change: req.Change, Worktree: ws.Path, State: string(ws.State)}); err != nil {
 			e.logf(req.Change, "warning: machine index: %v", err)

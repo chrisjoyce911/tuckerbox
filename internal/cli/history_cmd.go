@@ -43,6 +43,7 @@ type historyEvent struct {
 	Reason   string          `json:"reason,omitempty"`
 	Scope    string          `json:"scope,omitempty"`
 	OldScope string          `json:"old_scope,omitempty"`
+	By       string          `json:"by,omitempty"`
 }
 
 // history: tuckerbox history <change> [--json]
@@ -74,7 +75,7 @@ func (a App) history(args []string) int {
 				Time: rfc3339(e.Time), Kind: e.Kind, Step: e.Step, Round: e.Round, Agent: e.Agent,
 				Machine: e.Machine, To: e.To, Status: e.Status, Summary: e.Summary,
 				Findings: e.Findings, ExitCode: e.ExitCode, Reason: e.Reason,
-				Scope: e.Scope, OldScope: e.OldScope,
+				Scope: e.Scope, OldScope: e.OldScope, By: e.By,
 			})
 		}
 		return a.writeJSON(map[string]any{"version": HistoryVersion, "change": change, "events": out})

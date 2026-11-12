@@ -22,6 +22,9 @@ Commands:
                             one change, attached to this terminal;
                             --tasks <scope>: one change's group 2, task 2.3,
                             range 2.1-2.4 or next group)
+  autopilot [--once] [--dry-run]
+                            Keep starting approved changes, group by group,
+                            until Ctrl-C (runs keep going when it stops)
   board [--json] [--change <id>]  Show this repository’s change board
   status [--json]           Show every run on this machine
   logs <change> [step]      Show a step's agent output (--follow to watch)
@@ -107,6 +110,8 @@ func (a App) Run(args []string) int {
 			return a.tooMany(cmd)
 		}
 		return a.initConfig()
+	case "autopilot":
+		return a.autopilot(rest)
 	case "run":
 		return a.run(rest)
 	case "engine":

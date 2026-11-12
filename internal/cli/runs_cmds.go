@@ -304,14 +304,25 @@ func (s *switchWriter) set(w io.Writer) {
 //
 //	tuckerbox engine [--handshake] --mode start|resume|rerun [--step s] [--worktree p] [--start-rev c] [--tasks scope] <change>
 func (a App) engine(args []string) int {
-	var handshake bool
-	var mode, step, worktree, startRev, tasks string
-	pos, err := parseArgs(args, map[string]*bool{"handshake": &handshake},
-		map[string]*string{"mode": &mode, "step": &step, "worktree": &worktree, "start-rev": &startRev, "tasks": &tasks})
+	var handshake, expectNone bool
+	var mode, step, worktree, startRev, tasks, expectState, expectSince, by string
+	pos, err := parseArgs(args, map[string]*bool{"handshake": &handshake, "expect-none": &expectNone},
+		map[string]*string{"mode": &mode, "step": &step, "worktree": &worktree, "start-rev": &startRev, "tasks": &tasks,
+			"expect-state": &expectState, "expect-since": &expectSince, "by": &by})
 	if err != nil || len(pos) != 1 {
 		return a.usageErr("engine", "usage: tuckerbox engine --mode start|resume|rerun [--step s] [--worktree p] <change>")
 	}
-	req := runs.Request{Change: pos[0], Step: step, Worktree: worktree, StartRev: startRev, Scope: tasks}
+	req := runs.Request{Change: pos[0], Step: step, Worktree: worktree, StartRev: startRev, Scope: tasks, By: by}
+	switch {
+	case expectNone:
+		req.Expect = &runs.Expect{NoRun: true}
+	case expectState != "":
+		since, err := time.Parse(time.RFC3339Nano, expectSince)
+		if err != nil {
+			return a.usageErr("engine", "--expect-state needs --expect-since as an RFC 3339 time")
+		}
+		req.Expect = &runs.Expect{State: runs.State(expectState), Since: since}
+	}
 	switch mode {
 	case "start":
 		req.Mode = runs.Start
@@ -371,6 +382,16 @@ func (a App) newEngine(repo runs.Repo, cfg *config.Config, log io.Writer) *runs.
 	e := &runs.Engine{Repo: repo, Config: cfg, Log: log}
 	if cfg.RequireApproval {
 		e.Gate = approvalGate(repo)
+		e.ResumeGate = func(_ context.Context, change, worktree string) error {
+			st, err := approval.Judge(approval.DirOf(worktree, change))
+			if err != nil {
+				return err
+			}
+			if st.State == approval.None {
+				return fmt.Errorf("change %s is no longer approved", change)
+			}
+			return nil
+		}
 	}
 	if home, err := a.stateHome(); err == nil {
 		e.StateHome = home
