@@ -13,7 +13,7 @@
 
 ## 2. Passes (autopilot)
 
-- [ ] 2.1 Watch the repository's run states every 5 s; a full pass when a run ends or the interval passes: fetch the base (warn when offline), active changes in admission order (`add-priority`)
+- [x] 2.1 Watch the repository's run states every 5 s; a full pass when a run ends or the interval passes: fetch the base (warn when offline), active changes in admission order (`add-priority`)
 - [x] 2.2 Decide per change: approved (run gate), dependencies met (engine rule, read-only), no run or a ready run with unticked tasks; start until queued and running reach `max_parallel`
 - [x] 2.3 Start with `--tasks next` in group mode, no scope in change mode
 - [x] 2.4 Test: Within max_parallel

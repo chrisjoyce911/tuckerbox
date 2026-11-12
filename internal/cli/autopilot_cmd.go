@@ -13,6 +13,7 @@ import (
 	"github.com/chrisjoyce911/tuckerbox/internal/autopilot"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/history"
+	"github.com/chrisjoyce911/tuckerbox/internal/priority"
 	"github.com/chrisjoyce911/tuckerbox/internal/runs"
 )
 
@@ -81,6 +82,9 @@ func (a App) autopilot(args []string) int {
 		},
 		Start: func(_ context.Context, req autopilot.Request) error {
 			return a.spawnQuiet(repo.Root, req.Args())
+		},
+		Order: func(_ context.Context, ids []string) ([]string, error) {
+			return admissionOrder(repo, ids)
 		},
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), stopSignals...)
@@ -181,4 +185,28 @@ func approvalAt(ctx context.Context, repo runs.Repo, cfg *config.Config, change,
 	}
 	st, err := approval.JudgeWith(rev, entry)
 	return st.State, sp.Rev, err
+}
+
+// admissionOrder puts ids in add-priority's admission order (priority,
+// inherited from dependents, then id), read under the sidecar lock as the
+// slot queue reads it.
+func admissionOrder(repo runs.Repo, ids []string) ([]string, error) {
+	reqs := make([]priority.Request, len(ids))
+	for i, id := range ids {
+		reqs[i] = priority.Request{ID: id}
+	}
+	var all []priority.Change
+	err := runs.WithSidecarLock(repo.Common, func() error {
+		var err error
+		all, err = priority.Load(repo.Root)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(ids))
+	for _, r := range priority.Admission(reqs, all) {
+		out = append(out, r.ID)
+	}
+	return out, nil
 }
