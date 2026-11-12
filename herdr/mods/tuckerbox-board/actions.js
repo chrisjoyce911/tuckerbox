@@ -95,8 +95,18 @@ export function commandLine(action, change, extra = {}) {
   }
 }
 
+// The actions that start a run engine which goes on after the command
+// returns (tuckerbox run, resume, rerun). For a card on another machine,
+// exec goes through herdr-core, which ends every process it started when the
+// command returns, the detached engine too; so there these run in a
+// short-lived herdr-core terminal instead (detachCall). The app's own exec on
+// this computer leaves a detached child alone, so local cards keep exec. The
+// board shows their output or error either way.
+export const DETACHED = new Set(["start", "group", "resume", "rerun"]);
+
 // Where an action runs and how it shows (design: Actions):
-//   exec: run and show its output or error
+//   exec: run and show its output or error (`detach`: a remote card's run,
+//         in a short-lived herdr-core terminal so the engine keeps going)
 //   pane: a Herdr pane beside the board running the command (edit)
 //   tab:  a Herdr tab running the command (follow log)
 //   view: a Herdr view, no command (open proposal, open worktree)
@@ -105,6 +115,7 @@ export function invocation(action, card, extra = {}) {
   const argv = commandLine(action, card?.change, extra);
   const place = action === "mr" ? "browser" : action === "edit" ? "pane" : action === "follow" ? "tab" : argv ? "exec" : "view";
   const out = { action, place, argv, change: card?.change ?? "", on: card?.on ?? null, cwd: card?.path || "" };
+  if (DETACHED.has(action) && out.on) out.detach = true;
   if(action==="mr"){const link=card?.mr?.link??"";if(!/^https:\/\/[^/?#\s]+(?:[/?#]|$)/.test(link) || link.split("/")[2].includes("@"))throw new Error("merge request needs an HTTPS link");out.url=link;}
   if (action === "follow") out.title = `${card?.change} ${extra.step} log`;
   if (action === "edit") out.title = `edit ${card?.change} ${extra.file}`;
@@ -239,6 +250,55 @@ export function outcome(r) {
   const err = String(r?.stderr ?? "").trim();
   if ((r?.code ?? 1) === 0) return { ok: true, message: [out, err].filter(Boolean).join("\n") || "done" };
   return { ok: false, message: err || out || `exited with code ${r?.code}` };
+}
+
+// The `hc` arguments for a detached action: run the command in a terminal on
+// the card's machine, in its checkout, wait for it to return (tuckerbox run
+// returns once the engine is started) and print the result as JSON. Not
+// --rm: the terminal stays until the board has read its output, then
+// detachedResult says to remove it. --outlive-parent and --no-parent: the
+// terminal, and so the engine, belongs to nobody that could end it.
+export const DETACH_WAIT_S = 110;
+export function detachCall(inv) {
+  if (!inv?.detach || !Array.isArray(inv.argv) || !inv.argv.length) throw new Error(`${inv?.action} does not run detached`);
+  return [
+    "run", "--json", "--no-parent", "--no-notify", "--outlive-parent", "--timeout", String(DETACH_WAIT_S),
+    ...(inv.on ? ["--on", inv.on] : []),
+    ...(inv.cwd ? ["--cwd", inv.cwd] : []),
+    "--", ...inv.argv,
+  ];
+}
+
+// What `hc run --json` (an { code, stdout, stderr } from hc()) means for the
+// board: { ok, message, remove }. `remove` is the finished terminal to drop
+// with `hc rm` (null when there is none, or it is still running). A terminal
+// that could not start gives hc's error; one that ended gives the command's
+// own exit code and output, as outcome() shows them.
+export function detachedResult(r) {
+  // hc prints its JSON on stdout, and an error of its own on stderr.
+  const text = String(r?.stdout ?? "").trim();
+  const err = String(r?.stderr ?? "").trim();
+  let doc = null;
+  for (const t of [text, err]) {
+    try { doc = JSON.parse(t); } catch { doc = null; }
+    if (doc && typeof doc === "object") break;
+    doc = null;
+  }
+  if (doc?.error) {
+    const e = doc.error;
+    return { ok: false, message: [e.message || e.kind || "hc run failed", e.hint ? `(${e.hint})` : ""].filter(Boolean).join(" "), remove: null };
+  }
+  if (!doc || typeof doc.address !== "string") {
+    return { ok: false, message: err || text || `hc run exited with code ${r?.code}`, remove: null };
+  }
+  const w = doc.wait ?? {};
+  if (!w.ended) {
+    return { ok: true, message: `still starting in terminal ${doc.address}`, remove: null };
+  }
+  const code = Number.isInteger(w.exit_code) ? w.exit_code : (w.signal ? 128 : 1);
+  const res = outcome({ code, stdout: code === 0 ? doc.output : "", stderr: code === 0 ? "" : doc.output });
+  if (code !== 0 && !String(doc.output ?? "").trim() && w.signal) res.message = `ended by signal ${w.signal}`;
+  return { ...res, remove: doc.address };
 }
 
 // `tuckerbox validate --json`: it exits 1 for an invalid change and still
