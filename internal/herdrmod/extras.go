@@ -327,7 +327,24 @@ func installKeys(home string, env Env, rec *Record, key string, t *txn) (string,
 	}
 	first := string(before)
 	if rec.Keys != nil {
-		first = rec.Keys.Before // uninstall still restores the file from before the first install
+		if sum(before) == rec.Keys.After {
+			// Untouched since the last install: uninstall still restores
+			// the file from before the first install, byte for byte.
+			first = rec.Keys.Before
+		} else {
+			// The person edited keys.json since; the new baseline is the
+			// file as it was just now, minus the board's old binding, so
+			// uninstall keeps their edits.
+			base, _ := parseOrdered(before)
+			if old != "" {
+				if b, ok := base.(*obj); ok {
+					if s, ok := b.vals[rec.Keys.Section].(*obj); ok {
+						s.del(old)
+					}
+				}
+				first = string(encodeOrdered(base))
+			}
+		}
 	}
 	rec.Keys = &KeysRecord{Section: "global", Key: key, Action: action, Before: first, After: sum(after)}
 	if old != "" {

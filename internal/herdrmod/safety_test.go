@@ -394,6 +394,33 @@ func TestReinstallWithAnotherKey(t *testing.T) {
 	}
 }
 
+// Scenario: Uninstall after an edit and a new key.
+func TestReinstallWithAnotherKeyKeepsEdits(t *testing.T) {
+	home := herdrHome(t)
+	e, _ := extrasEnv(t, home, "darwin")
+	if _, err := InstallExtras(context.Background(), e, Options{Keys: true}); err != nil {
+		t.Fatal(err)
+	}
+	edited := strings.Replace(read(t, home, "keys.json"), `"global": {`, `"global": {"f9": "app.palette", `, 1)
+	if edited == read(t, home, "keys.json") {
+		t.Fatal("test edit not applied")
+	}
+	write(t, home, "keys.json", edited)
+	if _, err := InstallExtras(context.Background(), e, Options{Keys: true, Key: "f8"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Uninstall(context.Background(), e); err != nil {
+		t.Fatal(err)
+	}
+	keys := read(t, home, "keys.json")
+	if !strings.Contains(keys, `"f9": "app.palette"`) {
+		t.Errorf("the person's edit was lost:\n%s", keys)
+	}
+	if strings.Contains(keys, "tuckerbox-board") {
+		t.Errorf("board binding left behind:\n%s", keys)
+	}
+}
+
 // Scenario: New key clashes.
 func TestReinstallKeyClashes(t *testing.T) {
 	home := herdrHome(t)

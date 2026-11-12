@@ -93,3 +93,7 @@ When the record holds a toggle key and install runs with `--keys --key <key>` na
 #### Scenario: Uninstall after changing the key
 - **WHEN** the person installed with `--keys`, re-installed with `--keys --key f8`, and changed nothing else
 - **THEN** `tuckerbox herdr uninstall` leaves `keys.json` byte for byte as before the first install
+
+#### Scenario: Uninstall after an edit and a new key
+- **WHEN** the person installed with `--keys`, then added a shortcut of their own to `keys.json`, then re-installed with `--keys --key f8`
+- **THEN** `tuckerbox herdr uninstall` removes the board's binding and keeps the person's shortcut
