@@ -1,9 +1,10 @@
 // Running an action (6.4 to 6.6). Every action is a tuckerbox command on the
-// card's machine (exec), or a Herdr tab, pane or view that runs one or shows
+// card's machine (exec, or for a remote card's run a short-lived herdr-core
+// terminal), or a Herdr tab, pane or view that runs one or shows
 // something; the board writes nothing itself. With the dev fixtures the
 // board's paths are made up, so actions only say what they would run.
-import { exec, run, spaces, panes, focused } from "herdr";
-import { shown, herdrCall, outcome, parseValidation, invocation } from "./actions.js";
+import { exec, hc, run, spaces, panes, focused } from "herdr";
+import { shown, herdrCall, outcome, parseValidation, invocation, detachCall, detachedResult } from "./actions.js";
 import { startEdit, tick, markValidating, setValidation, keyCard } from "./edits.js";
 import { MOD } from "./data.js";
 
@@ -25,6 +26,24 @@ async function tuckerbox(inv) {
   }
 }
 
+// Start, Run group, Resume and Re-run on another machine: in a short-lived
+// herdr-core terminal, since exec there would end the run engine they leave
+// running (actions.js: DETACHED). Resolves with { ok, message }.
+async function detached(inv) {
+  let r;
+  try {
+    const x = await hc(detachCall(inv));
+    r = { code: x?.code ?? 0, stdout: x?.stdout ?? "", stderr: x?.stderr ?? "" };
+  } catch (e) {
+    return { ok: false, message: String(e?.message ?? e) };
+  }
+  const res = detachedResult(r);
+  // The board has the output: the finished terminal goes. A failed removal
+  // leaves a finished terminal behind, nothing worse.
+  if (res.remove) hc(["rm", "--json", res.remove]).catch(() => {});
+  return { ok: res.ok, message: res.message };
+}
+
 function shownSpace() {
   const f = focused();
   const all = spaces();
@@ -40,7 +59,7 @@ export async function perform(inv, opts = {}) {
   }
   if(inv.place==="browser"){try{if(!opts.openURL)throw new Error("browser action needs a click context");opts.openURL(inv.url);return {ok:true,message:""};}catch(e){return {ok:false,message:String(e?.message??e)};}}
   if (inv.place === "exec") {
-    const r = outcome(await tuckerbox(inv));
+    const r = inv.detach ? await detached(inv) : outcome(await tuckerbox(inv));
     if (r.ok) bump();
     return r;
   }

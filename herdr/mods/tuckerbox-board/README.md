@@ -16,7 +16,7 @@ stores no task state, writes no files and never moves a card by itself
 | `card.js` | Card detail: proposal (markdown), tasks with tick boxes, approval, last validation, dependencies, rounds with findings and task scope, history (newest first, local time), step settings with their pickers, actions, and Run group… (where Start is offered, and on Ready cards with unticked tasks) |
 | `model.js` | Data rules with no Herdr imports: reading the document, grouping, counts, times, polling |
 | `actions.js` | Which actions each state offers, and `commandLine()`, the one function that builds every tuckerbox command line |
-| `perform.js` | Runs an action: `exec` of the tuckerbox command on the card's machine, or the Herdr tab, pane or view for it. With the fixtures it only says what it would run |
+| `perform.js` | Runs an action: `exec` of the tuckerbox command on the card's machine (a short-lived `hc run` terminal for a remote card's Start, Run group, Resume and Re-run), or the Herdr tab, pane or view for it. With the fixtures it only says what it would run |
 | `edits.js` | Edit tracking: notes the editor's pane, validates when it closes, keeps the result in memory |
 | `proposal.js` | `view: "proposal"`: a change's proposal in a pane (Open proposal) |
 | `data.js` | Finds the space's Tuckerbox repository, runs `tuckerbox board --json` there on the space's machine and `--repo` on the other machines, or reads the fixtures |
@@ -279,6 +279,16 @@ Commands run with `exec` on the card's Herdr machine, in the document's
 lowercase letters, digits and dashes, a task number `n.m` and a position a
 whole number from 1, or the
 command isn't built. Archived (Done) cards offer nothing.
+
+Start, Run group, Resume and Re-run on a card from another machine are the
+exception. Their command leaves a run engine going after it returns, and
+herdr-core's `exec` ends every process it started when the command returns,
+so the engine would die at once and the run would use up a round. These run
+instead in a short-lived herdr-core terminal on that machine (`hc run --on
+<machine> --cwd <path> --outlive-parent --no-parent -- tuckerbox …`). The
+board waits for the command to return, shows its output or error, and then
+removes the finished terminal. The app's own `exec` on this computer leaves
+the engine alone, so this computer's cards still use it.
 
 ## Forge shipping
 
