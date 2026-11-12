@@ -9,6 +9,7 @@ import { cardActions, invocation, actionLabel, defaultStep, ACTIONS, dockCall, u
 import { perform, watchEdits, changed } from "./perform.js";
 import { editOf, editNote } from "./edits.js";
 import { button, tiny, dot, stateChip, approvalChip, progressBar, note, closeButton, SPINNER } from "./ui.js";
+import { SettingsView } from "./settings-view.js";
 
 const COL_W = 236;
 
@@ -24,7 +25,11 @@ export class BoardView extends View {
     this.notice = null; // { text, kind } from the last action
     this.handle = cx.focus_handle();
     // The first read from a timer: a spawn straight from init can stall in an overlay.
-    cx.timer.after(30, (cx) => this.refresh(cx));
+    cx.timer.after(30, (cx) => {
+      this.refresh(cx);
+      // Opened as Settings (the top bar: props.start "settings").
+      if (props()?.start === "settings") this.openSettings(cx);
+    });
     this.seen = changed();
     cx.timer.every(1000, (cx) => this.tick(cx));
   }
@@ -38,6 +43,7 @@ export class BoardView extends View {
     // The space or its folders changed (a window follows the shown space): look again now.
     const key = candidatesKey(candidates(this.self()));
     if (this.want !== null && key !== this.want) this.follow(key, cx);
+    this.settings?.tick(cx);
     if (due(this.last, Date.now(), this.shown())) this.refresh(cx);
   }
 
@@ -49,6 +55,22 @@ export class BoardView extends View {
     this.at = null;
     this.readError = null;
     this.last = 0;
+    // Settings follow the space too: the old space's read is dropped.
+    this.settings?.follow(key, cx);
+    cx.notify();
+  }
+
+  // Settings (settings-view: Opening Settings): the view takes the
+  // columns' place, for the repository and machine this board shows.
+  openSettings(cx) {
+    if (this.settings) return;
+    this.settings = new SettingsView(this);
+    this.settings.load(cx);
+    cx.notify();
+  }
+
+  closeSettings(cx) {
+    this.settings = null;
     cx.notify();
   }
 
@@ -319,6 +341,9 @@ export class BoardView extends View {
       .children((b?.unreachable ?? []).map((u, i) => div().id(`unreachable-${i}`).text_size(11).text_color(tm.blocked)
         .tooltip(u.message).child(`${u.machine ?? "this computer"} ${u.missing ? "has no tuckerbox" : "unreachable"}`)))
       .when(Boolean(b?.machine), (el) => el.child(div().text_size(11).text_color(tm.dim).child(b.machine)))
+      // Settings in the window and a docked pane (the drawer has none).
+      .when(Boolean(b), (el) => el.child(tiny("settings", this.settings ? "Board" : "Settings",
+        (_e, cx) => (this.settings ? this.closeSettings(cx) : this.openSettings(cx)), { primary: Boolean(this.settings), tooltip: "This repository's and this machine's Tuckerbox settings" })))
       // Dock only with a board to show: no Tuckerbox config, no Dock.
       .when(Boolean(overlay && b && !b.fixtures), (el) => el.child(tiny("dock", "Dock ⇥", (_e, cx) => this.dock(cx), { tooltip: "Show the board as a pane beside the terminals" })))
       .when(Boolean(!overlay && this.self() && props()?.view !== "panel"), (el) => el
@@ -337,6 +362,8 @@ export class BoardView extends View {
   }
 
   body() {
+    // Settings show their own reading and no-config states.
+    if (this.settings) return this.settings.render();
     const b = this.board;
     if (!b) return this.empty("Reading the board", "Looking for a Tuckerbox repository in this space.");
     if (b.error?.code === "no_config") {

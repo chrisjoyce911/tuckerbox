@@ -63,25 +63,25 @@
 
 ## 5. Settings view (settings-view)
 
-- [ ] 5.1 Settings in the board header (window and docked pane, not the drawer), view in place of the columns, Back; reads `tuckerbox config show --json` on the board's machine, dropping stale reads by the board's rule
-- [ ] 5.2 Node test "Open and go back"
-- [ ] 5.3 Node test "Space changed during a read"
-- [ ] 5.4 Repository and "This machine only (<machine>)" sections; editable only where the key's scope allows; value, source badge and the overridden value
-- [ ] 5.5 Node test "Machine-only key"
-- [ ] 5.6 Node test "Overridden machine default"
-- [ ] 5.7 Groups by key prefix (Workflow, Runs, Board, Autopilot, Change overrides, Other; Permission profiles, Forge tokens, Editor, Machines, Other); empty groups hidden; fields by key type
-- [ ] 5.8 Node test "Workflow group"
-- [ ] 5.9 Workflow editing: add a step (id and agent), remove, move up or down, as pending edits to `workflow.steps` and `steps.<id>`
-- [ ] 5.10 Node test "Reorder steps"
-- [ ] 5.11 Pending edits checked with `config set --dry-run --json`, problems by field, save target and reason shown, Save disabled while an edit adds a problem; one `config set --if-match` per save
-- [ ] 5.12 Node test "Edit that adds a problem"
-- [ ] 5.13 Node test "Save as a pull request"
-- [ ] 5.14 The view only runs `tuckerbox config`; shows a failed command's message and keeps pending edits
-- [ ] 5.15 Node test "Command refused"
-- [ ] 5.16 On "changed since read": reload, keep pending edits, mark keys changed meanwhile
-- [ ] 5.17 Node test "Someone saved first"
-- [ ] 5.18 Forge tokens group: `set` or `not set` with source; Set token opens a pane running the prompt on the board's machine; reload after it closes
-- [ ] 5.19 Node test "Set a token" (no token value in the mod's commands or state)
-- [ ] 5.20 Broken file: show the error with file and line, no fields for that file, Edit file opens a pane running `tuckerbox config edit` (`--machine` for machine config)
-- [ ] 5.21 Node test "Syntax error in repository config"
-- [ ] 5.22 Document the Settings view in README
+- [x] 5.1 Settings in the board header (window and docked pane, not the drawer), view in place of the columns, Back; reads `tuckerbox config show --json` on the board's machine, dropping stale reads by the board's rule
+- [x] 5.2 Node test "Open and go back"
+- [x] 5.3 Node test "Space changed during a read"
+- [x] 5.4 Repository and "This machine only (<machine>)" sections; editable only where the key's scope allows; value, source badge and the overridden value
+- [x] 5.5 Node test "Machine-only key"
+- [x] 5.6 Node test "Overridden machine default"
+- [x] 5.7 Groups by key prefix (Workflow, Runs, Board, Autopilot, Change overrides, Other; Permission profiles, Forge tokens, Editor, Machines, Other); empty groups hidden; fields by key type
+- [x] 5.8 Node test "Workflow group"
+- [x] 5.9 Workflow editing: add a step (id and agent), remove, move up or down, as pending edits to `workflow.steps` and `steps.<id>`
+- [x] 5.10 Node test "Reorder steps"
+- [x] 5.11 Pending edits checked with `config set --dry-run --json`, problems by field, save target and reason shown, Save disabled while an edit adds a problem; one `config set --if-match` per save
+- [x] 5.12 Node test "Edit that adds a problem"
+- [x] 5.13 Node test "Save as a pull request"
+- [x] 5.14 The view only runs `tuckerbox config`; shows a failed command's message and keeps pending edits
+- [x] 5.15 Node test "Command refused"
+- [x] 5.16 On "changed since read": reload, keep pending edits, mark keys changed meanwhile
+- [x] 5.17 Node test "Someone saved first"
+- [x] 5.18 Forge tokens group: `set` or `not set` with source; Set token opens a pane running the prompt on the board's machine; reload after it closes
+- [x] 5.19 Node test "Set a token" (no token value in the mod's commands or state)
+- [x] 5.20 Broken file: show the error with file and line, no fields for that file, Edit file opens a pane running `tuckerbox config edit` (`--machine` for machine config)
+- [x] 5.21 Node test "Syntax error in repository config"
+- [x] 5.22 Document the Settings view in README

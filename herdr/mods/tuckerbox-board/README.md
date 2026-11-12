@@ -21,7 +21,9 @@ stores no task state, writes no files and never moves a card by itself
 | `proposal.js` | `view: "proposal"`: a change's proposal in a pane (Open proposal) |
 | `data.js` | Finds the space's Tuckerbox repository, runs `tuckerbox board --json` there on the space's machine and `--repo` on the other machines, or reads the fixtures |
 | `ui.js` | Buttons, chips and badges, in theme colors |
-| `fixtures/` | `board.json` and `detail.json`: the board-data contract, by example |
+| `settings-view.js` | The Settings view (Settings in the board header, or `props.start: "settings"`): the repository's and this machine's configuration, edits, Save, Set token, Edit file |
+| `config.js` | Settings logic with no Herdr imports: reading `config show --json`, sections and groups, pending edits, the `tuckerbox config` command lines |
+| `fixtures/` | `board.json` and `detail.json`: the board-data contract, by example; `config.json`, the `config show --json` contract |
 | `test/` | `node --test test/` (no dependencies), and `check-fixtures.mjs` |
 
 ## Installing
@@ -323,3 +325,90 @@ these fields from run.json and makes no forge requests.
 Open merge request uses the local browser through the GPUI click context's
 `open_url`; Resume is offered on Ready with an open MR in mr mode. No merge
 action is exposed. Shipping is active for edit, task tick and approval gates.
+
+## Settings
+
+Settings in the board header (the window and a docked pane, not the drawer)
+replaces the columns with the Settings view for the repository and machine the
+board shows; Back, or Board in the header, returns to the columns. The top bar
+opens it directly with `props.start: "settings"`.
+
+- It reads `tuckerbox config show --json` on the board's machine, in the
+  repository's main checkout, when opened, after each save and on Read again.
+  A read that finishes after the space or machine changed is dropped, by the
+  board's own rule; a space change also drops pending edits.
+- **Repository** lists `repo` and `either` keys; **This machine only
+  (<machine>)** lists `machine` and `either` keys, with this machine's own
+  value. Each value has its source badge (`repo`, `machine`, `default`), and a
+  repository value that hides a machine value notes it.
+- Groups: Workflow, Runs, Board, Autopilot, Change overrides and Other;
+  Permission profiles, Forge tokens, Editor, Machines and Other. Empty groups
+  are hidden. Workflow lists the steps in order with their settings, and adds,
+  removes and moves steps as edits to `workflow.steps` and `steps.<id>.*`.
+- Change picks from fixed values (and `true`/`false`, and agents for a step's
+  `agent`) or opens a text field (a list is comma-separated). Unset removes the
+  key from that section's file. Edits are pending, per section, and checked
+  with `tuckerbox config set --dry-run --json` a moment after each one: the
+  problems show by their field, the bar says where the save goes and why, and
+  Save is off while an edit adds a problem.
+- Save runs one `tuckerbox config set --json --if-match <revision>` for the
+  section (`--machine` for the machine section) and shows its message and any
+  merge request link. Refused as changed since read, it reads again, keeps the
+  edits and marks the keys someone else changed. Any other failure shows the
+  command's message and keeps the edits.
+- Forge tokens show `set` or `not set` and where the token comes from, never a
+  value. Set token opens a pane on the board's machine running
+  `tuckerbox config set --machine forges."<host>".token`, whose prompt takes the
+  token; the view reads again when the pane closes.
+- A file that doesn't parse shows its error with file and line and no fields;
+  Edit file opens a pane running `tuckerbox config edit` (`--machine` for
+  machine config).
+
+The view only runs `tuckerbox config`; it writes no file.
+
+### Settings: the JSON it reads
+
+`tuckerbox config show --json` (`fixtures/config.json` is a full example):
+
+```json
+{
+  "machine": "studio",
+  "files": {
+    "repo": { "path": ".../.tuckerbox/config.toml", "revision": "<sha256>", "error": null },
+    "machine": { "path": ".../config.toml", "revision": null, "error": { "message": "expected '='", "line": 12 } },
+    "credentials": { "path": ".../credentials.toml", "revision": null, "error": null }
+  },
+  "keys": [
+    { "key": "max_parallel", "value": 2, "source": "repo", "scope": "either", "file": "repo",
+      "type": "int", "allowed": null, "default": 1, "secret": false,
+      "overridden": { "source": "machine", "value": 4 } },
+    { "key": "forges.\"github.com\".token", "secret": true, "set": true, "value": "set",
+      "source": "credentials", "scope": "machine", "type": "string" }
+  ]
+}
+```
+
+`type` is `string`, `int`, `bool` or `list` (durations are strings); `allowed`
+lists fixed values; an unset key has `value` null (or its default), source
+`default` and file `""`. A secret's source is `credentials`, `env:<NAME>`,
+`gh`, `glab` or `""`.
+
+`tuckerbox config set [--machine] --json [--dry-run] --if-match <revision|none> k=v... --unset k...`
+prints, and exits non-zero when `ok` is false:
+
+```json
+{
+  "ok": true, "dry_run": true, "file": "repo", "target": "pr",
+  "reason": "token for github.com on this machine",
+  "problems": [ { "file": "repo", "key": "steps.review.on_reject", "message": "no step bulid", "new": true } ],
+  "changes": [ { "change": "add-login", "key": "step.build.agent", "message": "is no longer allowed" } ],
+  "link": "https://github.com/example/shop/pull/9",
+  "message": "…",
+  "error": null
+}
+```
+
+`target` is `pr`, `local` or `machine`; `error.code` is `changed_since_read`,
+`check_failed`, `wrong_file` or `failed`. `--if-match none` means the file must
+still be absent.
+

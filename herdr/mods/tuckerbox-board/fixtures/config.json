@@ -1,0 +1,27 @@
+{
+  "machine": "studio",
+  "files": {
+    "repo": { "path": "/work/shop/.tuckerbox/config.toml", "revision": "r1", "error": null },
+    "machine": { "path": "/home/sam/.config/tuckerbox/config.toml", "revision": "m1", "error": null },
+    "credentials": { "path": "/home/sam/.config/tuckerbox/credentials.toml", "revision": null, "error": null }
+  },
+  "keys": [
+    { "key": "workflow.steps", "value": ["plan", "build", "review"], "source": "repo", "scope": "repo", "file": "repo", "type": "list", "allowed": null, "default": null, "secret": false },
+    { "key": "steps.plan.agent", "value": "claude", "source": "repo", "scope": "repo", "file": "repo", "type": "string", "secret": false },
+    { "key": "steps.build.agent", "value": "codex", "source": "repo", "scope": "repo", "file": "repo", "type": "string", "secret": false },
+    { "key": "steps.build.effort", "value": "medium", "source": "repo", "scope": "repo", "file": "repo", "type": "string", "allowed": ["low", "medium", "high"], "secret": false },
+    { "key": "steps.review.agent", "value": "claude", "source": "repo", "scope": "repo", "file": "repo", "type": "string", "secret": false },
+    { "key": "steps.review.on_reject", "value": "build", "source": "repo", "scope": "repo", "file": "repo", "type": "string", "secret": false },
+    { "key": "steps.review.max_rounds", "value": 3, "source": "repo", "scope": "repo", "file": "repo", "type": "int", "secret": false },
+    { "key": "max_parallel", "value": 2, "source": "repo", "scope": "either", "file": "repo", "type": "int", "default": 1, "secret": false, "overridden": { "source": "machine", "value": 4 } },
+    { "key": "require_approval", "value": true, "source": "default", "scope": "repo", "file": "", "type": "bool", "default": true, "secret": false },
+    { "key": "ship", "value": "mr", "source": "repo", "scope": "repo", "file": "repo", "type": "string", "allowed": ["none", "mr", "merge"], "default": "none", "secret": false },
+    { "key": "board.columns", "value": "compact", "source": "default", "scope": "either", "file": "", "type": "string", "allowed": ["compact", "full"], "default": "compact", "secret": false },
+    { "key": "autopilot.interval", "value": null, "source": "default", "scope": "either", "file": "", "type": "string", "default": "5m", "secret": false },
+    { "key": "overrides.agents", "value": ["claude", "codex"], "source": "repo", "scope": "repo", "file": "repo", "type": "list", "secret": false },
+    { "key": "permissions.edit.allowed_remotes", "value": ["*"], "source": "machine", "scope": "machine", "file": "machine", "type": "list", "secret": false },
+    { "key": "editor", "value": "nvim", "source": "machine", "scope": "machine", "file": "machine", "type": "string", "secret": false },
+    { "key": "forges.\"github.com\".token", "secret": true, "set": true, "value": "set", "source": "credentials", "scope": "machine", "file": "", "type": "string" },
+    { "key": "forges.\"gitlab.com\".token", "secret": true, "set": false, "value": "not set", "source": "", "scope": "machine", "file": "", "type": "string" }
+  ]
+}
