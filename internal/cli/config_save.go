@@ -323,14 +323,11 @@ func (a App) configSet(args []string) int {
 			res.Target = "local"
 			res.Reason = "no supported forge remote on this machine"
 		} else {
-			creds := cfg.Forges[host].Credentials()
-			withoutCLI := creds
-			withoutCLI.BorrowCLIToken = false
-			token, tokenErr := forge.LookupToken(ctx, target, withoutCLI, env.Getenv, nil)
-			// Borrowing is opt-in, after environment and stored credentials.
-			if !token.Available() && creds.BorrowCLIToken {
-				token, tokenErr = forge.ReadToken(ctx, target, cfg.Forges[host].Credentials())
+			borrow := a.BorrowToken
+			if borrow == nil {
+				borrow = forge.BorrowCLIToken
 			}
+			token, tokenErr := forge.LookupToken(ctx, target, cfg.Forges[host].Credentials(), env.Getenv, borrow)
 			if tokenErr != nil && !f.pr {
 				res.Target = "local"
 				res.Reason = "no token for " + host + " on this machine"
