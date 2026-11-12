@@ -313,14 +313,27 @@ func TestResumeAfterTheRunProcessDied(t *testing.T) {
 	f.plan(map[string]testenv.Action{"build": {WaitFor: f.gate("build"), ExitAfter: true}})
 	f.start("add-login")
 	f.waitAgent("add-login", "build")
+	// The scenario starts after the engine has acknowledged the agent's
+	// terminal, rather than during the launch-intent window.
+	waitFor(t, "the build terminal's address to be recorded", func() bool {
+		r := f.runOf("add-login")
+		return r.Terminal != nil && r.Terminal.Address != ""
+	})
 	addr := f.runOf("add-login").Terminal.Address
 	f.kill("add-login")
 
 	if res := f.tb("resume", "add-login"); res.code != 0 {
 		t.Fatalf("resume: %s%s", res.stdout, res.stderr)
 	}
-	waitFor(t, "the resumed run to hold the lock", func() bool {
-		return runs.Active(mustState(t, f.worktreeOf("add-login")).RunLock())
+	st := mustState(t, f.worktreeOf("add-login"))
+	waitFor(t, "the resumed run to adopt the build terminal", func() bool {
+		// Taking the lock precedes admission and adoption. Opening the
+		// gate at that point can let the original agent exit before the
+		// terminal backend adopts it, changing the scenario into a restart.
+		r := f.runOf("add-login")
+		log := readLog(t, st.Log("build"))
+		return runs.Active(st.RunLock()) && r.State == runs.Running &&
+			strings.Contains(log, "adopted live terminal") && strings.Contains(log, "("+addr+")")
 	})
 	r := f.runOf("add-login")
 	if r.Round != 1 || r.Step != "build" || r.State != runs.Running {

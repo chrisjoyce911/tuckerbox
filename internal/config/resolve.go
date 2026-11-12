@@ -232,6 +232,18 @@ func resolve(root, remote string, m, r *file) (*Config, Problems) {
 		}
 		cfg.Steps = append(cfg.Steps, resolveStep(cfg, root, id, i, index, mr.Steps[id], rr.Steps[id], m.path, r.path, orderFrom, knownAgent, add))
 	}
+	// A workflow id without its required definition is not a usable loop
+	// target. Name the referring field as well as the missing step fields.
+	for _, step := range cfg.Steps {
+		if step.OnReject == "" {
+			continue
+		}
+		target, ok := cfg.Step(step.OnReject)
+		if ok && (target.Agent == "" || target.Role == "") {
+			_, from, _ := pick(rr.Steps[step.ID].OnReject, mr.Steps[step.ID].OnReject, r.path, m.path)
+			add(from, "steps."+step.ID+".on_reject", "step %q has no complete definition", step.OnReject)
+		}
+	}
 	return cfg, ps
 }
 

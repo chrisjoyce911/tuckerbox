@@ -17,6 +17,8 @@ import (
 const configUsage = `usage:
   tuckerbox config show [--json]
   tuckerbox config get <key> [--json]
+  tuckerbox config set [--machine] [--local|--pr] [--if-match <rev|none>] [--dry-run] [--json] <key>=<value>... [--unset <key>]...
+  tuckerbox config edit [--machine] [--json]
 `
 
 // configCmd runs tuckerbox config <subcommand>.
@@ -26,6 +28,10 @@ func (a App) configCmd(args []string) int {
 		return 2
 	}
 	switch args[0] {
+	case "set":
+		return a.configSet(args[1:])
+	case "edit":
+		return a.configEdit(args[1:])
 	case "show":
 		return a.configShow(args[1:])
 	case "get":
