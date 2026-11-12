@@ -183,11 +183,16 @@ function shCall(argv, text) {
 // as UTF-8, into the command. The script has no double quote, which
 // Windows' command line would take apart. 16 KiB of text is about 22,000
 // characters of base64, inside Windows' 32,767-character command line.
+// Windows PowerShell's .NET opens the command's standard input with
+// [Console]::InputEncoding, which on a UTF-8 console (code page 65001)
+// writes a byte order mark first; so that is set to UTF-8 without one too
+// (where there is no console to set, there is no mark to stop).
 export function powershellCall(argv, text) {
   const b64 = base64(utf8(String(text)));
   const lit = (a) => `'${String(a).replace(/'/g, "''")}'`;
   const script = [
     "$OutputEncoding = New-Object System.Text.UTF8Encoding $false",
+    "try { [Console]::InputEncoding = $OutputEncoding } catch { }",
     `$t = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64}'))`,
     `$t | & ${argv.map(lit).join(" ")}`,
     "exit $LASTEXITCODE",
