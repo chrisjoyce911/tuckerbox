@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -310,7 +311,7 @@ func TestCloneCleanUpFails(t *testing.T) {
 	if r == nil || r.Drawer == nil {
 		t.Fatalf("clone not recorded: %q", did)
 	}
-	if *r.Drawer != (DrawerRecord{Layout: "main-tuckerbox", ClonedFrom: "main", Before: "", After: sum([]byte(f.cloneText))}) {
+	if !reflect.DeepEqual(*r.Drawer, DrawerRecord{Layout: "main-tuckerbox", ClonedFrom: "main", Before: "", After: sum([]byte(f.cloneText))}) {
 		t.Errorf("drawer %+v", r.Drawer)
 	}
 	if !strings.Contains(strings.Join(did, "\n"), "run tuckerbox herdr uninstall") {

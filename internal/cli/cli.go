@@ -53,10 +53,11 @@ Commands:
   priority <change> <n|up|down|top>
                             Move a change in the order (written in the
                             repository checkout, not committed)
-  herdr install [--keys [--key <key>]] [--drawer]
+  herdr install [--keys [--key <key>]] [--drawer] [--topbar]
                             Install or update the board mod in the Herdr app;
                             --keys binds a key to open and hide it, --drawer
-                            adds a peek drawer to your layout (Herdr must
+                            adds a peek drawer; --topbar adds controls beside tabs
+                            and a side-panel board (Herdr must
                             be running; if not, nothing changes)
   herdr uninstall           Undo what herdr install did
   version [--json]          Print the version, commit, Go version and platform

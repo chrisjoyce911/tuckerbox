@@ -321,7 +321,7 @@ export class BoardView extends View {
       .when(Boolean(b?.machine), (el) => el.child(div().text_size(11).text_color(tm.dim).child(b.machine)))
       // Dock only with a board to show: no Tuckerbox config, no Dock.
       .when(Boolean(overlay && b && !b.fixtures), (el) => el.child(tiny("dock", "Dock ⇥", (_e, cx) => this.dock(cx), { tooltip: "Show the board as a pane beside the terminals" })))
-      .when(Boolean(!overlay && this.self()), (el) => el
+      .when(Boolean(!overlay && this.self() && props()?.view !== "panel"), (el) => el
         .child(tiny("undock", "Undock", (_e, cx) => this.undock(cx, true), { tooltip: "Back to the board window" }))
         .child(closeButton("close-pane", (_e, cx) => this.undock(cx, false))))
       .when(Boolean(overlay), (el) => el.child(closeButton("close", () => closeOverlay(overlay))));

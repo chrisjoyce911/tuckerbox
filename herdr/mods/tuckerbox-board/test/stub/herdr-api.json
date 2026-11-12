@@ -64,7 +64,8 @@
     "truncate",
     "w",
     "w_full",
-    "when"
+    "when",
+    "on_size_change"
   ],
   "modules": {
     "gpui-kit": [
@@ -95,7 +96,12 @@
       "notify",
       "openOverlay",
       "closeOverlay",
-      "machines"
+      "machines",
+      "settings",
+      "layout",
+      "shared",
+      "setShared",
+      "terminals"
     ]
   }
 }
