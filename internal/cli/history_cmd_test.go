@@ -105,7 +105,7 @@ func TestHistoryAfterARejection(t *testing.T) {
 		t.Errorf("first row %q, want time %s", lines[1], first.Format("2006-01-02 15:04:05"))
 	}
 	out := res.stdout
-	for _, s := range []string{"rejected", "-> build: not yet", "    - [high] login.go: password is logged", "    - [low] no changelog entry", "ready"} {
+	for _, s := range []string{"rejected: not yet", "-> build", "    - [high] login.go: password is logged", "    - [low] no changelog entry", "ready"} {
 		if !strings.Contains(out, s) {
 			t.Errorf("table lacks %q:\n%s", s, out)
 		}
@@ -125,5 +125,56 @@ func TestHistoryUsage(t *testing.T) {
 	}
 	if res := f.tb("history", "../x"); res.code != 1 {
 		t.Errorf("bad id: exit %d %s", res.code, res.stderr)
+	}
+}
+
+// Review finding: a change that never ran in this repository has an empty
+// history, even when another repository on the machine ran a change with
+// the same id.
+func TestHistoryScopedToThisRepository(t *testing.T) {
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"fix-login"}})
+	other := tools.NewRepo(t, testenv.RepoOptions{Changes: []string{"fix-login"}})
+	if res := tbIn(t, other, "run", "--foreground", "fix-login"); res.code != 0 {
+		t.Fatalf("run in the other repository: %d %s", res.code, res.stderr)
+	}
+	if doc := f.history("fix-login"); len(doc.Events) != 0 {
+		t.Errorf("history here shows the other repository's %d events", len(doc.Events))
+	}
+	if res := f.tb("history", "fix-login"); res.code != 0 || !strings.Contains(res.stdout, "no history for fix-login") {
+		t.Errorf("text: %d %q", res.code, res.stdout)
+	}
+	// The other repository still sees its own.
+	if res := tbIn(t, other, "history", "fix-login", "--json"); res.code != 0 || !strings.Contains(res.stdout, `"ready"`) {
+		t.Errorf("other repository: %d %s", res.code, res.stdout)
+	}
+}
+
+// Review findings: findings on a result that isn't a rejection (here a
+// blocked build) are listed, and the last step's summary is shown.
+func TestHistoryTextShowsEveryResult(t *testing.T) {
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"fix-login"}})
+	f.env.SetPlan(t, map[string]testenv.Action{
+		"build:1": {Status: "blocked", Summary: "need a decision",
+			Findings: []testenv.Finding{{Severity: "medium", File: "login.go", Detail: "choose a credential store"}}},
+		"review": {Summary: "verified credential rotation"},
+	})
+	if res := f.tb("run", "--foreground", "fix-login"); res.code != 0 {
+		t.Fatalf("run: %d %s", res.code, res.stderr)
+	}
+	if res := f.tb("resume", "--foreground", "fix-login"); res.code != 0 {
+		t.Fatalf("resume: %d %s", res.code, res.stderr)
+	}
+	res := f.tb("history", "fix-login")
+	if res.code != 0 {
+		t.Fatalf("history: %d %s", res.code, res.stderr)
+	}
+	for _, s := range []string{
+		"blocked: need a decision",
+		"    - [medium] login.go: choose a credential store",
+		"done: verified credential rotation",
+	} {
+		if !strings.Contains(res.stdout, s) {
+			t.Errorf("table lacks %q:\n%s", s, res.stdout)
+		}
 	}
 }
