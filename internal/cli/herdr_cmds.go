@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/herdrmod"
 	"github.com/chrisjoyce911/tuckerbox/internal/version"
@@ -50,6 +51,15 @@ func (a App) herdrDoctorLine() string {
 		return ""
 	case !s.Installed:
 		return "herdr board mod: not installed (tuckerbox herdr install)"
+	case len(s.Modified) > 0 || len(s.Missing) > 0:
+		var what []string
+		for _, f := range s.Modified {
+			what = append(what, f+" changed")
+		}
+		for _, f := range s.Missing {
+			what = append(what, f+" missing")
+		}
+		return fmt.Sprintf("warning: herdr board mod in %s differs from what this tuckerbox ships (%s): run tuckerbox herdr install", s.Dir, strings.Join(what, ", "))
 	case !s.Current:
 		was := s.Stamp.Version
 		if was == "" {

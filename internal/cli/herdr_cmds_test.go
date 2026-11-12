@@ -100,6 +100,18 @@ func TestDoctorReportsTheBoardMod(t *testing.T) {
 	if !strings.Contains(out.String(), "herdr board mod: ") || !strings.Contains(out.String(), ", current") {
 		t.Errorf("out %q", out)
 	}
+	// A shipped file changed by hand, another deleted: named, doctor passes.
+	dir := filepath.Join(home, "mods", "tuckerbox-board")
+	os.WriteFile(filepath.Join(dir, "main.js"), []byte("broken"), 0o644)
+	os.Remove(filepath.Join(dir, "ui.js"))
+	out.Reset()
+	if code := a.Run([]string{"doctor"}); code != 0 {
+		t.Errorf("doctor failed on a changed mod: %d", code)
+	}
+	if !strings.Contains(out.String(), "differs from what this tuckerbox ships (main.js changed, ui.js missing): run tuckerbox herdr install") {
+		t.Errorf("out %q", out)
+	}
+	a.Run([]string{"herdr", "install"})
 	// An older copy: a warning, and doctor still passes.
 	vf := filepath.Join(home, "mods", "tuckerbox-board", herdrmod.VersionFile)
 	os.WriteFile(vf, []byte(`{"version":"v0.0.1","commit":"old","digest":"sha256:old"}`), 0o644)

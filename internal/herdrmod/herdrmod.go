@@ -242,13 +242,18 @@ func copyFS(dst string, src fs.FS) error {
 type State struct {
 	Herdr     bool  // the Herdr app's home exists
 	Installed bool  // the mod folder exists
-	Current   bool  // it is the copy this binary ships
+	Current   bool  // it is the copy this binary ships, unchanged
 	Stamp     Stamp // what its version.json says (empty if unreadable)
 	Dir       string
+	// Shipped files that differ from this binary's, or are gone, by
+	// slash-separated path. Other files are ignored: Herdr writes its own
+	// (gpui-kit.d.ts, jsconfig.json) and a person may add a dev.json.
+	Modified, Missing []string
 }
 
 // Inspect reports whether the mod is installed and whether it is the one
-// this binary ships, by the digest install recorded.
+// this binary ships: its version.json names this binary's mod, and every
+// shipped file is there with the shipped bytes.
 func Inspect(env Env) (State, error) {
 	env = env.withDefaults()
 	home, err := Home(env)
@@ -276,6 +281,28 @@ func Inspect(env Env) (State, error) {
 	if err != nil {
 		return s, err
 	}
-	s.Current = s.Stamp.Digest == want
+	err = fs.WalkDir(mod, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		shipped, err := fs.ReadFile(mod, p)
+		if err != nil {
+			return err
+		}
+		got, err := os.ReadFile(filepath.Join(s.Dir, filepath.FromSlash(p)))
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			s.Missing = append(s.Missing, p)
+		case err != nil:
+			return err
+		case !bytes.Equal(got, shipped):
+			s.Modified = append(s.Modified, p)
+		}
+		return nil
+	})
+	if err != nil {
+		return s, err
+	}
+	s.Current = s.Stamp.Digest == want && len(s.Modified) == 0 && len(s.Missing) == 0
 	return s, nil
 }

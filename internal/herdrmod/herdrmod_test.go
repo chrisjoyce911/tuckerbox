@@ -256,3 +256,44 @@ func TestDigestCoversPathsAndContent(t *testing.T) {
 		t.Error("version.json changed the digest")
 	}
 }
+
+func TestInspectSeesFilesChangedByHand(t *testing.T) {
+	home := t.TempDir()
+	var dirs []string
+	e := env(t, home, passCheck(&dirs))
+	res, err := Install(context.Background(), e, "v1", "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Files Herdr or a person adds don't count.
+	for _, n := range []string{"gpui-kit.d.ts", "jsconfig.json", "dev.json"} {
+		os.WriteFile(filepath.Join(res.Dir, n), []byte("{}"), 0o644)
+	}
+	if s, _ := Inspect(e); !s.Current || len(s.Modified)+len(s.Missing) != 0 {
+		t.Fatalf("added files counted: %+v", s)
+	}
+	// Modify one shipped file, delete another; the stamp stays as installed.
+	os.WriteFile(filepath.Join(res.Dir, "main.js"), []byte("broken"), 0o644)
+	os.Remove(filepath.Join(res.Dir, "ui.js"))
+	os.Remove(filepath.Join(res.Dir, "fixtures", "detail.json"))
+	s, err := Inspect(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Current {
+		t.Error("changed copy reported current")
+	}
+	if strings.Join(s.Modified, ",") != "main.js" {
+		t.Errorf("modified %v", s.Modified)
+	}
+	if strings.Join(s.Missing, ",") != "fixtures/detail.json,ui.js" {
+		t.Errorf("missing %v", s.Missing)
+	}
+	// Installing again puts it right.
+	if _, err := Install(context.Background(), e, "v1", "a"); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := Inspect(e); !s.Current {
+		t.Errorf("after reinstall %+v", s)
+	}
+}
