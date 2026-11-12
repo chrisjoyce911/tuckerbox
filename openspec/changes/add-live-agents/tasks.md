@@ -11,36 +11,36 @@
 
 ## 2. Terminal backend (agent-terminals)
 
-- [ ] 2.1 Interactive templates for `claude` and `codex`; custom `interactive` with `{turnhook}`; agents without one run headless
-- [ ] 2.2 Test "Custom agent without an interactive command"
-- [ ] 2.3 Terminal start under the change lock: `hc run --bg --name tb-<hash> --cwd <worktree> --no-parent --outlive-parent` with `herdr.space`, `herdr.tab` and `tuckerbox.*` labels; address in `run.json`; tested against a fake `hc` that records calls and enforces unique live names
-- [ ] 2.4 Test "Agent tab in Herdr" (name, cwd and labels)
-- [ ] 2.5 Adopt a live terminal whose step and round labels match; otherwise `hc kill` and wait before starting
-- [ ] 2.6 Test "Leftover terminal from an older round"
-- [ ] 2.7 Interactive start with the brief prompt, model, effort, profile flags and `TUCKERBOX_*` environment
-- [ ] 2.8 Test "Person answers a question" (fake interactive agent that reads a line from its terminal and then ends its turn)
-- [ ] 2.9 Hidden `tuckerbox agent-turn`: Claude `Stop` hook input (transcript path → last assistant message) and Codex `notify` input (`last-assistant-message`); atomic write of the last-message file; hooks passed with `--settings` and `-c notify=…`
-- [ ] 2.10 Test "Turn ends with a result" (result accepted, program ended after the grace, history kept)
-- [ ] 2.11 Test "Stale result in a later turn"
-- [ ] 2.12 A turn without a valid result keeps the step running with agent state `waiting for you`
-- [ ] 2.13 Test "Agent asks before finishing"
-- [ ] 2.14 `stop`: signal the run process when it holds the lock; otherwise take the lock, `hc kill <name>`, record `stopped`
-- [ ] 2.15 Test "Stop after a crash" (run process killed; agent terminal live; stop ends it)
-- [ ] 2.16 Crash detection with a live terminal shows `running` and `not watched`; `resume` and autopilot's crash resume adopt it with no new round
-- [ ] 2.17 Slot agent locks (`slots/<n>.agent.lock`, and for fleet slots): admission takes a slot only when both locks are free; record the slot number in `run.json`
-- [ ] 2.18 `tuckerbox agent-hold --slot <n> -- <argv>` (hidden): takes the agent lock, refuses if held, runs the agent as its child, passes its exit status; the terminal runs it
-- [ ] 2.19 Adoption takes the run lock of the agent's own slot from `run.json`, needing no free slot, waiting out an admission's brief hold
-- [ ] 2.20 Test "Crash, then another change queued" (kill the run process; the queued change stays queued until the agent ends)
-- [ ] 2.21 Test "Crash with room for another change"
-- [ ] 2.22 Test "Agent ends while orphaned"
-- [ ] 2.23 Test "Crash, another change admitted, then adoption" (separate processes holding real locks; never more than `max_parallel` agents)
-- [ ] 2.24 Run TLC on `formal/liveslots.tla` and `liveslots_broken_runlockonly` (`/opsx:tlc`, `scripts/tla-check.sh` in CI)
-- [ ] 2.25 Test "Resume after the run process died"
-- [ ] 2.26 `logs` through `hc read` (and following) while the terminal lives; append its history to the step log at the end
-- [ ] 2.27 Test "Logs after the step"
-- [ ] 2.28 `doctor` turn-hook self-check for each installed CLI
-- [ ] 2.29 Run TLC on `formal/terminals.tla` and its broken variants (`scripts/tla-check.sh` locally, the `tla` job in CI): the model passes, both variants are rejected
-- [ ] 2.30 Code review against model.md's mapping table: every terminal start is under the change lock with the change's one name; stop with a free lock takes the lock before `hc kill`
+- [x] 2.1 Interactive templates for `claude` and `codex`; custom `interactive` with `{turnhook}`; agents without one run headless
+- [x] 2.2 Test "Custom agent without an interactive command"
+- [x] 2.3 Terminal start under the change lock: `hc run --bg --name tb-<hash> --cwd <worktree> --no-parent --outlive-parent` with `herdr.space`, `herdr.tab` and `tuckerbox.*` labels; address in `run.json`; tested against a fake `hc` that records calls and enforces unique live names
+- [x] 2.4 Test "Agent tab in Herdr" (name, cwd and labels)
+- [x] 2.5 Adopt a live terminal whose step and round labels match; otherwise `hc kill` and wait before starting
+- [x] 2.6 Test "Leftover terminal from an older round"
+- [x] 2.7 Interactive start with the brief prompt, model, effort, profile flags and `TUCKERBOX_*` environment
+- [x] 2.8 Test "Person answers a question" (fake interactive agent that reads a line from its terminal and then ends its turn)
+- [x] 2.9 Hidden `tuckerbox agent-turn`: Claude `Stop` hook input (transcript path → last assistant message) and Codex `notify` input (`last-assistant-message`); atomic write of the last-message file; hooks passed with `--settings` and `-c notify=…`
+- [x] 2.10 Test "Turn ends with a result" (result accepted, program ended after the grace, history kept)
+- [x] 2.11 Test "Stale result in a later turn"
+- [x] 2.12 A turn without a valid result keeps the step running with agent state `waiting for you`
+- [x] 2.13 Test "Agent asks before finishing"
+- [x] 2.14 `stop`: signal the run process when it holds the lock; otherwise take the lock, `hc kill <name>`, record `stopped`
+- [x] 2.15 Test "Stop after a crash" (run process killed; agent terminal live; stop ends it)
+- [x] 2.16 Crash detection with a live terminal shows `running` and `not watched`; `resume` and autopilot's crash resume adopt it with no new round
+- [x] 2.17 Slot agent locks (`slots/<n>.agent.lock`, and for fleet slots): admission takes a slot only when both locks are free; record the slot number in `run.json`
+- [x] 2.18 `tuckerbox agent-hold --slot <n> -- <argv>` (hidden): takes the agent lock, refuses if held, runs the agent as its child, passes its exit status; the terminal runs it
+- [x] 2.19 Adoption takes the run lock of the agent's own slot from `run.json`, needing no free slot, waiting out an admission's brief hold
+- [x] 2.20 Test "Crash, then another change queued" (kill the run process; the queued change stays queued until the agent ends)
+- [x] 2.21 Test "Crash with room for another change"
+- [x] 2.22 Test "Agent ends while orphaned"
+- [x] 2.23 Test "Crash, another change admitted, then adoption" (separate processes holding real locks; never more than `max_parallel` agents)
+- [x] 2.24 Run TLC on `formal/liveslots.tla` and `liveslots_broken_runlockonly` (`/opsx:tlc`, `scripts/tla-check.sh` in CI)
+- [x] 2.25 Test "Resume after the run process died"
+- [x] 2.26 `logs` through `hc read` (and following) while the terminal lives; append its history to the step log at the end
+- [x] 2.27 Test "Logs after the step"
+- [x] 2.28 `doctor` turn-hook self-check for each installed CLI
+- [x] 2.29 Run TLC on `formal/terminals.tla` and its broken variants (`scripts/tla-check.sh` locally, the `tla` job in CI): the model passes, both variants are rejected
+- [x] 2.30 Code review against model.md's mapping table: every terminal start is under the change lock with the change's one name; stop with a free lock takes the lock before `hc kill`
 
 ## 3. Activity (agent-activity)
 

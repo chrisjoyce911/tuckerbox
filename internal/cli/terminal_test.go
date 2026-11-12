@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -473,8 +474,32 @@ func TestLogsAfterTheStep(t *testing.T) {
 	if res.code != 0 || !strings.Contains(res.stdout, "Which design?") {
 		t.Errorf("logs of the live terminal: exit %d\n%s%s", res.code, res.stdout, res.stderr)
 	}
+	// Following it shows what the agent writes next, until its terminal
+	// ends.
+	follow := exec.Command(tools.Tuckerbox, "logs", "add-login", "build", "--follow")
+	follow.Dir = f.repo
+	var followed lockedBuffer
+	follow.Stdout, follow.Stderr = &followed, &followed
+	if err := follow.Start(); err != nil {
+		t.Fatal(err)
+	}
+	followDone := make(chan error, 1)
+	go func() { followDone <- follow.Wait() }()
+	time.Sleep(700 * time.Millisecond)
 	if err := f.hc().Send(context.Background(), f.runOf("add-login").Terminal.Name, "the second"); err != nil {
 		t.Fatal(err)
+	}
+	select {
+	case err := <-followDone:
+		if err != nil {
+			t.Errorf("logs --follow: %v\n%s", err, followed.String())
+		}
+	case <-time.After(30 * time.Second):
+		_ = follow.Process.Kill()
+		t.Fatalf("logs --follow did not end with the terminal:\n%s", followed.String())
+	}
+	if out := followed.String(); !strings.Contains(out, "the person said: the second") || !strings.Contains(out, "ended; tuckerbox logs add-login build shows its session") {
+		t.Errorf("logs --follow:\n%s", out)
 	}
 	f.waitAgent("add-login", "review") // the build's terminal is replaced by the review's
 	res = f.tb("logs", "add-login", "build")
