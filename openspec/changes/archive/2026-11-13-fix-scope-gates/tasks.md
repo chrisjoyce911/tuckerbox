@@ -14,4 +14,4 @@
 
 ## 3. Integration
 
-- [ ] 3.1 (ci) `go vet`, `go test -race` and the TLA+ checks pass on Linux, macOS and Windows CI
+- [x] 3.1 (ci) `go vet`, `go test -race` and the TLA+ checks pass on Linux, macOS and Windows CI
