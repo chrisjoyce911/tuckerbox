@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 await import("./stub/register.mjs");
 const { state, reset } = await import("./stub/herdr.mjs");
-const { all, idOf } = await import("./stub/element.mjs");
+const { all, idOf, find, callsOf, text } = await import("./stub/element.mjs");
 const { fakeCx } = await import("./stub/cx.mjs");
 const { normaliseBoard } = await import("../model.js");
 const { autopilotName, autopilotMenu, startArgs, stopArgs, startAutopilot, stopAutopilot, sha256Hex, autopilotArgv, renderAutopilot, forgetAutopilot } = await import("../bar-autopilot.js");
@@ -185,4 +185,63 @@ test("Approval off, from the menu: no Autopilot section", async () => {
   const m = await draw(fakeCx());
   assert.deepEqual(m.ids, []);
   assert.deepEqual(m.items, []);
+});
+
+// ---- Through the production entry point: main.js routes view "bar-menu" ----
+
+const { default: Main } = await import("../main.js");
+const { BarView } = await import("../bar.js");
+const click = (el, id, cx) => callsOf(find(el, id), "on_click")[0][0]({}, cx);
+
+async function openMenu(cx) {
+  state.props = { view: "bar-menu", overlay: "menu-1", token: "t" };
+  forgetAutopilot();
+  const main = new Main(); main.init({}, cx);
+  main.render(cx); await cx.settle();
+  return main;
+}
+
+test("The bar menu (main.js, view bar-menu) shows Autopilot; Start runs hc and closes the menu", async () => {
+  let ap = { running: false };
+  space(() => ap);
+  const cx = fakeCx();
+  let main = await openMenu(cx);
+  let el = main.render(cx);
+  assert.deepEqual(text(el), ["Board", "Settings", "Autopilot is off", "Start autopilot"]);
+  click(el, "bar-autopilot-start", cx);
+  await cx.settle();
+  assert.equal(calls[0][0], "run");
+  assert.ok(calls[0].includes(NAME));
+  assert.deepEqual(state.closed, ["menu-1"]);
+
+  ap = { running: true, pid: 4242, machine: "mini", started: "2026-11-13T09:00:00+10:00", terminal: NAME };
+  main = await openMenu(cx);
+  el = main.render(cx);
+  assert.ok(text(el).includes("Stop autopilot"));
+  click(el, "bar-autopilot-stop", cx);
+  await cx.settle();
+  assert.deepEqual(calls[1], ["keys", "--json", NAME, "ctrl+c"]);
+});
+
+test("The bar menu (main.js) has no Autopilot with approval off, or started in a shell no Stop", async () => {
+  space(() => ({ running: false }), { require_approval: false });
+  const cx = fakeCx();
+  let el = (await openMenu(cx)).render(cx);
+  assert.deepEqual(text(el), ["Board", "Settings"]);
+  space(() => ({ running: true, pid: 5150, machine: "mini" }));
+  el = (await openMenu(cx)).render(cx);
+  assert.equal(find(el, "bar-autopilot-stop"), null);
+  assert.equal(find(el, "bar-autopilot-start"), null);
+  assert.match(text(el).join(" "), /pid 5150/);
+});
+
+test("The popup is tall enough for the Autopilot section when approval is required", async () => {
+  for (const [approval, height] of [[true, 84 + 56], [false, 84]]) {
+    reset(); state.hc = async () => ({ code: 0 });
+    space(() => ({ running: false }), { require_approval: approval, columns: [], cards: [] });
+    const cx = fakeCx(), bar = new BarView(); bar.init({}, cx);
+    bar.refresh(cx); await cx.settle();
+    bar.menu({ x: 500, y: 0, width: 30, height: 40 });
+    assert.equal(state.overlays.at(-1).height, height, `approval ${approval}`);
+  }
 });
