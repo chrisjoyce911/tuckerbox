@@ -8,11 +8,11 @@
 
 ## 2. Config (repo-config)
 
-- [ ] 2.1 Load and merge machine and repo `config.toml` with repo precedence; reject unknown keys
-- [ ] 2.2 Machine-only permission profiles with allowed remotes; reject raw agent args in repo config
-- [ ] 2.3 `tuckerbox check`: validate steps, loops, agents and profiles, with file and key in every message
-- [ ] 2.4 `tuckerbox init`: write a commented starter `.tuckerbox/config.toml`
-- [ ] 2.5 Tests for each repo-config scenario
+- [x] 2.1 Load and merge machine and repo `config.toml` with repo precedence; reject unknown keys
+- [x] 2.2 Machine-only permission profiles with allowed remotes; reject raw agent args in repo config
+- [x] 2.3 `tuckerbox check`: validate steps, loops, agents and profiles, with file and key in every message
+- [x] 2.4 `tuckerbox init`: write a commented starter `.tuckerbox/config.toml`
+- [x] 2.5 Tests for each repo-config scenario
 
 ## 3. Runs (change-runs)
 
