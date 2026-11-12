@@ -1,0 +1,2 @@
+title = "Forge shipping"
+depends_on = ["add-herdr-board"]
