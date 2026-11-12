@@ -28,7 +28,12 @@ func configApp(t *testing.T) (App, string, *bytes.Buffer, *bytes.Buffer) {
 				}
 				return "", errors.New("exit status 1")
 			},
-			UserConfigDir: func() (string, error) { return cfgDir, nil },
+			Getenv: func(k string) string {
+				if k == "XDG_CONFIG_HOME" {
+					return cfgDir
+				}
+				return ""
+			},
 		},
 		Getwd: func() (string, error) { return root, nil },
 	}

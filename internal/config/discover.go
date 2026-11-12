@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -15,14 +16,27 @@ import (
 type Env struct {
 	// Git runs git with args in dir and returns its standard output.
 	Git func(dir string, args ...string) (string, error)
+	// Getenv reads an environment variable, as os.Getenv does.
+	Getenv func(key string) string
+	// HomeDir returns the user's home directory, as os.UserHomeDir does.
+	HomeDir func() (string, error)
 	// UserConfigDir returns the user's config directory, as
-	// os.UserConfigDir does.
+	// os.UserConfigDir does. It is used only on Windows.
 	UserConfigDir func() (string, error)
+	// GOOS is the operating system, as runtime.GOOS; "" means runtime.GOOS.
+	GOOS string
 }
 
-// SystemEnv returns an Env that runs the real git and uses os.UserConfigDir.
+// SystemEnv returns an Env that runs the real git and reads the real
+// environment, home and config directories.
 func SystemEnv() Env {
-	return Env{Git: runGit, UserConfigDir: os.UserConfigDir}
+	return Env{
+		Git:           runGit,
+		Getenv:        os.Getenv,
+		HomeDir:       os.UserHomeDir,
+		UserConfigDir: os.UserConfigDir,
+		GOOS:          runtime.GOOS,
+	}
 }
 
 func runGit(dir string, args ...string) (string, error) {
@@ -41,14 +55,35 @@ func runGit(dir string, args ...string) (string, error) {
 	return string(out), nil
 }
 
-// MachinePath returns the machine config file:
-// os.UserConfigDir()/tuckerbox/config.toml.
+// MachinePath returns the machine config file, config.toml in:
+//
+//   - $XDG_CONFIG_HOME/tuckerbox, when XDG_CONFIG_HOME is set to an absolute
+//     path (on any OS; a relative value is ignored, as the XDG Base
+//     Directory spec requires);
+//   - otherwise ~/.config/tuckerbox on macOS, Linux and other Unix systems
+//     (not ~/Library/Application Support on macOS);
+//   - otherwise os.UserConfigDir()/tuckerbox on Windows, which is
+//     %AppData%\tuckerbox.
 func MachinePath(env Env) (string, error) {
-	dir, err := env.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("finding the user config directory: %w", err)
+	if xdg := env.Getenv("XDG_CONFIG_HOME"); xdg != "" && filepath.IsAbs(xdg) {
+		return filepath.Join(xdg, "tuckerbox", "config.toml"), nil
 	}
-	return filepath.Join(dir, "tuckerbox", "config.toml"), nil
+	goos := env.GOOS
+	if goos == "" {
+		goos = runtime.GOOS
+	}
+	if goos == "windows" {
+		dir, err := env.UserConfigDir()
+		if err != nil {
+			return "", fmt.Errorf("finding the user config directory: %w", err)
+		}
+		return filepath.Join(dir, "tuckerbox", "config.toml"), nil
+	}
+	home, err := env.HomeDir()
+	if err != nil {
+		return "", fmt.Errorf("finding the home directory: %w", err)
+	}
+	return filepath.Join(home, ".config", "tuckerbox", "config.toml"), nil
 }
 
 // RepoRoot returns the root of the git checkout (repository or worktree)

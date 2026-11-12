@@ -25,7 +25,12 @@ func TestDiscover(t *testing.T) {
 			"rev-parse --show-toplevel":      filepath.ToSlash(root) + "\n",
 			"config --get remote.origin.url": "git@github.com:me/repo.git\n",
 		}),
-		UserConfigDir: func() (string, error) { return cfgDir, nil },
+		Getenv: func(k string) string {
+			if k == "XDG_CONFIG_HOME" {
+				return cfgDir
+			}
+			return ""
+		},
 	}
 	opts, err := Discover(env, filepath.Join(root, "sub"))
 	if err != nil {
@@ -38,7 +43,7 @@ func TestDiscover(t *testing.T) {
 }
 
 func TestDiscoverNotARepo(t *testing.T) {
-	env := Env{Git: fakeGit(nil), UserConfigDir: func() (string, error) { return t.TempDir(), nil }}
+	env := Env{Git: fakeGit(nil), Getenv: func(string) string { return "" }}
 	if _, err := Discover(env, t.TempDir()); err == nil || !strings.Contains(err.Error(), "not in a git repository") {
 		t.Errorf("err %v", err)
 	}
@@ -59,5 +64,50 @@ func TestRemoteChoice(t *testing.T) {
 	none := Env{Git: fakeGit(map[string]string{"remote": ""})}
 	if got := Remote(none, "."); got != "" {
 		t.Errorf("no remote: %q", got)
+	}
+}
+
+func TestMachinePath(t *testing.T) {
+	xdg := t.TempDir()
+	home := filepath.Join(t.TempDir(), "home")
+	appData := filepath.Join(t.TempDir(), "AppData", "Roaming")
+	env := func(goos, xdgValue string) Env {
+		return Env{
+			GOOS: goos,
+			Getenv: func(k string) string {
+				if k == "XDG_CONFIG_HOME" {
+					return xdgValue
+				}
+				return ""
+			},
+			HomeDir:       func() (string, error) { return home, nil },
+			UserConfigDir: func() (string, error) { return appData, nil },
+		}
+	}
+	for _, c := range []struct {
+		name, goos, xdg, want string
+	}{
+		{"xdg on linux", "linux", xdg, filepath.Join(xdg, "tuckerbox", "config.toml")},
+		{"xdg on darwin", "darwin", xdg, filepath.Join(xdg, "tuckerbox", "config.toml")},
+		{"xdg on windows", "windows", xdg, filepath.Join(xdg, "tuckerbox", "config.toml")},
+		{"linux", "linux", "", filepath.Join(home, ".config", "tuckerbox", "config.toml")},
+		{"darwin", "darwin", "", filepath.Join(home, ".config", "tuckerbox", "config.toml")},
+		{"relative xdg ignored", "darwin", "rel/dir", filepath.Join(home, ".config", "tuckerbox", "config.toml")},
+		{"windows", "windows", "", filepath.Join(appData, "tuckerbox", "config.toml")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := MachinePath(env(c.goos, c.xdg))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != c.want {
+				t.Errorf("got %s, want %s", got, c.want)
+			}
+		})
+	}
+	failing := env("linux", "")
+	failing.HomeDir = func() (string, error) { return "", errors.New("no home") }
+	if _, err := MachinePath(failing); err == nil {
+		t.Error("no error without a home directory")
 	}
 }

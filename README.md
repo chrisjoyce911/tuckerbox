@@ -36,7 +36,7 @@ tuckerbox init      # writes a commented starter .tuckerbox/config.toml
 tuckerbox check     # validates it, merged with this machine's config
 ```
 
-A repository's workflow lives in `.tuckerbox/config.toml`, committed with it. Machine defaults go in `tuckerbox/config.toml` under your user config directory (`~/Library/Application Support` on macOS, `$XDG_CONFIG_HOME` or `~/.config` on Linux, `%AppData%` on Windows). Repository values win, except that permission profiles (the flags that let agents run without prompts, and which repository remotes may use them) and the editor can only be set on the machine:
+A repository's workflow lives in `.tuckerbox/config.toml`, committed with it. Machine defaults go in `$XDG_CONFIG_HOME/tuckerbox/config.toml` if that variable is set, otherwise `~/.config/tuckerbox/config.toml` on macOS and Linux and `%AppData%\tuckerbox\config.toml` on Windows. Repository values win, except that permission profiles (the flags that let agents run without prompts, and which repository remotes may use them) and the editor can only be set on the machine:
 
 ```toml
 # machine config

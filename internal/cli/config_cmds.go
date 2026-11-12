@@ -16,8 +16,17 @@ func (a App) configEnv() (config.Env, func() (string, error)) {
 	if env.Git == nil {
 		env.Git = sys.Git
 	}
+	if env.Getenv == nil {
+		env.Getenv = sys.Getenv
+	}
+	if env.HomeDir == nil {
+		env.HomeDir = sys.HomeDir
+	}
 	if env.UserConfigDir == nil {
 		env.UserConfigDir = sys.UserConfigDir
+	}
+	if env.GOOS == "" {
+		env.GOOS = sys.GOOS
 	}
 	getwd := a.Getwd
 	if getwd == nil {
