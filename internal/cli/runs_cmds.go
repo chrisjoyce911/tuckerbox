@@ -331,15 +331,15 @@ func (s *switchWriter) set(w io.Writer) {
 //
 //	tuckerbox engine [--handshake] --mode start|resume|rerun [--step s] [--worktree p] [--start-rev c] [--tasks scope] <change>
 func (a App) engine(args []string) int {
-	var handshake, expectNone bool
+	var handshake, expectNone, dispatched bool
 	var mode, step, worktree, startRev, tasks, expectState, expectSince, by string
-	pos, err := parseArgs(args, map[string]*bool{"handshake": &handshake, "expect-none": &expectNone},
+	pos, err := parseArgs(args, map[string]*bool{"handshake": &handshake, "expect-none": &expectNone, "dispatched": &dispatched},
 		map[string]*string{"mode": &mode, "step": &step, "worktree": &worktree, "start-rev": &startRev, "tasks": &tasks,
 			"expect-state": &expectState, "expect-since": &expectSince, "by": &by})
 	if err != nil || len(pos) != 1 {
 		return a.usageErr("engine", "usage: tuckerbox engine --mode start|resume|rerun [--step s] [--worktree p] <change>")
 	}
-	req := runs.Request{Change: pos[0], Step: step, Worktree: worktree, StartRev: startRev, Scope: tasks, By: by}
+	req := runs.Request{Change: pos[0], Step: step, Worktree: worktree, StartRev: startRev, Scope: tasks, By: by, Dispatched: dispatched}
 	switch {
 	case expectNone:
 		req.Expect = &runs.Expect{NoRun: true}
@@ -978,6 +978,8 @@ type statusRun struct {
 	// summary and findings, with the step and round that asked
 	// (blocked-answers), or a waiting terminal agent's last message.
 	Question *runs.QuestionView `json:"question,omitempty"`
+	// Machine is the machine the run is on, with --all-machines only.
+	Machine string `json:"machine,omitempty"`
 }
 
 // StatusVersion is the format version of tuckerbox status --json.
@@ -1024,12 +1026,15 @@ func (a App) statusRuns() ([]statusRun, error) {
 	return out, nil
 }
 
-// status: tuckerbox status [--json]
+// status: tuckerbox status [--all-machines] [--json]
 func (a App) status(args []string) int {
-	var asJSON bool
-	pos, err := parseArgs(args, map[string]*bool{"json": &asJSON}, nil)
+	var asJSON, all bool
+	pos, err := parseArgs(args, map[string]*bool{"json": &asJSON, "all-machines": &all}, nil)
 	if err != nil || len(pos) > 0 {
-		return a.usageErr("status", "usage: tuckerbox status [--json]")
+		return a.usageErr("status", "usage: tuckerbox status [--all-machines] [--json]")
+	}
+	if all {
+		return a.statusAllMachines(asJSON)
 	}
 	list, err := a.statusRuns()
 	if err != nil {

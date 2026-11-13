@@ -26,6 +26,27 @@ max_parallel = 1
 # change's branch and pushes nothing.
 ship = "local"
 
+# How this repository's changes run (repository only, so every machine agrees):
+# "solo" (default) on the machine where you type tuckerbox run; "fleet" on
+# one owner's several machines, claimed in refs/tuckerbox/fleet on the
+# remote (needs a remote); "team" by several people, each change claimed
+# with a merge request (needs ship = "mr" or "merge").
+# mode = "solo"
+# [fleet]
+# max_runs = 4          # claims across all machines (leave out for no limit)
+# lease = "10m"         # an active claim not renewed for this long expires
+# [team]
+# approvers = ["sam", "alex"]   # forge logins whose approval counts
+#
+# The machines and how many fleet runs each takes are machine config, never
+# this file, because how to reach a machine is your network detail:
+#   machine = "studio"
+#   fleet_capacity = 2  # dispatched runs this machine takes (default 0: none)
+#   [machines.mini]
+#   ssh = "mini"        # an SSH destination, such as an alias in ~/.ssh/config
+#   [machines.lab]
+#   hc = "lab"          # a herdr-core machine, reached with hc run --on
+
 # Board layout: "compact" (default) groups queued runs and workflow steps.
 # Use "steps" for a Queued column and one column per workflow step.
 # [board]

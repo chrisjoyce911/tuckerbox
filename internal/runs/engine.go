@@ -14,9 +14,11 @@ import (
 
 	"github.com/chrisjoyce911/tuckerbox/internal/agent"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
+	"github.com/chrisjoyce911/tuckerbox/internal/fleetslot"
 	"github.com/chrisjoyce911/tuckerbox/internal/forge"
 	"github.com/chrisjoyce911/tuckerbox/internal/history"
 	"github.com/chrisjoyce911/tuckerbox/internal/scope"
+	"github.com/chrisjoyce911/tuckerbox/internal/ship"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 )
 
@@ -59,6 +61,12 @@ type Request struct {
 	// By says who asked, for the history event that starts the run
 	// ("autopilot"); "" is a person.
 	By string
+	// Dispatched, for Start, marks a run that tuckerbox dispatch started
+	// (run --dispatched): it takes one of the machine's fleet_capacity
+	// fleet slots before anything else, and refuses with "<machine> is
+	// full" when none is free (machine-inventory: Machine-wide admission).
+	// Resume and Rerun of a run recorded as dispatched take one again.
+	Dispatched bool
 }
 
 // Expect is the run state a conditional request was decided on: no run,
@@ -382,8 +390,26 @@ func OpenWorkspace(ctx context.Context, path string) (Workspace, error) {
 func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	var ws Workspace
 	var err error
+	// A dispatched run holds a fleet slot from before it claims or makes
+	// anything until Run returns: ended, stopped, blocked or ready.
+	var fleet *fleetslot.Slot
+	defer func() { _ = fleet.Free() }()
+	// An existing run keeps the mode it started in.
+	if err := e.freezeMode(ctx, req); err != nil {
+		return nil, err
+	}
+	if req.Mode == Start && req.Dispatched {
+		if fleet, err = e.takeFleetSlot(); err != nil {
+			return nil, err
+		}
+	}
 	if req.Worktree != "" {
 		ws, err = OpenWorkspace(ctx, req.Worktree)
+		if err == nil && req.Mode != Start && fleet == nil {
+			if r, rerr := ReadRun(ws.State.RunFile()); rerr == nil && r.Dispatched {
+				fleet, err = e.takeFleetSlot()
+			}
+		}
 	} else {
 		ws, err = e.ensureWorktree(ctx, req)
 	}
@@ -453,6 +479,11 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	rs, startIdx, err := e.prepare(req, ws, adopt != nil)
 	if err != nil {
 		return nil, err
+	}
+	if req.Mode == Start {
+		// A person's own start of a change dispatch once started is the
+		// person's: it holds no fleet slot from now on.
+		rs.Dispatched = req.Dispatched
 	}
 	termName := agent.TerminalName(e.Repo.Identity(ctx), req.Change)
 	if adopt == nil {
@@ -627,6 +658,19 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	return e.steps(ctx, ws, rs, startIdx, stopReq)
 }
 
+// takeFleetSlot takes one of this machine's fleet slots, for a dispatched
+// run. It needs the machine state directory.
+func (e *Engine) takeFleetSlot() (*fleetslot.Slot, error) {
+	if e.StateHome == "" {
+		return nil, errors.New("a dispatched run needs the machine state directory for its fleet slot")
+	}
+	name, err := ship.MachineName(e.Config.Machine)
+	if err != nil || name == "" {
+		name = "this machine"
+	}
+	return fleetslot.Take(e.StateHome, name, e.Config.FleetCapacity)
+}
+
 func (e *Engine) gated(req Request) bool { return e.Gate != nil && req.Mode == Start }
 
 // ensureWorktree finds or makes req's worktree. A new one is made at a
@@ -679,6 +723,7 @@ func (e *Engine) prepare(req Request, ws Workspace, adopt bool) (*Run, int, erro
 		rs = &Run{
 			Change: req.Change, Repo: e.Repo.Root, Worktree: ws.Path, Branch: ws.Branch, Base: ws.Base,
 			Step: steps[0].ID, Round: 1, Created: now, Since: now, Scope: sc,
+			Mode: EffectiveMode(e.Config, nil),
 		}
 		if req.Mode == Rerun {
 			rs.Step = req.Step

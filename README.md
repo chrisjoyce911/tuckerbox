@@ -240,7 +240,54 @@ tuckerbox answer fix-login --resume "use plan B" # record, then resume as tucker
 
 `answer` takes the change lock, adds the answer (its text, your git `user.name`, the time, and the step and round it answers) to `answers` in the run's state, writes an `answered` history event, and leaves the run blocked. An answer is at most 16 KiB. It refuses a run that isn't blocked and records nothing, unless the run's step runs in a terminal whose agent waits for you: then the text is typed into that terminal (`hc send` to its address, only while it is still that step and round's terminal), as typing in its tab would, and recorded in history, and the run keeps running. When the run resumes, the step's brief has a section "Answers from a person" with the question and every answer since, oldest first; they stay in that step's briefs (after a crash or a stop too) until it reports a result, and later briefs leave them out. `--resume` keeps every gate and refusal of `resume`: if the resume is refused, the answer stays recorded, the output says so, and a later `resume` uses it. On the board, a blocked card's detail (or a card whose agent waits) shows the question, the answers so far and a text box: Answer runs `tuckerbox answer <change> -` with the text on standard input (piped in by `sh`, or by PowerShell when the card's machine runs Windows), and on a blocked card Answer and resume adds `--resume`.
 
-`doctor` exits non-zero only when a required tool (`git` or `openspec`) is missing. Agent CLIs are optional. It does not yet check whether an agent is signed in, and says `sign-in not checked`.
+`doctor` exits non-zero only when a required tool (`git` or `openspec`) is missing. Agent CLIs are optional. For each installed agent it says whether it is `signed in`, `signed out` or `unknown`, asking the CLI's own status command (`claude auth status`, `codex login status`) with a 5-second timeout. That starts no session and uses no model tokens. A custom agent, or an answer doctor can't read, is `unknown`. Doctor never signs in or changes agent config.
+
+## Operating modes and machines
+
+`mode` in `.tuckerbox/config.toml` says how the repository's changes run. It is a repository rule, so `check` refuses it in machine config:
+
+```toml
+mode = "fleet"          # "solo" (default), "fleet" or "team"
+
+[fleet]
+max_runs = 4            # claims across all machines (leave out for no limit)
+lease = "10m"           # an active claim not renewed for this long expires
+
+[team]
+approvers = ["sam", "alex"]   # forge logins whose approval counts
+```
+
+- **solo** is how Tuckerbox has always worked: runs happen on the machine where you type `tuckerbox run`.
+- **fleet** spreads one owner's approved changes over several machines. It needs a remote to hold the claims (`[shipping] remote`, else `origin`).
+- **team** lets several people work in one repository. Each change is claimed with a merge request, so it needs `ship = "mr"` or `"merge"`. With `require_approval` it also needs `approvers`.
+
+Changing `mode` never changes a run already started: each run keeps the mode it started in. A fleet claim left on the remote after a move away from fleet stays until its run ends or `tuckerbox claim release` removes it. Until then, `tuckerbox check` lists it.
+
+Which machines there are, and how to reach them, is machine config. A repository must not name hosts, so `check` refuses `[machines]` and `fleet_capacity` in repository config:
+
+```toml
+# machine config
+machine = "studio"      # this machine's name (default: the host name)
+fleet_capacity = 2      # dispatched runs this machine takes at once, all repositories (default 0)
+
+[machines.mini]
+ssh = "mini"            # an SSH destination, e.g. an alias in ~/.ssh/config
+
+[machines.lab]
+hc = "lab"              # a herdr-core machine, started with hc run --on
+```
+
+Give each machine exactly one of `ssh` or `hc`. Tuckerbox runs `ssh -T -o BatchMode=yes <destination> -- tuckerbox ...` or `hc run --on <name> --rm -- tuckerbox ...`. It never opens a terminal or asks for a password, and it sends no token. ssh and hc start with a clean environment: the few variables a transport needs (such as `PATH`, `HOME`, `SSH_AUTH_SOCK`, `LANG`/`LC_*`, `XDG_*`). That never includes any `[forges.<host>] token_env` variable or anything named like a secret. ssh is also given `-o SendEnv=-*`, so no `SendEnv` in `ssh_config` forwards a variable. A machine that doesn't answer within 30 seconds is named as unreachable, and the other machines carry on.
+
+`fleet_capacity` defaults to 0, so a machine takes fleet work only when its owner says so. A run started by `tuckerbox dispatch` takes one of the machine's fleet slots before it claims its change. The slots are OS file locks in the user state directory, shared by every repository on the machine. The run holds its slot while it is queued, running or shipping. With no slot free it refuses with `<machine> is full` and claims nothing. A run you start yourself takes no fleet slot; it is still limited by its repository's `max_parallel`.
+
+```sh
+tuckerbox machine --json                          # name, version, OS, fleet capacity and runs, agents and sign-in
+tuckerbox machine --json --for github.com/sam/app # also this machine's checkout of that repository and its runs there
+tuckerbox status --all-machines [--json]          # runs here and on every [machines.*], each with its machine
+```
+
+`machine --json` never prints tokens or permission flags. With `--for` it also lists the agents that the checkout's repository config defines. It finds the checkout through the machine index, which lists every repository that has had a run on this machine. A fresh clone is found once it has had a run there, so `dispatch` doesn't place work in it before then. `status --all-machines --json` has the same format and version as `status --json`. Each run gains a `machine` field, and `unreachable` lists the machines that didn't answer.
 
 ## Forge configuration
 

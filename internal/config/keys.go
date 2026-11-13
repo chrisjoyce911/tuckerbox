@@ -63,6 +63,7 @@ var (
 	agentBackends = []string{BackendAuto, BackendTerminal, BackendHeadless}
 	shipModes     = []string{string(ShipLocal), string(ShipMR), string(ShipMerge)}
 	forgeKinds    = []string{"github", "gitlab"}
+	modes         = []string{string(ModeSolo), string(ModeFleet), string(ModeTeam)}
 )
 
 // Keys is the key table: every key `tuckerbox check` knows, with its scope.
@@ -77,6 +78,15 @@ var Keys = []Key{
 	{Path: "max_parallel", Type: TypeInt, Scope: ScopeEither, Default: int64(DefaultMaxParallel)},
 	{Path: "ship", Type: TypeEnum, Allowed: shipModes, Scope: ScopeEither, Default: string(ShipLocal)},
 	{Path: "require_approval", Type: TypeBool, Scope: ScopeRepo, Default: true},
+	{Path: "mode", Type: TypeEnum, Allowed: modes, Scope: ScopeRepo, Default: string(ModeSolo)},
+	{Path: "fleet_capacity", Type: TypeInt, Scope: ScopeMachine, Default: int64(0)},
+
+	{Path: "fleet.max_runs", Type: TypeInt, Scope: ScopeRepo},
+	{Path: "fleet.lease", Type: TypeDuration, Scope: ScopeRepo, Default: DefaultFleetLease.String()},
+	{Path: "team.approvers", Type: TypeList, Scope: ScopeRepo},
+
+	{Path: "machines.<name>.ssh", Type: TypeString, Scope: ScopeMachine},
+	{Path: "machines.<name>.hc", Type: TypeString, Scope: ScopeMachine},
 
 	{Path: "workflow.steps", Type: TypeList, Scope: ScopeEither},
 	{Path: "steps.<id>.agent", Type: TypeString, Scope: ScopeEither},
@@ -276,6 +286,11 @@ var wrongFileMessages = map[string]string{
 	"editor":           "editor is machine-only; set it in machine config",
 	"agent_backend":    "agent_backend belongs in machine config: whether herdr-core is installed and running is a fact about the machine",
 	"require_approval": "require_approval belongs in repository config (.tuckerbox/config.toml), so every machine applies the same gate",
+	"mode":             "mode belongs in repository config (.tuckerbox/config.toml), so every machine runs the repository the same way",
+	"fleet":            "belongs in repository config (.tuckerbox/config.toml): the fleet's limits are a repository rule",
+	"team":             "belongs in repository config (.tuckerbox/config.toml): who may approve is a repository rule",
+	"machines":         "machines belongs in machine config: how to reach a machine is this person's network detail, and a repository must not name hosts",
+	"fleet_capacity":   "fleet_capacity belongs in machine config: how many fleet runs a machine takes is its owner's choice",
 	"overrides":        "[overrides] belongs in repository config (.tuckerbox/config.toml), so every machine allows the same change overrides",
 }
 

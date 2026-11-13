@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeEnv finds the tools in installed and answers version queries with
@@ -50,8 +51,10 @@ func TestCheckAllFound(t *testing.T) {
 		if !r.Found || r.Version != want[r.Tool.Name] {
 			t.Errorf("%s: found=%v version=%q, want %q", r.Tool.Name, r.Found, r.Version, want[r.Tool.Name])
 		}
-		if r.Tool.Agent && r.Note != SignInNotChecked {
-			t.Errorf("%s: note = %q, want %q", r.Tool.Name, r.Note, SignInNotChecked)
+		// The fake answers the sign-in check with the version text, which
+		// says neither way.
+		if r.Tool.Agent && (r.Note != Unknown || r.SignIn != Unknown) {
+			t.Errorf("%s: note = %q sign-in = %q, want %q", r.Tool.Name, r.Note, r.SignIn, Unknown)
 		}
 		if !r.Tool.Agent && r.Note != "" {
 			t.Errorf("%s: unexpected note %q", r.Tool.Name, r.Note)
@@ -75,7 +78,7 @@ func TestMissingOptionalAgentIsOK(t *testing.T) {
 			t.Errorf("output lacks %q:\n%s", s, out)
 		}
 	}
-	if strings.Contains(out, SignInNotChecked) {
+	if strings.Contains(out, Unknown) || strings.Contains(out, "signed") {
 		t.Errorf("sign-in note shown for a missing agent:\n%s", out)
 	}
 }
@@ -146,5 +149,99 @@ func TestSystemEnvFindsGoTool(t *testing.T) {
 	r = Check(SystemEnv(), []Tool{{Name: "tuckerbox-no-such-tool-x9", Required: true}})[0]
 	if r.Found {
 		t.Errorf("found a tool that does not exist: %+v", r)
+	}
+}
+
+// signInEnv answers each program's sign-in command with the given output
+// and error, and its version query with a version.
+func signInEnv(answers map[string]struct {
+	out string
+	err error
+}) Env {
+	return Env{
+		LookPath: func(name string) (string, error) {
+			if _, ok := answers[name]; ok {
+				return filepath.Join("fake", "bin", name), nil
+			}
+			return "", exec.ErrNotFound
+		},
+		Output: func(ctx context.Context, path string, args ...string) ([]byte, error) {
+			a := answers[filepath.Base(path)]
+			if len(args) == 1 && args[0] == "--version" {
+				return []byte("1.0.0\n"), nil
+			}
+			return []byte(a.out), a.err
+		},
+	}
+}
+
+func TestSignInStates(t *testing.T) {
+	exit1 := errors.New("exit status 1")
+	cases := []struct {
+		name, program, out string
+		err                error
+		want               string
+	}{
+		{"claude signed in", "claude", `{"loggedIn": true, "email": "x"}`, nil, SignedIn},
+		{"claude signed out", "claude", `{"loggedIn": false}`, exit1, SignedOut},
+		{"claude old cli", "claude", "error: unknown command 'auth'", exit1, Unknown},
+		{"codex signed in", "codex", "Logged in using ChatGPT\n", nil, SignedIn},
+		{"codex signed out", "codex", "Not logged in\n", exit1, SignedOut},
+		{"codex other", "codex", "Usage: codex ...", exit1, Unknown},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			env := signInEnv(map[string]struct {
+				out string
+				err error
+			}{c.program: {c.out, c.err}})
+			for _, r := range Check(env, AgentTools(nil)) {
+				if r.Tool.Name == c.program && r.SignIn != c.want {
+					t.Errorf("sign-in = %q, want %q", r.SignIn, c.want)
+				}
+			}
+		})
+	}
+}
+
+// Scenario: Unknown sign-in. A custom agent omp is installed: doctor
+// reports its sign-in as unknown and still passes.
+func TestUnknownSignInCustomAgent(t *testing.T) {
+	env := signInEnv(map[string]struct {
+		out string
+		err error
+	}{"git": {}, "openspec": {}, "omp-cli": {}})
+	tools := append(DefaultTools[:2:2], AgentTools(map[string]string{"omp": "omp-cli"})...)
+	results := Check(env, tools)
+	if !OK(results) {
+		t.Fatal("doctor fails with an unknown sign-in")
+	}
+	var omp *Result
+	for i := range results {
+		if results[i].Tool.Name == "omp" {
+			omp = &results[i]
+		}
+	}
+	if omp == nil || !omp.Found || omp.SignIn != Unknown {
+		t.Fatalf("omp = %+v, want found with sign-in unknown", omp)
+	}
+	var buf bytes.Buffer
+	if err := Write(&buf, results); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "omp") || !strings.Contains(buf.String(), "(unknown)") {
+		t.Errorf("output lacks omp's unknown sign-in:\n%s", buf.String())
+	}
+}
+
+// A sign-in check that hangs counts as unknown, after SignInTimeout.
+func TestSignInTimeoutIsUnknown(t *testing.T) {
+	env := Env{Output: func(ctx context.Context, path string, args ...string) ([]byte, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}, SignInTimeout: 50 * time.Millisecond}
+	tool := DefaultTools[2]
+	if got := SignIn(env, "claude", tool); got != Unknown {
+		t.Fatalf("sign-in = %q, want unknown", got)
 	}
 }
