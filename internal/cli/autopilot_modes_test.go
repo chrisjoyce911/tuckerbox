@@ -62,3 +62,48 @@ func TestAutopilotTeamMode(t *testing.T) {
 	}
 	f.noRun("add-login")
 }
+
+// A run keeps the mode it started in: a solo run with group 1 done is
+// still given its next group by autopilot after the repository moves to
+// fleet (dispatch skips a run it holds no claim for), while a new change
+// is left to dispatch.
+func TestAutopilotSoloRunAfterSwitchToFleet(t *testing.T) {
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"add-login", "add-users"}, RequireApproval: true})
+	f.withRemote()
+	f.tasks("add-login", threeGroups)
+	f.push()
+	f.approveAll("add-login")
+	f.env.SetPlan(t, map[string]testenv.Action{"build:1": {Tick: []string{"1.1"}}})
+	if res := f.pass(); !strings.Contains(res.stdout, "start add-login --tasks next") {
+		t.Fatalf("solo pass:\n%s", res.stdout)
+	}
+	f.waitState("add-login", "ready", "")
+	if r := f.runOf("add-login"); r.Scope == nil || r.Scope.Spec != "1" || r.Mode != "solo" {
+		t.Fatalf("group 1: %+v %s", r.Scope, r.Mode)
+	}
+	if res := f.pass("--dry-run"); !strings.Contains(res.stdout, "would start add-login --tasks next") {
+		t.Fatalf("solo dry run:\n%s", res.stdout)
+	}
+
+	// Move the repository to fleet, with mini as the only other machine.
+	ssh := useFakeSSH(t)
+	f.setTop("mode = \"fleet\"\n")
+	f.push()
+	machineConfig(t, f.env.Home, "machine = \"studio\"\n\n[machines.mini]\nssh = \"mini\"\n")
+	fl := &fleetFixture{cliFixture: f, ssh: ssh}
+	f.approveAll("add-users")
+	fl.report("mini", dispatch.Report{FleetCapacity: 2, Checkout: true})
+
+	res := f.pass("--dry-run")
+	for _, want := range []string{"would start add-login --tasks next", "would dispatch: start add-users on mini"} {
+		if !strings.Contains(res.stdout, want) {
+			t.Errorf("fleet dry run lacks %q:\n%s\n%s", want, res.stdout, res.stderr)
+		}
+	}
+	if strings.Contains(res.stdout, "would start add-users") || strings.Contains(res.stdout, "dispatch: continue add-login") {
+		t.Errorf("wrong placement:\n%s", res.stdout)
+	}
+	if c := fl.startCalls("mini"); len(c) != 0 {
+		t.Errorf("dry run started %v", c)
+	}
+}

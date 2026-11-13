@@ -185,10 +185,6 @@ func (p *Pilot) Pass(ctx context.Context) (Outcome, error) {
 		}
 	}
 	room := p.Config.MaxParallel - busy
-	if fleet {
-		// Dispatch places new changes and next groups.
-		room = 0
-	}
 	lookup := runs.DependencyLookupFrom(local, p.Config)
 	active := map[string]bool{}
 	for _, id := range ids {
@@ -196,15 +192,22 @@ func (p *Pilot) Pass(ctx context.Context) (Outcome, error) {
 	}
 
 	for _, id := range ids {
-		req, why, err := p.decide(ctx, id, base, rev, active, local, lookup, room)
+		var req *Request
+		var why string
+		var err error
+		l, hasRun := local[id]
+		// A run keeps the mode it started in (runs.EffectiveMode): after a
+		// switch to fleet, a solo run here still gets its next group and
+		// its crash resume from autopilot. New changes and fleet runs are
+		// dispatch's.
+		if fleet && (!hasRun || runs.EffectiveMode(p.Config, l.Run) == config.ModeFleet) {
+			why, err = p.fleetRun(id, l, hasRun)
+		} else {
+			req, why, err = p.decide(ctx, id, base, rev, active, local, lookup, room)
+		}
 		if err != nil {
 			p.printf("%s: %v", id, err)
 			continue
-		}
-		if fleet && req != nil {
-			// Only a crash resume gets here with no room; in fleet mode
-			// it is a person's to make.
-			req, why = nil, "its run crashed; in fleet mode autopilot resumes nothing, resume it by hand"
 		}
 		if why != "" {
 			out.NeedsYou[id] = why
@@ -296,6 +299,23 @@ func (p *Pilot) decide(ctx context.Context, id, base, rev string, active map[str
 		return nil, fmt.Sprintf("needs approval again before %s (approval is %s)", nextGroup(l), st), nil
 	}
 	return &Request{Change: id, Mode: runs.Start, Tasks: scope.Next, Expect: runs.Expect{State: r.State, Since: r.Since}}, "", nil
+}
+
+// fleetRun is what needs a person about change id in fleet mode, where
+// dispatch places new changes and continues fleet runs: a fleet run here
+// that is blocked or failed, or crashed (autopilot resumes no fleet run).
+func (p *Pilot) fleetRun(id string, l runs.LocalRun, hasRun bool) (string, error) {
+	switch {
+	case !hasRun || l.Active:
+		return "", nil
+	case l.Crashed():
+		return "its run crashed; autopilot resumes no fleet run, resume it by hand", nil
+	case l.Run.State == runs.Blocked:
+		return "blocked: " + l.Run.Reason, nil
+	case l.Run.State == runs.Failed:
+		return "failed: " + l.Run.Reason, nil
+	}
+	return "", nil
 }
 
 // crashed decides on a run whose process died: resume it once per crash
