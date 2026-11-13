@@ -64,3 +64,33 @@ func TestTwoPeopleTeamClaimAndCopiedMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+type closesDuringPushForge struct {
+	*fakeForge
+	reads int
+}
+
+func (f *closesDuringPushForge) FindMR(ctx context.Context, b string) (*forge.MR, error) {
+	f.reads++
+	if f.reads > 1 {
+		return nil, nil
+	}
+	return f.fakeForge.FindMR(ctx, b)
+}
+func TestTeamShippingNeverReopensClosedDraft(t *testing.T) {
+	f := repositories(t)
+	c := f.claim(f.one, "studio")
+	c.Identity.By = "sam"
+	api := &fakeForge{}
+	owned := ownedForge{api, "sam"}
+	_, err := c.Acquire(context.Background(), owned, forge.OpenRequest{Draft: true}, func(string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, f.one, "commit", "--allow-empty", "-m", "finished steps")
+	closing := &closesDuringPushForge{fakeForge: api}
+	_, err = c.PushTeam(context.Background(), closing, func(string) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "merge request closed") || api.opens != 1 {
+		t.Fatal(err, api.opens)
+	}
+}

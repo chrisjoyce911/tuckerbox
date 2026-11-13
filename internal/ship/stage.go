@@ -216,7 +216,9 @@ func (e *Engine) Run(ctx context.Context, resume bool) Outcome {
 	}
 	hadMR := r.MR != nil
 	var mr *forge.MR
-	if resume {
+	if e.Identity.By != "" {
+		mr, err = claim.PushTeam(ctx, e.Forge, e.persistPush)
+	} else if resume {
 		mr, err = claim.Resume(ctx, e.Forge, e.Request, func(sha string) error {
 			if !claim.adopting {
 				return e.persistPush(sha)
