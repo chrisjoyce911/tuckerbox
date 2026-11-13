@@ -188,6 +188,7 @@ func TestFleetEndToEndCrashDuringStepsAndCI(t *testing.T) {
 	})
 	oldBuild := fleetCrashRun(t, alpha, buildChange)
 	oldCI := fleetCrashRun(t, beta, ciChange)
+	testenv.WriteFile(t, filepath.Join(oldBuild.Worktree, "unfinished-build.txt"), "unpublished old-machine work\n")
 	if oldCI.State != runs.Shipping || oldCI.LastPush == "" || oldCI.MR == nil {
 		t.Fatalf("not in CI wait: %+v", oldCI)
 	}
@@ -230,6 +231,13 @@ func TestFleetEndToEndCrashDuringStepsAndCI(t *testing.T) {
 		if c.Machine != p[1] || c.Epoch != original[p[0]].Epoch+1 || c.State != fleet.Ready {
 			t.Fatalf("takeover claim: %+v", c)
 		}
+	}
+	if text := readFile(t, filepath.Join(oldBuild.Worktree, "unfinished-build.txt")); text != "unpublished old-machine work\n" {
+		t.Fatal("takeover changed unpublished old-machine work")
+	}
+	recoveredBuild := fleetCrashRun(t, beta, buildChange)
+	if _, err := os.Stat(filepath.Join(recoveredBuild.Worktree, "unfinished-build.txt")); !os.IsNotExist(err) {
+		t.Fatal("step takeover copied unpublished old-machine work")
 	}
 	recoveredCI := fleetCrashRun(t, alpha, ciChange)
 	if len(recoveredCI.History) != 0 || recoveredCI.LastPush == oldCITip {
