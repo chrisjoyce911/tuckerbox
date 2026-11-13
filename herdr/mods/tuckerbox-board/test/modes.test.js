@@ -11,7 +11,7 @@ const { find, callsOf, text } = await import("./stub/element.mjs");
 const { fakeCx } = await import("./stub/cx.mjs");
 const { BoardView } = await import("../board.js");
 const { normaliseBoard, mergeBoards, claimText } = await import("../model.js");
-const { detailActions, cardActions, dispatchOffered, dispatchInvocation, invocation, commandLine, confirmText, detachCall } = await import("../actions.js");
+const { detailActions, cardActions, dispatchOffered, dispatchInvocation, invocation, commandLine, confirmText, detachCall, actionCard } = await import("../actions.js");
 
 const COLUMNS = [
   { id: "proposed", kind: "proposed", name: "Proposed" }, { id: "approved", kind: "approved", name: "Approved" },
@@ -156,4 +156,50 @@ test("the header shows the mode, the fleet count and stale claims", () => {
   assert.match(words(doc([])), /fleet 1\/3 claimed/);
   assert.match(words(doc([], { mode: "team", fleet: null, claims_read: { source: "forge", at: "2026-11-13T08:55:00+10:00", stale: true, error: "forge down" } })), /team.*claims from/);
   assert.doesNotMatch(words(doc([], { mode: "solo", fleet: null, claims_read: null })), /fleet|team/);
+});
+
+// Take over runs on the board's own machine (studio, this computer), not on
+// the expired holder's: the merged board takes mini's copy of the card, with
+// its run, its machine and its checkout there.
+test("Take over of a card merged from the expired holder runs on the board's machine", async () => {
+  const own = doc([card("add-login", { claim: expired })]);
+  const mini = normaliseBoard({ ...own, path: "/srv/shop", machine: "mini", os: "linux",
+    cards: [card("add-login", { column: "in_progress", state: "running", step: "build", claim: expired })] }, { on: "mini" });
+  const merged = mergeBoards(own, [{ machine: "mini", board: mini }]);
+  const c = merged.cards[0];
+  assert.equal(c.on, "mini");
+  assert.equal(c.path, "/srv/shop");
+  assert.ok(detailActions(c, merged).includes("takeover"));
+
+  // The board.
+  const v = view(merged);
+  const cx = fakeCx();
+  click(v.card(c), "takeover-add-login", cx);
+  click(v.render(), "confirm-yes", cx);
+  await cx.settle();
+  assert.deepEqual(execs, [{ cmd: "tuckerbox", args: ["run", "--take-over", "add-login"], cwd: "/work/shop", on: null }]);
+
+  // Card detail, opened from that board: its detail read is on mini and
+  // replaces the board path with mini's; Take over still runs here.
+  execs = [];
+  const { CardView } = await import("../card.js");
+  state.props = { change: c.change, card: c, board: v.boardProps() };
+  const d = new CardView();
+  d.init({}, { ...fakeCx(), focus_handle: () => ({ focus() {}, is_focused: () => false }) });
+  d.board = { ...d.board, path: "/srv/shop" };
+  const dcx = fakeCx();
+  d.act("takeover", {}, dcx);
+  assert.deepEqual(execs, [], "asks first");
+  assert.match(d.pending.confirm, /left behind/);
+  d.act(d.pending.action, d.pending.extra, dcx);
+  await dcx.settle();
+  // (then it reads the detail again, on mini)
+  assert.deepEqual(execs.filter((e) => e.args[0] === "run"), [{ cmd: "tuckerbox", args: ["run", "--take-over", "add-login"], cwd: "/work/shop", on: null }]);
+
+  // A board shown from mini's space takes over on mini, in a herdr-core terminal there.
+  const there = invocation("takeover", actionCard("takeover", c, view({ ...merged, on: "mini", path: "/srv/shop" }).home()));
+  assert.equal(there.on, "mini");
+  assert.equal(there.detach, true);
+  // Other actions keep the card's machine.
+  assert.equal(invocation("stop", actionCard("stop", c, v.home())).on, "mini");
 });

@@ -291,6 +291,20 @@ export function dispatchInvocation(at = {}) {
   return out;
 }
 
+// Actions that run on the board's own machine, in its checkout, whichever
+// machine the card's run is on: Take over moves the change to this
+// machine, so it can't run on the old holder's (modes-board: Take over
+// from the board).
+export const ON_BOARD = new Set(["takeover"]);
+
+// The card an action runs against: for ON_BOARD actions the card with the
+// board's own machine, checkout and OS (`home`: { on, path, os }) in place
+// of its run's.
+export function actionCard(action, card, home) {
+  if (!ON_BOARD.has(action) || !card) return card;
+  return { ...card, on: home?.on ?? null, path: home?.path || "", os: home?.os ?? "" };
+}
+
 // What the person confirms before an action, or "" for none. Take over
 // leaves the old machine's work behind (fleet-claims: Taking over).
 export function confirmText(action, card) {

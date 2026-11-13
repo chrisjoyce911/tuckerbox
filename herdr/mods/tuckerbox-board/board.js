@@ -5,7 +5,7 @@ import { v_flex, h_flex, Scrollbar } from "gpui-base";
 import { theme, props, openOverlay, closeOverlay, spaces, panes, focused, run, notify } from "herdr";
 import { MOD, loadAll, locate, candidates, fixturesFolder } from "./data.js";
 import { group, counts, columnName, due, isShown, ago, needsYou, needsYouReason, newlyNeeding, toastCall, activityLine, candidatesKey, openGate, showsApproval, NO_CONFIG, sortedColumn, dropPosition, eventBox, liveDrop, priorityCard, oneLine, boardMode, fmtLocal } from "./model.js";
-import { cardActions, invocation, actionLabel, defaultStep, ACTIONS, dockCall, undockCalls, dispatchOffered, dispatchInvocation, confirmText, claimLine } from "./actions.js";
+import { cardActions, invocation, actionLabel, defaultStep, ACTIONS, dockCall, undockCalls, dispatchOffered, dispatchInvocation, confirmText, claimLine, actionCard } from "./actions.js";
 import { perform, watchEdits, changed } from "./perform.js";
 import { editOf, editNote } from "./edits.js";
 import { button, tiny, dot, stateChip, approvalChip, progressBar, note, closeButton, SPINNER } from "./ui.js";
@@ -142,7 +142,7 @@ export class BoardView extends View {
       // Dispatch runs on the board's own machine, in its checkout.
       inv = action === "dispatch"
         ? dispatchInvocation({ cwd: this.board?.path || this.at?.root || this.at?.cwd || "", on: this.board?.on ?? this.at?.on ?? null })
-        : invocation(action, card ?? { change: "", path: this.at?.cwd ?? "", on: this.at?.on ?? null }, extra);
+        : invocation(action, actionCard(action, card, this.home()) ?? { change: "", path: this.at?.cwd ?? "", on: this.at?.on ?? null }, extra);
     }
     catch (e) { this.notice = { text: String(e?.message ?? e), kind: "error" }; cx.notify(); return; }
     inv.card = card;
@@ -158,9 +158,14 @@ export class BoardView extends View {
     });
   }
 
+  // The board's own machine and checkout: where Dispatch and Take over run.
+  home() {
+    return { on: this.board?.on ?? this.at?.on ?? null, path: this.board?.path || this.at?.root || this.at?.cwd || "", os: this.board?.os ?? "" };
+  }
+
   boardProps() {
     const b = this.board ?? {};
-    return { ship:b.ship,mode:b.mode,repo: b.repo, path: b.path, require_approval: b.require_approval, columns: b.columns, steps: b.steps, on: b.on, fixtures: Boolean(b.fixtures) };
+    return { ship:b.ship,mode:b.mode,repo: b.repo, path: b.path, require_approval: b.require_approval, columns: b.columns, steps: b.steps, on: b.on, os: b.os, fixtures: Boolean(b.fixtures) };
   }
 
   // Dock: this window becomes a pane beside the shown space's terminals,

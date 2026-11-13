@@ -7,7 +7,7 @@ import { v_flex, h_flex, TextView, Textarea, TextareaState } from "gpui-base";
 import { theme, props, closeOverlay } from "herdr";
 import { loadDetail } from "./data.js";
 import { normaliseCard, cardAt, columnName, newestFirst, eventText, fmtLocal, fmtBrisbane, taskGroups, approvalBadge, isActive, activityRows, waitingForYou, ago, answerable, showsApproval } from "./model.js";
-import { detailActions, invocation, actionLabel, defaultStep, rerunSteps, runGroups, canEdit, EDIT_FILES, ACTIONS, answerActions, confirmText, claimLine } from "./actions.js";
+import { detailActions, invocation, actionLabel, defaultStep, rerunSteps, runGroups, canEdit, EDIT_FILES, ACTIONS, answerActions, confirmText, claimLine, actionCard } from "./actions.js";
 import { perform, validate, watchEdits, changed } from "./perform.js";
 import { editOf, editNote } from "./edits.js";
 import { settingsRows, choose, canPick } from "./settings.js";
@@ -20,6 +20,10 @@ export class CardView extends View {
     const pr = props() ?? p ?? {};
     this.change = pr.change ?? "";
     this.board = pr.board ?? { columns: [], require_approval: true };
+    // The board's own machine and checkout, where Take over runs. The
+    // detail read below happens on the card's machine and replaces
+    // this.board.path with that machine's, so it is kept here.
+    this.home = { on: this.board.on ?? null, path: this.board.path ?? "", os: this.board.os ?? "" };
     // Keep the card's machine, checkout and operating system: the answer
     // actions pick their standard-input transport from os (stdinCall) and
     // may run before, or without, the detail read below.
@@ -88,7 +92,7 @@ export class CardView extends View {
       return;
     }
     let inv;
-    try { inv = invocation(action, this.card, extra); }
+    try { inv = invocation(action, actionCard(action, this.card, this.home), extra); }
     catch (e) { this.notice = { text: String(e?.message ?? e), kind: "error" }; cx.notify(); return; }
     inv.card = this.card;
     inv.board = this.board;
