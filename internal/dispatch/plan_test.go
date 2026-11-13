@@ -296,3 +296,26 @@ func TestStartArgs(t *testing.T) {
 		t.Errorf("args %v", got)
 	}
 }
+
+// A change with a run on any machine is not placed again, even without a
+// fleet claim: a run started in solo mode before the repository became a
+// fleet keeps working unclaimed.
+func TestExistingRunNotPlacedAgain(t *testing.T) {
+	p := Decide(Input{
+		Changes: []Change{approved("add-login", "mini"), approved("add-users")},
+		Machines: []Machine{
+			holder("studio", 0, 0, RunReport{Change: "add-login", State: "running", Since: since, Mode: "solo"}),
+			holder("lab", 1, 0, RunReport{Change: "add-users", State: "stopped", Since: since, Mode: "fleet"}),
+			machine("mini", 2, 0),
+		},
+	})
+	if len(p.Actions) != 0 {
+		t.Fatalf("placed %+v", p.Actions)
+	}
+	if s := skipOf(t, p, "add-login"); s.Why != "has a run on studio (running, started in solo mode) and no fleet claim; not placed again" {
+		t.Errorf("add-login: %q", s.Why)
+	}
+	if s := skipOf(t, p, "add-users"); s.Why != "has a run on lab (stopped) and no fleet claim; not placed again" {
+		t.Errorf("add-users: %q", s.Why)
+	}
+}

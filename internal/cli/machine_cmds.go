@@ -193,7 +193,7 @@ func (a App) machineReport(ctx context.Context, cfg *config.Config, forRemote st
 		if err != nil {
 			continue
 		}
-		rr := machines.RunReport{Change: r.Change, State: string(r.State), Complete: r.Complete, Dispatched: r.Dispatched}
+		rr := machines.RunReport{Change: r.Change, State: string(r.State), Complete: r.Complete, Dispatched: r.Dispatched, Mode: string(r.StartedMode())}
 		if !r.Since.IsZero() {
 			rr.Since = r.Since.Format(time.RFC3339Nano)
 		}

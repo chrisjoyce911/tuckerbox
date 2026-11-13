@@ -49,6 +49,8 @@ type RunReport struct {
 	Scope      string    `json:"scope,omitempty"`
 	Complete   bool      `json:"complete"`
 	Dispatched bool      `json:"dispatched"`
+	// Mode is the mode the run started in ("solo", "fleet" or "team").
+	Mode string `json:"mode,omitempty"`
 }
 
 // Report is what tuckerbox machine --json --for <remote> says about a
@@ -281,6 +283,17 @@ func Decide(in Input) Plan {
 			}
 			continue
 		}
+		// A run of the change on any machine that answered owns it, whatever
+		// mode it started in: a run started before the repository became a
+		// fleet holds no claim, and no claim could fence it.
+		if where, r, ok := existingRun(in.Machines, ch.ID); ok {
+			mode := ""
+			if r.Mode != "" && r.Mode != "fleet" {
+				mode = ", started in " + r.Mode + " mode"
+			}
+			skip(ch.ID, fmt.Sprintf("has a run on %s (%s%s) and no fleet claim; not placed again", where, r.State, mode))
+			continue
+		}
 		if ch.NotStartable != "" {
 			skip(ch.ID, ch.NotStartable)
 			continue
@@ -310,6 +323,19 @@ func Decide(in Input) Plan {
 		p.Actions = append(p.Actions, Action{Kind: Start, Change: ch.ID, Machine: pick, Notes: notes})
 	}
 	return p
+}
+
+// existingRun finds a run of change in the machines' reports.
+func existingRun(ms []Machine, change string) (string, RunReport, bool) {
+	for _, m := range ms {
+		if m.Report == nil {
+			continue
+		}
+		if r, ok := m.Report.run(change); ok {
+			return m.Name, r, true
+		}
+	}
+	return "", RunReport{}, false
 }
 
 // candidate reports whether m may take a new change that uses agents,

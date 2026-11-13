@@ -11,7 +11,6 @@ import (
 	"github.com/chrisjoyce911/tuckerbox/internal/dispatch"
 )
 
-
 // fleetSkew is how far clocks may disagree before an active claim reads as
 // expired.
 const fleetSkew = time.Minute

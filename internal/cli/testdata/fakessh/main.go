@@ -3,8 +3,10 @@
 //
 //	ssh -T -o BatchMode=yes <dest> -- <remote command line>
 //
-// and appends its arguments, as one JSON array, to $FAKESSH_DIR/calls.log.
-// What it does next is set in $FAKESSH_DIR/<dest>/:
+// and appends its arguments, as one JSON array, to <dir>/calls.log, where
+// <dir> is "fakessh" beside $XDG_STATE_HOME (the remote runner passes only
+// a clean environment, and XDG_ variables are in it). What it does next is
+// set in <dir>/<dest>/:
 //
 //   - asleep: exit 255 (unreachable), as ssh does
 //   - report.json: printed for "tuckerbox machine ..." commands
@@ -26,7 +28,7 @@ import (
 )
 
 func main() {
-	dir := os.Getenv("FAKESSH_DIR")
+	dir := filepath.Join(filepath.Dir(os.Getenv("XDG_STATE_HOME")), "fakessh")
 	args := os.Args[1:]
 	if f, err := os.OpenFile(filepath.Join(dir, "calls.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
 		data, _ := json.Marshal(args)

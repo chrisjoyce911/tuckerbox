@@ -45,9 +45,12 @@ func useFakeSSH(t *testing.T) string {
 	if fakeSSHErr != nil {
 		t.Fatal(fakeSSHErr)
 	}
-	dir := t.TempDir()
+	// The fake reads and records beside the test's state directory.
+	dir := filepath.Join(filepath.Dir(os.Getenv("XDG_STATE_HOME")), "fakessh")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("PATH", fakeSSHDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("FAKESSH_DIR", dir)
 	return dir
 }
 
@@ -517,5 +520,39 @@ func TestRunExpectStateUnapproved(t *testing.T) {
 	after := f.runOf("add-login")
 	if after.State != before.State || !after.Since.Equal(before.Since) {
 		t.Errorf("run changed: %+v -> %+v", before, after)
+	}
+}
+
+// operating-modes: Changing mode, solo to fleet. A run started in solo
+// mode is still running when the repository becomes a fleet: dispatch
+// doesn't start a second copy elsewhere, though the change has no claim.
+func TestDispatchSoloRunStillActiveAfterMoveToFleet(t *testing.T) {
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}, RequireApproval: true})
+	ff := &fleetFixture{cliFixture: f, ssh: useFakeSSH(t)}
+	f.withRemote()
+	f.approveAll("add-login")
+	f.env.SetPlan(t, map[string]testenv.Action{"build": {WaitFor: f.gate("build"), Tick: []string{"1.1"}}})
+	if res := f.tb("run", "add-login"); res.code != 0 {
+		t.Fatalf("solo run: %d %s", res.code, res.stderr)
+	}
+	f.waitState("add-login", "running", "build")
+	f.setTop("mode = \"fleet\"\n")
+	f.push()
+	machineConfig(t, f.env.Home, "machine = \"desk\"\n\n[machines.mini]\nssh = \"mini\"\n")
+	testenv.WriteFile(t, filepath.Join(f.repo, "openspec", "changes", "add-login", "tuckerbox.toml"), "machines = [\"mini\"]\n")
+	ff.report("mini", dispatch.Report{FleetCapacity: 2, Checkout: true})
+	ff.answer("mini", "started\n", 0)
+	r := ff.dispatchJSON()
+	if len(r.Started)+len(r.Failed) != 0 || len(r.Actions) != 0 {
+		t.Fatalf("placed again: %+v", r)
+	}
+	if why := skipped(r, "add-login"); !strings.Contains(why, "has a run on desk (running, started in solo mode)") {
+		t.Errorf("add-login: %q", why)
+	}
+	if c := ff.startCalls("mini"); len(c) != 0 {
+		t.Errorf("mini ran %v", c)
+	}
+	if s, _ := f.state("add-login"); s != "running" {
+		t.Errorf("original run is %s", s)
 	}
 }
