@@ -413,7 +413,6 @@ func TestDispatchContinuationsFirst(t *testing.T) {
 	}
 }
 
-
 // run --for finds this machine's checkout of a remote; a remote with no
 // checkout here is refused.
 func TestRunForRemote(t *testing.T) {

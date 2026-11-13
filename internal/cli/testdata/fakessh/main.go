@@ -96,7 +96,7 @@ func main() {
 }
 
 // split splits a POSIX shell command line of plain words and single-quoted
-// strings ('\'' for a quote), as tuckerbox's runner writes it.
+// strings ('\” for a quote), as tuckerbox's runner writes it.
 func split(s string) []string {
 	var out []string
 	var cur strings.Builder

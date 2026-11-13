@@ -94,6 +94,30 @@ tuckerbox autopilot            # until Ctrl-C; --once for one pass, --dry-run to
 
 It is not a service: it runs in the foreground for the repository it is started in, one per repository on a machine, and the runs it starts keep going when you stop it. On each pass (every `[autopilot] interval`, 60 s by default, and whenever a run ends) it fetches the base branch and starts approved changes whose dependencies are met while `max_parallel` has room, group by group with `--tasks next` (`[autopilot] scope = "change"` runs whole changes). Approval is the one gate it keeps: it refuses to run with `require_approval = false`, never approves, edits or ticks, and never resumes a blocked or stopped run or re-runs a failed one. A run whose process died is resumed once per crash streak (counted from history since the run's last step result or a person's action). Every start or resume carries the state and time it saw, and the engine does nothing if the run moved on meanwhile. Runs that need you are printed once, flagged on the board (`needs_you`), and toasted by the Herdr board mod; the board header shows whether autopilot is on.
 
+In a fleet repository (`mode = "fleet"`), `tuckerbox dispatch` places approved changes on the owner's machines in one pass and exits:
+
+```sh
+tuckerbox dispatch                 # place approved, unclaimed changes; continue ready runs' next groups
+tuckerbox dispatch add-login       # consider only these changes
+tuckerbox dispatch --dry-run       # print each change with its machine, or why none fits; start nothing
+tuckerbox dispatch --json          # the same as JSON (actions, skipped, unreachable, started, failed)
+```
+
+It fetches the base branch and the fleet ref, asks this machine and every `[machines.*]` entry in machine config for `tuckerbox machine --json --for <remote>` in parallel (30 s each; a machine that doesn't answer is named and skipped), and then:
+
+- **Continues ready runs first.** An approved change whose claim is `ready` and whose run isn't complete gets its next group on the machine holding the claim, with `tuckerbox run --for <remote> --expect-state ready --expect-since <since> --tasks next <change>`, when the run has a scope or `[autopilot] scope` is `group`; otherwise it is reported for you. The holder checks, under the change lock, that the run is still as dispatch saw it and still approved, and does nothing if not. Complete ready runs and parked claims (stopped, blocked or failed) are left alone.
+- **Places new changes** that pass the run gate, have their dependencies met and have no claim, in the Approved column's order, while `[fleet] max_runs` has room. A machine is a candidate when it answered, has free `fleet_capacity`, has a checkout of the remote, and has every agent the change's steps use installed and not signed out (an `unknown` sign-in is noted, not refused). The change's own `machines` list comes first, in order, then the machine with the most free capacity, then the name. Each placement uses up a place for the rest of the pass.
+- **Starts each run** with `tuckerbox run --for <remote> --dispatched <change>`: locally, over `ssh -T -o BatchMode=yes <destination> --`, or with `hc run --on <machine> --`. `--for` finds that machine's checkout through its machine index; dispatch never clones. The started run takes one of its machine's fleet slots and claims the change itself. A placement reserves nothing: if the claim is refused (another dispatcher got there first) or the command fails, dispatch reports it and doesn't try another machine in the same pass.
+
+Dispatch is not a service and installs no schedule. Run it by hand, from the board, or from your own scheduler. For example, every ten minutes during working hours with cron (cron uses the machine's local time zone; set `CRON_TZ=Australia/Brisbane` where your cron supports it):
+
+```cron
+CRON_TZ=Australia/Brisbane
+*/10 8-18 * * 1-5  cd ~/src/app && tuckerbox dispatch >> ~/.local/state/tuckerbox/dispatch.log 2>&1
+```
+
+launchd, Windows Task Scheduler or a herdr-core schedule work the same way. In a solo or team repository, `dispatch` refuses and starts nothing (in a team each person starts their own runs).
+
 A change can wait for others: list them in `openspec/changes/<change>/tuckerbox.toml` as `depends_on = ["add-users"]`. Its run stays `queued (waiting on add-users (build))`, without taking a slot, until each dependency is `ready` on this machine or archived. A dependency run with a task scope counts only once a run of it is ready with the whole change ticked: `queued (waiting on add-users (ready, tasks 1))`. `tuckerbox check` reports dependencies that name no active or archived change, and cycles.
 
 ### Priority
