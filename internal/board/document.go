@@ -31,10 +31,10 @@ type Document struct {
 	Fleet *FleetCount `json:"fleet,omitempty"`
 	// ClaimsRead says where fleet or team claims came from, and when.
 	ClaimsRead *ClaimsRead `json:"claims_read,omitempty"`
-	Steps     []string  `json:"steps"`
-	Columns   []Column  `json:"columns"`
-	Cards     []Card    `json:"cards"`
-	Detail    *Detail   `json:"detail,omitempty"`
+	Steps      []string    `json:"steps"`
+	Columns    []Column    `json:"columns"`
+	Cards      []Card      `json:"cards"`
+	Detail     *Detail     `json:"detail,omitempty"`
 }
 type Column struct {
 	ID   string `json:"id"`

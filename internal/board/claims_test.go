@@ -2,9 +2,9 @@ package board
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
-	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -199,7 +199,9 @@ func TestTeamBoardIgnoresApprovalsRef(t *testing.T) {
 	root := modeRepo(t, "team", "ship = 'mr'\n", "", "add-login")
 	old := TeamClaims
 	t.Cleanup(func() { TeamClaims = old })
-	TeamClaims = func(context.Context, string, *config.Config, time.Time) (TeamSnapshot, error) { return TeamSnapshot{}, nil }
+	TeamClaims = func(context.Context, string, *config.Config, time.Time) (TeamSnapshot, error) {
+		return TeamSnapshot{}, nil
+	}
 	hash, err := approval.Hash(approval.DirOf(root, "add-login"))
 	if err != nil {
 		t.Fatal(err)
