@@ -106,6 +106,43 @@ func fleetCrashSnapshot(t *testing.T, r *runs.Run) string {
 	return p
 }
 
+// A process running the production ship.Engine is paused inside its forge's
+// green-check response. Keep it separate from the killed run's lock so this
+// can reproduce an old in-memory attempt waking after the takeover.
+func fleetCrashBackground(t *testing.T, m *otherMachine, binary string, args ...string) func() cmdResult {
+	t.Helper()
+	cmd := exec.Command(binary, args...)
+	cmd.Dir = m.repo
+	cmd.Env = append(os.Environ(), m.env...)
+	var out, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	var result cmdResult
+	go func() {
+		err := cmd.Wait()
+		code := 0
+		if ee, ok := err.(*exec.ExitError); ok {
+			code = ee.ExitCode()
+		} else if err != nil {
+			code = -1
+		}
+		result = cmdResult{out.String(), stderr.String(), code}
+		close(done)
+	}()
+	t.Cleanup(func() {
+		select {
+		case <-done:
+		default:
+			_ = cmd.Process.Kill()
+			<-done
+		}
+	})
+	return func() cmdResult { <-done; return result }
+}
+
 // Task 7.1: the real dispatcher starts two real detached engines over fake SSH.
 // Each worker has its own clone/config/state directory and both use one bare
 // remote. Killing engines (not stop) leaves active claims; the test clock ages
@@ -221,6 +258,18 @@ func TestFleetEndToEndCrashDuringStepsAndCI(t *testing.T) {
 	if err := api.SetCI(ctx, "green"); err != nil {
 		t.Fatal(err)
 	}
+	// Enter the REAL merge watch while the old epoch still owns its claim.
+	// It observes the old MR/head and green CI, then pauses before checkClaim.
+	staleMergeResult := fleetCrashBackground(t, beta, binary, "fleet-test-effect", "merge", oldCIFile)
+	waitFor(t, "stale production watch sees green", func() bool { _, err := os.Stat(filepath.Join(api.Dir, "merge-seen-green")); return err == nil })
+	if pin := readFile(t, filepath.Join(api.Dir, "merge-seen-green")); pin != oldCITip {
+		t.Fatalf("stale watch checked %s, want %s", pin, oldCITip)
+	}
+	// Its valid shipping startup renewed ownership; age the lease again before
+	// the real takeover. The paused attempt retains its old green observation.
+	if err := clock.Renew(ctx, *oldCI.FleetClaim); err != nil {
+		t.Fatal(err)
+	}
 	fleetCrashMust(t, beta, binary, "run", "--take-over", buildChange)
 	fleetCrashMust(t, alpha, binary, "run", "--take-over", ciChange)
 	beta.waitState(buildChange, "ready")
@@ -287,15 +336,16 @@ func TestFleetEndToEndCrashDuringStepsAndCI(t *testing.T) {
 			t.Fatalf("old run resumed: %+v", r)
 		}
 	}
-	staleMerge := fleetCrashTB(t, beta, binary, "fleet-test-effect", "merge", oldCIFile)
-	if staleMerge.code == 0 || !strings.Contains(staleMerge.stderr, "pinned head changed") {
-		t.Fatalf("stale pin merged: %+v", staleMerge)
+	testenv.WriteFile(t, filepath.Join(api.Dir, "merge-continue"), "")
+	staleMerge := staleMergeResult()
+	if staleMerge.code == 0 || !strings.Contains(staleMerge.stderr, "claim taken by alpha") {
+		t.Fatalf("stale merge bypassed production claim fence: %+v", staleMerge)
 	}
 	if f.fleetTip() != before || testenv.Git(t, remote, "rev-parse", "refs/heads/"+buildChange) != buildTip || testenv.Git(t, remote, "rev-parse", "refs/heads/"+ciChange) != ciTip {
 		t.Fatal("stale holder changed a remote ref")
 	}
 	state, err = api.Snapshot(ctx)
-	if err != nil || state.AcceptedMerges != 0 || state.RefusedMerges != 1 {
+	if err != nil || state.AcceptedMerges != 0 || state.RefusedMerges != 0 {
 		t.Fatalf("stale merge accounting: %+v %v", state, err)
 	}
 }

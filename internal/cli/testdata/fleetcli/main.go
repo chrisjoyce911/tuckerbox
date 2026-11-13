@@ -6,6 +6,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/cli"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
@@ -36,7 +39,7 @@ func main() {
 				g := ship.Git{Worktree: r.Worktree, Remote: r.FleetRemote, Branch: r.Branch, Base: r.Base, Fleet: fence}
 				_, err = g.Push(context.Background(), r.LastPush)
 			case "merge":
-				err = client.Merge(context.Background(), r.MR.Number, r.LastPush, "merge")
+				err = staleMerge(client, r)
 			default:
 				panic("unknown effect")
 			}
@@ -51,4 +54,55 @@ func main() {
 		return client, func(s string) string { return s }, nil
 	}}
 	os.Exit(app.Run(os.Args[1:]))
+}
+
+// mergeWaitForge freezes one already-green observation. The normal CLI engines
+// use Client directly, so a takeover can run while this stale attempt is paused.
+type mergeWaitForge struct{ fleetforge.Client }
+
+func (c mergeWaitForge) Checks(ctx context.Context, sha, base string) (forge.Checks, error) {
+	checks, err := c.Client.Checks(ctx, sha, base)
+	if err != nil {
+		return checks, err
+	}
+	if err = os.WriteFile(filepath.Join(c.Dir, "merge-seen-green"), []byte(sha), 0600); err != nil {
+		return checks, err
+	}
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if _, err := os.Stat(filepath.Join(c.Dir, "merge-continue")); err == nil {
+			return checks, nil
+		} else if !os.IsNotExist(err) {
+			return checks, err
+		}
+		select {
+		case <-ctx.Done():
+			return checks, ctx.Err()
+		case <-tick.C:
+		}
+	}
+}
+
+// Run the production ship.Engine all the way into watch.go's ShipMerge case.
+// Startup still owns the saved claim; it is lost only while Checks is paused.
+func staleMerge(client fleetforge.Client, r *runs.Run) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	opts, err := config.Discover(config.SystemEnv(), r.Repo)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(opts)
+	if err != nil {
+		return err
+	}
+	cfg.Ship = config.ShipMerge
+	fence := &fleet.Fence{Store: fleet.Store{Dir: r.Repo, Remote: r.FleetRemote}, Claim: *r.FleetClaim}
+	stage := ship.Engine{Config: cfg, Git: ship.Git{Worktree: r.Worktree, Remote: r.FleetRemote, Branch: r.Branch, Base: r.Base, Fleet: fence}, Identity: ship.Identity{Change: r.Change, Machine: r.FleetClaim.Machine, Run: r.FleetClaim.Run, Epoch: r.FleetClaim.Epoch}, Forge: mergeWaitForge{client}, Record: &r.Record, Request: forge.OpenRequest{Title: r.Change, Branch: r.Branch, Base: strings.TrimPrefix(r.Base, "origin/")}, Save: func() error { return nil }, Commit: func(ctx context.Context, msg string) (bool, error) { return runs.CommitAll(ctx, r.Worktree, msg) }}
+	out := stage.Run(ctx, true)
+	if out.State != "merged" {
+		return fmt.Errorf("%s: %s", out.State, out.Reason)
+	}
+	return nil
 }
