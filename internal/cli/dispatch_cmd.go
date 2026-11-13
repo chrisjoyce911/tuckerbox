@@ -334,7 +334,8 @@ func (a App) machineReports(ctx context.Context, repo runs.Repo, cfg *config.Con
 			defer wg.Done()
 			out, err := a.dispatchOn(ctx, repo, cfg, *m, []string{"machine", "--json", "--for", remote}, machines.DefaultReportTimeout)
 			if err != nil {
-				m.Err = errors.New(startError(out, err))
+				msg, _, _ := strings.Cut(startError(out, err), "; ")
+				m.Err = errors.New(msg)
 				return
 			}
 			var r dispatch.Report
