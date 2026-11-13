@@ -43,8 +43,17 @@ func (f *fleetFixture) machine(name string, capacity int, extra string) *otherMa
 	}
 	home := filepath.Join(root, "home")
 	env := []string{"XDG_STATE_HOME=" + filepath.Join(home, "state"), "XDG_CONFIG_HOME=" + filepath.Join(home, "config")}
+	// The remote runner passes only a clean environment, as real ssh
+	// would; the test harness's own settings (the fake agent's plan, the
+	// fake hc, no network) reach the machine through its env file.
+	for _, kv := range os.Environ() {
+		k, _, _ := strings.Cut(kv, "=")
+		if _, ok := testenv.NoNetwork[k]; ok || strings.HasPrefix(k, "FAKEAGENT_") || strings.HasPrefix(k, "FAKEHC_") {
+			env = append(env, kv)
+		}
+	}
 	testenv.WriteFile(t, filepath.Join(home, "config", "tuckerbox", "config.toml"),
-		fmt.Sprintf("machine = %q\nfleet_capacity = %d\n%s\n[agents.fake]\ncommand = ['%s', \"{brief}\"]\n", name, capacity, extra, tools.FakeAgent))
+		fmt.Sprintf("machine = %q\nfleet_capacity = %d\n%s", name, capacity, extra))
 	d := filepath.Join(f.ssh, name)
 	testenv.WriteFile(t, filepath.Join(d, "tuckerbox"), tools.Tuckerbox)
 	testenv.WriteFile(t, filepath.Join(d, "cwd"), repo)
