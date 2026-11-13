@@ -23,6 +23,9 @@ import (
 var tools *testenv.Tools
 
 func TestMain(m *testing.M) {
+	if os.Getenv(fakeSSHEnv) != "" {
+		os.Exit(fakeSSH())
+	}
 	var err error
 	tools, err = testenv.Build(true)
 	if err != nil {
