@@ -71,7 +71,7 @@ func (e *Engine) tickCI(ctx context.Context, claim *Claim) (pushed bool, out Out
 		}
 		return false, e.blocked(err)
 	}
-	if _, err := claim.Acquire(ctx, e.Forge, e.Request, e.persistPush); err != nil {
+	if _, err := e.pushClaim(ctx, claim); err != nil {
 		return false, e.blocked(err)
 	}
 	return true, Outcome{}

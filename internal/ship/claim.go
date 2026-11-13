@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/forge"
 )
 
-type Identity struct{ Change, Machine, Run string }
+type Identity struct {
+	Change, Machine, Run, By string
+	Epoch                    uint64
+}
 
 func MachineName(configured string) (string, error) {
 	if configured != "" {
@@ -24,7 +28,17 @@ func (i Identity) Marker() (string, error) {
 			return "", fmt.Errorf("invalid claim identity")
 		}
 	}
-	return fmt.Sprintf("<!-- tuckerbox: change=%s machine=%s run=%s -->", i.Change, i.Machine, i.Run), nil
+	extra := ""
+	if i.By != "" {
+		if strings.ContainsAny(i.By, " \t\r\n<>=\x00") {
+			return "", fmt.Errorf("invalid claim login")
+		}
+		extra += " by=" + i.By
+	}
+	if i.Epoch != 0 {
+		extra += " epoch=" + strconv.FormatUint(i.Epoch, 10)
+	}
+	return fmt.Sprintf("<!-- tuckerbox: change=%s machine=%s run=%s%s -->", i.Change, i.Machine, i.Run, extra), nil
 }
 
 var markerRE = regexp.MustCompile(`<!--\s*tuckerbox:\s*(.*?)\s*-->`)
@@ -35,18 +49,25 @@ func ParseMarker(body string) (Identity, bool) {
 		return Identity{}, false
 	}
 	fields := strings.Fields(matches[0][1])
-	if len(fields) != 3 {
+	if len(fields) < 3 || len(fields) > 5 {
 		return Identity{}, false
 	}
 	values := map[string]string{}
 	for _, f := range fields {
 		k, v, ok := strings.Cut(f, "=")
-		if !ok || v == "" || values[k] != "" {
+		if !ok || v == "" || values[k] != "" || (k != "change" && k != "machine" && k != "run" && k != "by" && k != "epoch") {
 			return Identity{}, false
 		}
 		values[k] = v
 	}
-	i := Identity{Change: values["change"], Machine: values["machine"], Run: values["run"]}
+	i := Identity{Change: values["change"], Machine: values["machine"], Run: values["run"], By: values["by"]}
+	if v, ok := values["epoch"]; ok {
+		n, err := strconv.ParseUint(v, 10, 64)
+		if err != nil || n == 0 {
+			return Identity{}, false
+		}
+		i.Epoch = n
+	}
 	if _, err := i.Marker(); err != nil {
 		return Identity{}, false
 	}
@@ -73,8 +94,8 @@ func (c *Claim) owner(mr *forge.MR) error {
 	if !ok {
 		return fmt.Errorf("claimed by another owner: %s", mr.URL)
 	}
-	if id != c.Identity {
-		return fmt.Errorf("claimed by %s: %s", id.Machine, mr.URL)
+	if id != c.Identity || (c.Identity.By != "" && mr.Author != c.Identity.By) {
+		return fmt.Errorf("claimed by %s on %s: %s", claimOwner(mr, id), id.Machine, mr.URL)
 	}
 	return nil
 }
@@ -213,4 +234,14 @@ func (c *Claim) Resume(ctx context.Context, f ClaimForge, request forge.OpenRequ
 		}
 	}
 	return c.Acquire(ctx, f, request, save)
+}
+
+func claimOwner(mr *forge.MR, id Identity) string {
+	if mr.Author != "" {
+		return mr.Author
+	}
+	if id.By != "" {
+		return id.By
+	}
+	return id.Machine
 }

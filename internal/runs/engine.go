@@ -481,10 +481,12 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 		return nil, err
 	}
 	if req.Mode == Start {
-		// A person's own start of a change dispatch once started is the
-		// person's: it holds no fleet slot from now on.
 		rs.Dispatched = req.Dispatched
 	}
+	if err := e.teamStart(ctx, ws, rs); err != nil {
+		return nil, err
+	}
+
 	termName := agent.TerminalName(e.Repo.Identity(ctx), req.Change)
 	if adopt == nil {
 		// A launch the dead process left on its way (it never saw hc run

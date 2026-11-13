@@ -210,7 +210,7 @@ func (e *Engine) fix(ctx context.Context, claim *Claim, feedback Feedback) Outco
 		}
 		return e.blocked(err)
 	}
-	if _, err := claim.Acquire(ctx, e.Forge, e.Request, e.persistPush); err != nil {
+	if _, err := e.pushClaim(ctx, claim); err != nil {
 		return e.blocked(err)
 	}
 	feedback.FixedCommit = r.LastPush

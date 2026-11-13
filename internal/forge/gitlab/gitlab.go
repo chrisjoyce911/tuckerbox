@@ -42,6 +42,8 @@ func (c *Client) Access(ctx context.Context) (forge.Access, error) {
 }
 
 type mergeRequest struct {
+	Draft                     bool
+	Author                    struct{ Username string }
 	IID                       int
 	WebURL                    string `json:"web_url"`
 	Title, Description, State string
@@ -55,7 +57,7 @@ func mr(p mergeRequest) *forge.MR {
 	if state == "opened" {
 		state = "open"
 	}
-	return &forge.MR{Number: p.IID, URL: p.WebURL, Title: p.Title, Body: p.Description, State: state, Head: p.SHA, Base: p.TargetBranch, MergeStatus: p.DetailedMergeStatus, Mergeable: p.DetailedMergeStatus == "mergeable", Behind: p.DetailedMergeStatus == "need_rebase"}
+	return &forge.MR{Author: p.Author.Username, Draft: p.Draft, Number: p.IID, URL: p.WebURL, Title: p.Title, Body: p.Description, State: state, Head: p.SHA, Base: p.TargetBranch, MergeStatus: p.DetailedMergeStatus, Mergeable: p.DetailedMergeStatus == "mergeable", Behind: p.DetailedMergeStatus == "need_rebase"}
 }
 func (c *Client) FindMR(ctx context.Context, branch string) (*forge.MR, error) {
 	var r []mergeRequest
@@ -69,6 +71,9 @@ func (c *Client) FindMR(ctx context.Context, branch string) (*forge.MR, error) {
 	return mr(r[0]), nil
 }
 func (c *Client) OpenMR(ctx context.Context, r forge.OpenRequest) (*forge.MR, error) {
+	if r.Draft && !strings.HasPrefix(r.Title, "Draft:") {
+		r.Title = "Draft: " + r.Title
+	}
 	var p mergeRequest
 	_, err := c.http.Do(ctx, "POST", c.project+"/merge_requests", map[string]any{"title": r.Title, "description": r.Body, "source_branch": r.Branch, "target_branch": r.Base, "labels": strings.Join(r.Labels, ","), "remove_source_branch": false}, &p)
 	if err != nil {

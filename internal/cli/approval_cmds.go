@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/BurntSushi/toml"
+	"io/fs"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -49,10 +53,24 @@ func (a App) approve(args []string) int {
 	if !ok {
 		return 1
 	}
+	repo, cfg, loaded := a.loadRepo("approve", p.Dir)
+	if !loaded {
+		return 1
+	}
 	var ap approval.Entry
 	var invalid *edits.Result
 	var pubErr error
 	err = edits.WithChangeLock(ctx, p, "tuckerbox approve", func() error {
+		worktree := ""
+		if p.Worktree {
+			worktree = p.Dir
+		}
+		effective, err := runConfig(ctx, repo, cfg, change, worktree)
+		if err != nil {
+			return err
+		}
+		cfg = effective
+
 		res, err := edits.Validator{}.Validate(ctx, p)
 		if err != nil {
 			return err
@@ -60,6 +78,42 @@ func (a App) approve(args []string) int {
 		if !res.Valid {
 			invalid = res
 			return nil
+		}
+		if cfg.Mode == config.ModeTeam {
+			c, err := a.teamClient(ctx, cfg)
+			if err != nil {
+				return err
+			}
+			login, err := c.Login(ctx)
+			if err != nil {
+				return err
+			}
+			by := gitUserName(ctx, p.Dir)
+			if by == "" {
+				by = login
+			}
+			d := approval.DirOf(p.Dir, change)
+			hash, err := approval.Hash(d)
+			if err != nil {
+				return err
+			}
+			lines, shash, err := approval.Settings(d)
+			if err != nil {
+				return err
+			}
+			record := approval.Approval{Hash: hash, SettingsHash: shash, Settings: lines, By: by, Login: login, At: time.Now().Truncate(time.Second)}
+			ap = approval.Entry{Hash: hash, By: login, At: record.At, Settings: lines}
+			return withSidecar(ctx, p.Dir, func() error {
+				old, err := d.Read(approval.SidecarName)
+				if err != nil && !errors.Is(err, fs.ErrNotExist) {
+					return err
+				}
+				data, err := approval.SetApproval(old, record)
+				if err != nil {
+					return err
+				}
+				return approval.WriteSidecar(d.SidecarPath(), data)
+			})
 		}
 		by := gitUserName(ctx, p.Dir)
 		if by == "" {
@@ -94,7 +148,11 @@ func (a App) approve(args []string) int {
 	if len(ap.Settings) > 0 {
 		fmt.Fprintf(a.Stdout, "with its overrides %s; changing an agent or permissions override makes the approval stale\n", strings.Join(ap.Settings, ", "))
 	}
-	published(a, pubErr)
+	if cfg.Mode == config.ModeTeam {
+		fmt.Fprintln(a.Stdout, "commit and merge tuckerbox.toml through the protected base branch for this approval to count")
+	} else {
+		published(a, pubErr)
+	}
 	return 0
 }
 
@@ -118,11 +176,36 @@ func (a App) unapprove(args []string) int {
 	if !ok {
 		return 1
 	}
+	repo, cfg, loaded := a.loadRepo("unapprove", p.Dir)
+	if !loaded {
+		return 1
+	}
 	var removed bool
 	var pubErr error
 	ctx := context.Background()
 	err = edits.WithChangeLock(ctx, p, "tuckerbox unapprove", func() error {
-		st, err := currentApproval(ctx, p.Dir, change)
+		worktree := ""
+		if p.Worktree {
+			worktree = p.Dir
+		}
+		effective, err := runConfig(ctx, repo, cfg, change, worktree)
+		if err != nil {
+			return err
+		}
+		cfg = effective
+
+		if cfg.Mode == config.ModeTeam {
+			return withSidecar(ctx, p.Dir, func() error {
+				var err error
+				removed, err = approval.Unapprove(approval.DirOf(p.Dir, change))
+				return err
+			})
+		}
+		entry, err := refEntry(ctx, p.Dir, change)
+		if err != nil {
+			return err
+		}
+		st, err := approval.JudgeWith(approval.DirOf(p.Dir, change), entry)
 		if err != nil {
 			return err
 		}
@@ -145,13 +228,27 @@ func (a App) unapprove(args []string) int {
 		return 0
 	}
 	fmt.Fprintf(a.Stdout, "withdrew the approval of %s\n", change)
-	published(a, pubErr)
+	if cfg.Mode == config.ModeTeam {
+		fmt.Fprintln(a.Stdout, "commit and merge the withdrawal through the protected base branch")
+	} else {
+		published(a, pubErr)
+	}
 	return 0
 }
 
 // currentApproval judges change's approval in dir from the approvals ref
 // (synced from the remote) or, without an entry there, its sidecar.
 func currentApproval(ctx context.Context, dir, change string) (approval.Status, error) {
+	var policy struct{ Mode config.Mode }
+	if data, err := os.ReadFile(filepath.Join(dir, config.RepoFile)); err == nil {
+		if _, err = toml.Decode(string(data), &policy); err != nil {
+			return approval.Status{}, err
+		}
+		if policy.Mode == config.ModeTeam {
+			return approval.Judge(approval.DirOf(dir, change))
+		}
+	}
+
 	e, err := refEntry(ctx, dir, change)
 	if err != nil {
 		return approval.Status{}, err
@@ -194,6 +291,17 @@ type runGate struct {
 // check returns the commit a new worktree would start at ("" when the
 // change has a worktree or approval is off), or why change may not start.
 func (g *runGate) check(ctx context.Context, change string) (string, error) {
+	effective, err := runConfig(ctx, g.repo, g.cfg, change, "")
+	if err != nil {
+		return "", err
+	}
+	if effective.Mode == config.ModeTeam {
+		sp, err := g.start(ctx, change)
+		if err != nil {
+			return "", err
+		}
+		return sp.Rev, g.a.teamGate(ctx, g.repo, effective, change, sp, false)
+	}
 	if !g.cfg.RequireApproval {
 		return "", nil
 	}
@@ -311,6 +419,9 @@ func settingsGate(ctx context.Context, root, change, worktree string) error {
 	if err != nil {
 		return fmt.Errorf("change %s: reading %s: %v", change, approval.RefName, err)
 	}
+	if entry != nil && entry.State == approval.EntryWithdrawn {
+		return &notApprovedError{State: approval.None, msg: fmt.Sprintf("change %s: approval was withdrawn; approve it again before resuming or rerunning", change)}
+	}
 	st, err := approval.JudgeWith(approval.DirOf(worktree, change), entry)
 	if err != nil {
 		return fmt.Errorf("change %s: reading its approval in %s: %v", change, worktree, err)
@@ -334,6 +445,14 @@ func (e *notApprovedError) Error() string { return e.msg }
 // approvalConflicts notes the changes approved both on the approvals ref
 // and in their tuckerbox.toml with different hashes (the ref counts).
 func approvalConflicts(a App, root string) {
+	var policy struct{ Mode config.Mode }
+	if b, err := os.ReadFile(filepath.Join(root, config.RepoFile)); err == nil {
+		_, _ = toml.Decode(string(b), &policy)
+		if policy.Mode == config.ModeTeam {
+			return
+		}
+	}
+
 	ctx := context.Background()
 	s := approval.Store{Dir: root}
 	_ = s.Sync(ctx, time.Minute)

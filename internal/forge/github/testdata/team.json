@@ -1,0 +1,136 @@
+[
+  {
+    "Method": "GET",
+    "Path": "/user",
+    "Response": {
+      "login": "sam"
+    }
+  },
+  {
+    "Method": "GET",
+    "Path": "/repos/sam/app/branches/main/protection",
+    "Response": {
+      "enforce_admins": {
+        "enabled": true
+      },
+      "required_pull_request_reviews": {
+        "required_approving_review_count": 1
+      }
+    }
+  },
+  {
+    "Method": "POST",
+    "Path": "/repos/sam/app/pulls",
+    "Request": {
+      "title": "login",
+      "body": "marker",
+      "head": "login",
+      "base": "main",
+      "draft": true
+    },
+    "Response": {
+      "number": 12,
+      "draft": true,
+      "user": {
+        "login": "sam"
+      },
+      "state": "open"
+    }
+  },
+  {
+    "Method": "GET",
+    "Path": "/repos/sam/app/pulls?state=open&per_page=100&page=1",
+    "Response": [
+      {
+        "number": 12,
+        "draft": true,
+        "user": {
+          "login": "sam"
+        },
+        "state": "open"
+      }
+    ]
+  },
+  {
+    "Method": "PATCH",
+    "Path": "/repos/sam/app/pulls/12",
+    "Request": {
+      "title": "Login ready",
+      "body": "proposal"
+    },
+    "Response": {
+      "number": 12,
+      "draft": true,
+      "user": {
+        "login": "sam"
+      },
+      "state": "open"
+    }
+  },
+  {
+    "Method": "GET",
+    "Path": "/repos/sam/app/pulls/12",
+    "Response": {
+      "node_id": "PR_12",
+      "draft": true
+    }
+  },
+  {
+    "Method": "POST",
+    "Path": "/graphql",
+    "Request": {
+      "query": "mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{isDraft}}}",
+      "variables": {
+        "id": "PR_12"
+      }
+    },
+    "Response": {
+      "data": {
+        "markPullRequestReadyForReview": {
+          "pullRequest": {
+            "isDraft": false
+          }
+        }
+      }
+    }
+  },
+  {
+    "Method": "GET",
+    "Path": "/repos/sam/app/branches/main/protection",
+    "Response": {
+      "enforce_admins": {
+        "enabled": false
+      },
+      "required_pull_request_reviews": {
+        "required_approving_review_count": 1
+      }
+    }
+  },
+  {
+    "Method": "GET",
+    "Path": "/repos/sam/app/branches/main/protection",
+    "Response": {
+      "enforce_admins": {
+        "enabled": true
+      },
+      "required_pull_request_reviews": {
+        "required_approving_review_count": 1,
+        "bypass_pull_request_allowances": {
+          "users": [
+            {
+              "login": "bypass"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "Method": "GET",
+    "Path": "/repos/sam/app/branches/main/protection",
+    "Status": 403,
+    "Response": {
+      "message": "forbidden"
+    }
+  }
+]

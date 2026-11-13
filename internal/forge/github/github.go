@@ -38,6 +38,8 @@ type pull struct {
 	Number             int
 	HTMLURL            string `json:"html_url"`
 	Title, Body, State string
+	Draft              bool
+	User               struct{ Login string }
 	Merged             bool
 	MergeableState     string `json:"mergeable_state"`
 	Head               struct{ SHA string }
@@ -49,7 +51,7 @@ func mr(p pull) *forge.MR {
 	if p.Merged {
 		state = "merged"
 	}
-	return &forge.MR{Number: p.Number, URL: p.HTMLURL, Title: p.Title, Body: p.Body, State: state, Head: p.Head.SHA, Base: p.Base.Ref, MergeStatus: p.MergeableState, Mergeable: p.MergeableState == "clean", Behind: p.MergeableState == "behind"}
+	return &forge.MR{Author: p.User.Login, Draft: p.Draft, Number: p.Number, URL: p.HTMLURL, Title: p.Title, Body: p.Body, State: state, Head: p.Head.SHA, Base: p.Base.Ref, MergeStatus: p.MergeableState, Mergeable: p.MergeableState == "clean", Behind: p.MergeableState == "behind"}
 }
 func (c *Client) FindMR(ctx context.Context, branch string) (*forge.MR, error) {
 	for page := 1; ; page++ {
@@ -68,7 +70,7 @@ func (c *Client) FindMR(ctx context.Context, branch string) (*forge.MR, error) {
 }
 func (c *Client) OpenMR(ctx context.Context, r forge.OpenRequest) (*forge.MR, error) {
 	var p pull
-	_, err := c.http.Do(ctx, "POST", c.repo+"/pulls", map[string]any{"title": r.Title, "body": r.Body, "head": r.Branch, "base": r.Base, "draft": false}, &p)
+	_, err := c.http.Do(ctx, "POST", c.repo+"/pulls", map[string]any{"title": r.Title, "body": r.Body, "head": r.Branch, "base": r.Base, "draft": r.Draft}, &p)
 	if err != nil {
 		return nil, err
 	}

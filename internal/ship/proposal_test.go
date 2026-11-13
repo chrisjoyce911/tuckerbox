@@ -24,7 +24,7 @@ func TestProposalRequestTitleSectionsAndLimits(t *testing.T) {
 			t.Fatal(err)
 		}
 		target := forge.Target{Kind: forge.GitHub, Host: "github.com", Project: "sam/app"}
-		identity := Identity{"add-login", "studio", "run1"}
+		identity := Identity{Change: "add-login", Machine: "studio", Run: "run1"}
 		r, err := ProposalRequest(root, "add-login", target, "add-login", "main", []string{"automation"}, identity)
 		if err != nil || r.Title != "add login" || !strings.Contains(r.Body, "Login matters") || !strings.Contains(r.Body, "Add a form") || strings.Contains(r.Body, "DO NOT INCLUDE") {
 			t.Fatal(r, err)

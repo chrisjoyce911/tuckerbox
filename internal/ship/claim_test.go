@@ -59,7 +59,7 @@ func repositories(t *testing.T) repoFixture {
 	return f
 }
 func (f repoFixture) claim(dir, machine string) *Claim {
-	return &Claim{Identity: Identity{"add-login", machine, "run1"}, Git: Git{Worktree: dir, Remote: "origin", Branch: "add-login", Base: "main", DefaultBranch: "main"}}
+	return &Claim{Identity: Identity{Change: "add-login", Machine: machine, Run: "run1"}, Git: Git{Worktree: dir, Remote: "origin", Branch: "add-login", Base: "main", DefaultBranch: "main"}}
 }
 
 type fakeForge struct {
@@ -94,7 +94,7 @@ func (f *fakeForge) OpenMR(_ context.Context, r forge.OpenRequest) (*forge.MR, e
 }
 func savedTo(p *string) SaveLease { return func(s string) error { *p = s; return nil } }
 func TestMarker(t *testing.T) {
-	want := Identity{"add-login", "studio", "run1"}
+	want := Identity{Change: "add-login", Machine: "studio", Run: "run1"}
 	marker, err := want.Marker()
 	if err != nil || marker != "<!-- tuckerbox: change=add-login machine=studio run=run1 -->" {
 		t.Fatal(marker, err)
@@ -109,7 +109,7 @@ func TestMarker(t *testing.T) {
 		}
 	}
 	for _, name := range []string{"", "has space", "evil-->", "x=y"} {
-		if _, err := (Identity{"change", name, "run"}).Marker(); err == nil {
+		if _, err := (Identity{Change: "change", Machine: name, Run: "run"}).Marker(); err == nil {
 			t.Fatal(name)
 		}
 	}
@@ -299,7 +299,7 @@ func TestAlreadyOpenRaceChecksMarker(t *testing.T) {
 		t.Run(machine, func(t *testing.T) {
 			f := repositories(t)
 			c := f.claim(f.one, "studio")
-			marker, err := (Identity{"add-login", machine, "run1"}).Marker()
+			marker, err := (Identity{Change: "add-login", Machine: machine, Run: "run1"}).Marker()
 			if err != nil {
 				t.Fatal(err)
 			}
