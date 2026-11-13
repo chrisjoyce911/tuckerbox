@@ -215,6 +215,16 @@ func (a App) unapprove(args []string) int {
 // currentApproval judges change's approval in dir from the approvals ref
 // (synced from the remote) or, without an entry there, its sidecar.
 func currentApproval(ctx context.Context, dir, change string) (approval.Status, error) {
+	var policy struct{ Mode config.Mode }
+	if data, err := os.ReadFile(filepath.Join(dir, config.RepoFile)); err == nil {
+		if _, err = toml.Decode(string(data), &policy); err != nil {
+			return approval.Status{}, err
+		}
+		if policy.Mode == config.ModeTeam {
+			return approval.Judge(approval.DirOf(dir, change))
+		}
+	}
+
 	e, err := refEntry(ctx, dir, change)
 	if err != nil {
 		return approval.Status{}, err
@@ -225,16 +235,6 @@ func currentApproval(ctx context.Context, dir, change string) (approval.Status, 
 // refEntry fetches the approvals ref and returns change's entry on it, or
 // nil. Offline, the local ref is used as it is.
 func refEntry(ctx context.Context, dir, change string) (*approval.Entry, error) {
-	var policy struct{ Mode config.Mode }
-	if data, err := os.ReadFile(filepath.Join(dir, config.RepoFile)); err == nil {
-		if _, err = toml.Decode(string(data), &policy); err != nil {
-			return nil, err
-		}
-		if policy.Mode == config.ModeTeam {
-			return nil, nil
-		}
-	}
-
 	s := approval.Store{Dir: dir}
 	if err := s.Sync(ctx, 0); err != nil {
 		return nil, err
@@ -267,12 +267,16 @@ type runGate struct {
 // check returns the commit a new worktree would start at ("" when the
 // change has a worktree or approval is off), or why change may not start.
 func (g *runGate) check(ctx context.Context, change string) (string, error) {
-	if g.cfg.Mode == config.ModeTeam {
+	effective, err := runConfig(ctx, g.repo, g.cfg, change, "")
+	if err != nil {
+		return "", err
+	}
+	if effective.Mode == config.ModeTeam {
 		sp, err := g.start(ctx, change)
 		if err != nil {
 			return "", err
 		}
-		return sp.Rev, g.a.teamGate(ctx, g.repo, g.cfg, change, sp, false)
+		return sp.Rev, g.a.teamGate(ctx, g.repo, effective, change, sp, false)
 	}
 	if !g.cfg.RequireApproval {
 		return "", nil

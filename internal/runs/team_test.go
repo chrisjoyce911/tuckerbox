@@ -135,3 +135,20 @@ func TestTeamLastStepMarksExistingDraftReady(t *testing.T) {
 	}
 	_ = f
 }
+
+func TestTeamModeChangeKeepsDraftClaim(t *testing.T) {
+	f, e, api := teamSetup(t)
+	f.withTasks(scopedTasks, "add-login")
+	testenv.Git(t, f.dir, "push", "origin", "main")
+	f.env.SetPlan(t, map[string]testenv.Action{"build": tick("1.1", "1.2")})
+	r, err := e.Run(context.Background(), Request{Change: "add-login", Scope: "1"})
+	if err != nil || r.StartedMode() != config.ModeTeam {
+		t.Fatal(r, err)
+	}
+	f.cfg.Mode = config.ModeSolo
+	api.mr.State = "closed"
+	_, err = e.Run(context.Background(), Request{Change: "add-login", Scope: "2"})
+	if err == nil || !strings.Contains(err.Error(), "merge request closed") {
+		t.Fatal("mode change bypassed team claim", err)
+	}
+}

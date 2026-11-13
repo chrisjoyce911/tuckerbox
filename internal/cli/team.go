@@ -62,3 +62,27 @@ func (a App) teamGate(ctx context.Context, repo runs.Repo, cfg *config.Config, c
 func (a App) teamSettingsGate(ctx context.Context, repo runs.Repo, cfg *config.Config, change, worktree string) error {
 	return a.teamGate(ctx, repo, cfg, change, runs.StartPoint{Worktree: worktree}, true)
 }
+
+// runConfig reads only saved state; it never creates a worktree or a run.
+func runConfig(ctx context.Context, repo runs.Repo, cfg *config.Config, change, worktree string) (*config.Config, error) {
+	var saved *runs.Run
+	var err error
+	if worktree != "" {
+		ws, e := runs.OpenWorkspace(ctx, worktree)
+		if e != nil {
+			return nil, e
+		}
+		saved, err = runs.ReadRun(ws.State.RunFile())
+		if err == runs.ErrNoRun {
+			err = nil
+		}
+	} else {
+		saved, err = repo.SavedRun(ctx, cfg.Worktree, change)
+	}
+	if err != nil {
+		return nil, err
+	}
+	copy := *cfg
+	copy.Mode = runs.EffectiveMode(cfg, saved)
+	return &copy, nil
+}

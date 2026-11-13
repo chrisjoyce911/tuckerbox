@@ -34,18 +34,23 @@ func (a App) shippingPreflight(ctx context.Context, repo runs.Repo, cfg *config.
 		a.errf("run", "%v", err)
 		return false
 	}
-	if cfg.Mode == config.ModeTeam {
-		tc, ok := client.(forge.TeamClient)
-		if !ok {
-			a.errf("run", "forge does not support team mode")
-			return false
-		}
-		login, err := tc.Login(ctx)
+	for _, id := range changes {
+		effective, err := runConfig(ctx, repo, cfg, id, "")
 		if err != nil {
-			a.errf("run", "%s", mask(err.Error()))
+			a.errf("run", "%v", err)
 			return false
 		}
-		for _, id := range changes {
+		if effective.Mode == config.ModeTeam {
+			tc, ok := client.(forge.TeamClient)
+			if !ok {
+				a.errf("run", "forge does not support team mode")
+				return false
+			}
+			login, err := tc.Login(ctx)
+			if err != nil {
+				a.errf("run", "%s", mask(err.Error()))
+				return false
+			}
 			mr, err := tc.FindMR(ctx, repo.BranchName(cfg.Worktree, id))
 			if err != nil {
 				a.errf("run", "%s", mask(err.Error()))
@@ -59,11 +64,9 @@ func (a App) shippingPreflight(ctx context.Context, repo runs.Repo, cfg *config.
 				a.errf("run", "%s: claimed by %s on %s: %s", id, mr.Author, owner.Machine, mr.URL)
 				return false
 			}
+			continue
 		}
-		return true
-	}
-	for _, id := range changes {
-		err := runs.ShipPreflight(ctx, client, machine, repo.BranchName(cfg.Worktree, id))
+		err = runs.ShipPreflight(ctx, client, machine, repo.BranchName(cfg.Worktree, id))
 		if err == nil {
 			continue
 		}
@@ -77,5 +80,6 @@ func (a App) shippingPreflight(ctx context.Context, repo runs.Repo, cfg *config.
 		}
 		fmt.Fprintf(a.Stderr, "warning: forge unreachable for %s; starting anyway: %s\n", id, mask(err.Error()))
 	}
+
 	return true
 }

@@ -420,35 +420,43 @@ func (a App) newEngine(repo runs.Repo, cfg *config.Config, log io.Writer) (*runs
 	if a.Forge != nil {
 		e.Forge = func(ctx context.Context) (forge.Client, func(string) string, error) { return a.Forge(ctx, cfg) }
 	}
-	if cfg.RequireApproval {
-		e.Gate = approvalGate(repo)
-		e.SettingsGate = func(ctx context.Context, change, worktree string) error {
-			return settingsGate(ctx, repo.Root, change, worktree)
+	e.Gate = func(ctx context.Context, change string, sp runs.StartPoint) error {
+		if e.Config.Mode == config.ModeTeam {
+			return a.teamGate(ctx, repo, e.Config, change, sp, false)
 		}
-		e.ResumeGate = func(ctx context.Context, change, worktree string) error {
-			// The approvals ref wins over the sidecar, as in the run gate.
-			entry, err := refEntry(ctx, repo.Root, change)
-			if err != nil {
-				return err
-			}
-			st, err := approval.JudgeWith(approval.DirOf(worktree, change), entry)
-			if err != nil {
-				return err
-			}
-			if st.State == approval.None {
-				return fmt.Errorf("change %s is no longer approved", change)
-			}
+		if !e.Config.RequireApproval {
 			return nil
 		}
+		return judgeStart(ctx, repo, change, sp, false)
 	}
-	if cfg.Mode == config.ModeTeam {
-		e.Gate = func(ctx context.Context, change string, sp runs.StartPoint) error {
-			return a.teamGate(ctx, repo, cfg, change, sp, false)
+	e.SettingsGate = func(ctx context.Context, change, worktree string) error {
+		if e.Config.Mode == config.ModeTeam {
+			return a.teamSettingsGate(ctx, repo, e.Config, change, worktree)
 		}
-		e.SettingsGate = func(ctx context.Context, change, worktree string) error {
-			return a.teamSettingsGate(ctx, repo, cfg, change, worktree)
+		if !e.Config.RequireApproval {
+			return nil
 		}
-		e.ResumeGate = e.SettingsGate
+		return settingsGate(ctx, repo.Root, change, worktree)
+	}
+	e.ResumeGate = func(ctx context.Context, change, worktree string) error {
+		if e.Config.Mode == config.ModeTeam {
+			return a.teamSettingsGate(ctx, repo, e.Config, change, worktree)
+		}
+		if !e.Config.RequireApproval {
+			return nil
+		}
+		entry, err := refEntry(ctx, repo.Root, change)
+		if err != nil {
+			return err
+		}
+		st, err := approval.JudgeWith(approval.DirOf(worktree, change), entry)
+		if err != nil {
+			return err
+		}
+		if st.State == approval.None {
+			return fmt.Errorf("change %s is no longer approved", change)
+		}
+		return nil
 	}
 	if home, err := a.stateHome(); err == nil {
 		e.StateHome = home
@@ -692,6 +700,10 @@ func (a App) restart(cmd string, fg bool, change string, req runs.Request) int {
 	repo, cfg, ok := a.loadRepo(cmd, l.Run.Repo)
 	if !ok {
 		return 1
+	}
+	cfg, err = runConfig(context.Background(), repo, cfg, change, req.Worktree)
+	if err != nil {
+		return a.errf(cmd, "%v", err)
 	}
 	// A clear refusal before any process starts; the engine checks again
 	// under the change lock.

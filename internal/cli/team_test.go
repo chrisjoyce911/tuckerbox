@@ -135,3 +135,37 @@ func TestTeamCheckAndRunRefuseUnprotectedOrUnreadableBase(t *testing.T) {
 		})
 	}
 }
+
+func TestTeamGateUsesSavedModeAfterConfigChange(t *testing.T) {
+	f, a, _, _ := teamCLI(t)
+	f.withRemote()
+	repo, cfg, ok := a.loadRepo("run", f.repo)
+	if !ok {
+		t.Fatal("config")
+	}
+	ws, err := repo.EnsureWorktree(context.Background(), cfg.Worktree, "add-login", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = ws.State.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	saved := &runs.Run{Mode: config.ModeTeam, Change: "add-login", Worktree: ws.Path, Repo: f.repo, State: runs.Stopped, Created: time.Now()}
+	if err = runs.WriteRun(ws.State.RunFile(), saved); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Mode = config.ModeSolo
+	g := runGate{a: a, repo: repo, cfg: cfg}
+	_, err = g.check(context.Background(), "add-login")
+	if err == nil || !strings.Contains(err.Error(), "base branch has no approval") {
+		t.Fatal(err)
+	}
+	e, err := a.newEngine(repo, cfg, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.Run(context.Background(), runs.Request{Change: "add-login", Mode: runs.Resume, Worktree: ws.Path})
+	if err == nil || !strings.Contains(err.Error(), "base branch has no approval") {
+		t.Fatal(err)
+	}
+}
