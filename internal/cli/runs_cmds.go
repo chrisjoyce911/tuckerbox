@@ -19,8 +19,10 @@ import (
 
 	"github.com/chrisjoyce911/tuckerbox/internal/agent"
 	"github.com/chrisjoyce911/tuckerbox/internal/approval"
+	"github.com/chrisjoyce911/tuckerbox/internal/board"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/forge"
+	"github.com/chrisjoyce911/tuckerbox/internal/gitremote"
 	"github.com/chrisjoyce911/tuckerbox/internal/priority"
 	"github.com/chrisjoyce911/tuckerbox/internal/runs"
 	"github.com/chrisjoyce911/tuckerbox/internal/scope"
@@ -84,15 +86,29 @@ func (a App) loadRepo(cmd, dir string) (runs.Repo, *config.Config, bool) {
 	return repo, cfg, true
 }
 
-// run: tuckerbox run [--foreground] [--tasks <scope>] <change>... | --all
+// run: tuckerbox run [--foreground] [--tasks <scope>] [--for <remote>]
+// [--dispatched] [--expect-state <s> --expect-since <t>] <change>... | --all
 func (a App) run(args []string) int {
-	var all, fg bool
-	var tasks string
-	pos, err := parseArgs(args, map[string]*bool{"all": &all, "foreground": &fg}, map[string]*string{"tasks": &tasks})
+	var all, fg, dispatched bool
+	var tasks, forRemote, expectState, expectSince string
+	pos, err := parseArgs(args, map[string]*bool{"all": &all, "foreground": &fg, "dispatched": &dispatched},
+		map[string]*string{"tasks": &tasks, "for": &forRemote, "expect-state": &expectState, "expect-since": &expectSince})
 	if err != nil {
 		return a.usageErr("run", err.Error())
 	}
+	var expect *runs.Expect
+	if expectState != "" || expectSince != "" {
+		since, err := time.Parse(time.RFC3339Nano, expectSince)
+		if expectState == "" || err != nil {
+			return a.usageErr("run", "--expect-state and --expect-since go together; --expect-since is an RFC 3339 time")
+		}
+		expect = &runs.Expect{State: runs.State(expectState), Since: since}
+	}
 	switch {
+	case (dispatched || expect != nil) && (all || len(pos) != 1):
+		return a.usageErr("run", "--dispatched and --expect-state take one change, not --all or several")
+	case (dispatched || expect != nil) && fg:
+		return a.usageErr("run", "--dispatched and --expect-state start a background run, not --foreground")
 	case tasks != "" && (all || len(pos) != 1):
 		return a.usageErr("run", "--tasks takes one change, not --all or several")
 	case tasks != "":
@@ -110,6 +126,13 @@ func (a App) run(args []string) int {
 	wd, err := getwd()
 	if err != nil {
 		return a.errf("run", "%v", err)
+	}
+	if forRemote != "" {
+		// Dispatch names the repository by its remote: this machine's
+		// checkout of it, through the machine index.
+		if wd, err = a.checkoutFor(forRemote, wd); err != nil {
+			return a.errf("run", "%v", err)
+		}
 	}
 	repo, cfg, ok := a.loadRepo("run", wd)
 	if !ok {
@@ -215,6 +238,12 @@ func (a App) run(args []string) int {
 		}
 		if tasks != "" {
 			engineArgs = append([]string{"--tasks", tasks}, engineArgs...)
+		}
+		if dispatched {
+			engineArgs = append([]string{"--dispatched"}, engineArgs...)
+		}
+		if expect != nil {
+			engineArgs = append([]string{"--expect-state", string(expect.State), "--expect-since", expect.Since.Format(time.RFC3339Nano)}, engineArgs...)
 		}
 		err := a.spawn(repo.Root, engineArgs)
 		var se *runs.StateError
@@ -1176,4 +1205,16 @@ func (a App) runScope(ctx context.Context, g *runGate, change, spec string) (str
 		return cur.Scope.Spec, nil
 	}
 	return sc.Spec, nil
+}
+
+// checkoutFor finds this machine's checkout of the repository whose remote
+// is remote (normalised as the board names it), looking in dir's
+// repository first and then in the machine index.
+func (a App) checkoutFor(remote, dir string) (string, error) {
+	home, err := a.stateHome()
+	if err != nil {
+		return "", err
+	}
+	env, _ := a.configEnv()
+	return board.Find(context.Background(), gitremote.Normalize(remote), dir, home, env)
 }
