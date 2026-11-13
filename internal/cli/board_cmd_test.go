@@ -8,10 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/board"
+	"github.com/chrisjoyce911/tuckerbox/internal/fleet"
 	"github.com/chrisjoyce911/tuckerbox/internal/runs"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
+	"github.com/chrisjoyce911/tuckerbox/internal/team"
 	"github.com/chrisjoyce911/tuckerbox/internal/testenv"
 )
 
@@ -195,5 +198,93 @@ func TestBoardCLIFindsRepoByKey(t *testing.T) {
 	other := tbIn(t, outside, "board", "--json", "--repo", "example.com/owner/other")
 	if other.code != 1 || !strings.Contains(other.stdout, `"code": "repo_not_found"`) {
 		t.Fatal(other)
+	}
+}
+
+// modes-board through the CLI with the real fleet ref: a claim another
+// machine holds on the remote shows on its card, and counts.
+func TestBoardCLIFleetClaims(t *testing.T) {
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"add-login", "add-search"}})
+	bare := filepath.Join(t.TempDir(), "remote.git")
+	testenv.Git(t, f.repo, "clone", "-q", "--bare", f.repo, bare)
+	testenv.Git(t, f.repo, "remote", "add", "origin", bare)
+	path := filepath.Join(f.repo, ".tuckerbox", "config.toml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testenv.WriteFile(t, path, "mode = \"fleet\"\n"+string(data)+"\n[fleet]\nmax_runs = 3\n")
+	// Another clone of the remote claims add-login, as mini would.
+	other := filepath.Join(t.TempDir(), "mini")
+	testenv.Git(t, filepath.Dir(other), "clone", "-q", bare, other)
+	if _, err := (fleet.Store{Dir: other}).Acquire(context.Background(), "add-login", "mini", "run-1", "add-login", false, false); err != nil {
+		t.Fatal(err)
+	}
+	res := f.tb("board", "--json")
+	if res.code != 0 {
+		t.Fatalf("%d %s", res.code, res.stderr)
+	}
+	var doc board.Document
+	if err := json.Unmarshal([]byte(res.stdout), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Mode != "fleet" || doc.Fleet == nil || doc.Fleet.MaxRuns != 3 || doc.Fleet.Claims != 1 || doc.ClaimsRead == nil || doc.ClaimsRead.Stale {
+		t.Fatalf("mode %q fleet %+v read %+v", doc.Mode, doc.Fleet, doc.ClaimsRead)
+	}
+	for _, c := range doc.Cards {
+		switch c.Change {
+		case "add-login":
+			if c.Claim == nil || c.Claim.Machine != "mini" || c.Claim.State != "active" || c.Claim.Epoch != 1 || c.Claim.RenewedAt == "" {
+				t.Fatalf("claim %+v", c.Claim)
+			}
+		case "add-search":
+			if c.Claim != nil {
+				t.Fatalf("unclaimed %+v", c.Claim)
+			}
+		}
+	}
+}
+
+// modes-board through the CLI with the real team reader: team.BoardClaims'
+// kept answer, read less than a minute ago, gives the card its owner
+// without asking the forge.
+func TestBoardCLITeamClaims(t *testing.T) {
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"add-login", "add-search"}})
+	testenv.Git(t, f.repo, "remote", "add", "origin", "https://github.com/example/shop.git")
+	path := filepath.Join(f.repo, ".tuckerbox", "config.toml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testenv.WriteFile(t, path, "mode = \"team\"\n"+strings.Replace(string(data), "ship = \"local\"", "ship = \"mr\"", 1))
+	at := time.Now()
+	kept, err := json.Marshal(team.Snapshot{Claims: map[string]team.Claim{"add-login": {Change: "add-login", Login: "sam", Machine: "studio", Run: "r1", MR: 7}}, FetchedAt: at, AttemptedAt: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	common := testenv.Git(t, f.repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	testenv.WriteFile(t, filepath.Join(common, "tuckerbox", "team-claims.json"), string(kept))
+	res := f.tb("board", "--json")
+	if res.code != 0 {
+		t.Fatalf("%d %s", res.code, res.stderr)
+	}
+	var doc board.Document
+	if err := json.Unmarshal([]byte(res.stdout), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Mode != "team" || doc.Fleet != nil || doc.ClaimsRead == nil || doc.ClaimsRead.Source != "forge" || doc.ClaimsRead.Stale {
+		t.Fatalf("mode %q fleet %+v read %+v", doc.Mode, doc.Fleet, doc.ClaimsRead)
+	}
+	for _, c := range doc.Cards {
+		switch c.Change {
+		case "add-login":
+			if c.Claim == nil || c.Claim.Login != "sam" || c.Claim.Machine != "studio" || c.Claim.State != "open" {
+				t.Fatalf("claim %+v", c.Claim)
+			}
+		case "add-search":
+			if c.Claim != nil {
+				t.Fatalf("unclaimed %+v", c.Claim)
+			}
+		}
 	}
 }

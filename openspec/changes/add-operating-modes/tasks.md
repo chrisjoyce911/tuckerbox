@@ -141,7 +141,7 @@
 
 ## 6. Board (modes-board)
 
-- [ ] 6.1 `board --json`: `mode`, fleet `max_runs` and claim count, `claim` on cards (fleet ref or forge), claims shown for machines not connected; update the board JSON snapshot
+- [x] 6.1 `board --json`: `mode`, fleet `max_runs` and claim count, `claim` on cards (fleet ref or forge), claims shown for machines not connected; update the board JSON snapshot
 - [x] 6.2 Test "Fleet board"
 - [x] 6.3 Test "Expired claim on a card"
 - [x] 6.4 Test "Owner in a team"

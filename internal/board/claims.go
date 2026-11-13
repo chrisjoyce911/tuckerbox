@@ -81,12 +81,12 @@ type TeamSnapshot struct {
 }
 
 var (
-	// FleetClaims opens the fleet ref of the repository at root; nil until
-	// the fleet package is linked in.
+	// FleetClaims opens the fleet ref of the repository at root
+	// (claims_wire.go: fleet.Store). Tests may replace it.
 	FleetClaims func(root string, cfg *config.Config) FleetSource
 	// TeamClaims reads team mode's claims for the repository at root, at
-	// most once a minute, keeping the answer in the state directory; nil
-	// until the team package is linked in.
+	// most once a minute, keeping the answer in the state directory
+	// (claims_wire.go: team.BoardClaims). Tests may replace it.
 	TeamClaims func(ctx context.Context, root string, cfg *config.Config, now time.Time) (TeamSnapshot, error)
 	// now is the board's clock (tests set it).
 	now = time.Now

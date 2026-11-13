@@ -352,7 +352,9 @@ machine isn't this computer, as for Start), showing where each change was
 placed or why not. A card shows `claim: <state> on <machine>` (`<login> on
 <machine>` in a team). A claimed card offers no Start. A card whose fleet
 claim expired offers **Take over**, which asks first, since work on the old
-machine is left behind, then runs `tuckerbox run --take-over <change>`.
+machine is left behind, then runs `tuckerbox run --take-over <change>` on
+the board's own machine, in its checkout, whichever machine the card's run
+is on.
 
 ## Settings
 
