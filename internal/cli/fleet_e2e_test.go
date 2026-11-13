@@ -173,6 +173,9 @@ func TestFleetEndToEndCrashDuringStepsAndCI(t *testing.T) {
 	beta := f.machine("beta", 1, "")
 	for _, m := range []*otherMachine{alpha, beta} {
 		m.env = append(m.env, "FLEET_E2E_FORGE="+api.Dir, config.TestForgeURLEnv+"=https://github.com/example/fleet.git", "FAKEAGENT_PLAN="+f.env.Plan, "FAKEAGENT_RECORD="+f.env.Record)
+		if deadline, ok := t.Deadline(); ok {
+			m.env = append(m.env, "FLEET_E2E_DEADLINE="+deadline.Format(time.RFC3339Nano))
+		}
 		for k, v := range testenv.NoNetwork {
 			m.env = append(m.env, k+"="+v)
 		}

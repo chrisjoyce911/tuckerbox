@@ -87,7 +87,19 @@ func (c mergeWaitForge) Checks(ctx context.Context, sha, base string) (forge.Che
 // Run the production ship.Engine all the way into watch.go's ShipMerge case.
 // Startup still owns the saved claim; it is lost only while Checks is paused.
 func staleMerge(client fleetforge.Client, r *runs.Run) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	// The parent owns this process and kills it in test cleanup. Use its
+	// deadline: a separate short wall clock can expire while a slow Windows
+	// runner is still performing the deliberate takeover between our gates.
+	ctx, cancel := context.WithCancel(context.Background())
+	if value := os.Getenv("FLEET_E2E_DEADLINE"); value != "" {
+		deadline, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			cancel()
+			return err
+		}
+		cancel()
+		ctx, cancel = context.WithDeadline(context.Background(), deadline)
+	}
 	defer cancel()
 	opts, err := config.Discover(config.SystemEnv(), r.Repo)
 	if err != nil {
