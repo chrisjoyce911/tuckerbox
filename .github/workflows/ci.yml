@@ -36,9 +36,10 @@ jobs:
         # The race detector needs cgo; the shipped binary does not.
         env:
           CGO_ENABLED: "1"
-        # internal/cli spawns many tuckerbox and git processes, which are
-        # slow on Windows runners: go test's default 10m is not enough there.
-        run: go test -race -timeout 25m ./...
+          TUCKERBOX_TEST_TIMEOUT: ${{ runner.os == 'Windows' && '40m' || '25m' }}
+        # The CLI suite spawns many processes. On Windows the existing
+        # fixtures take about 20m; fleet crash/CI recovery adds several more.
+        run: go test -race -timeout "$TUCKERBOX_TEST_TIMEOUT" ./...
       - name: go build (no cgo)
         env:
           CGO_ENABLED: "0"
