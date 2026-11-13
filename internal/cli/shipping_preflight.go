@@ -34,6 +34,9 @@ func (a App) shippingPreflight(ctx context.Context, repo runs.Repo, cfg *config.
 		a.errf("run", "%v", err)
 		return false
 	}
+	if cfg.Mode == config.ModeFleet {
+		return true
+	} // Fleet ownership, including takeover, is decided by the ref CAS.
 	for _, id := range changes {
 		effective, err := runConfig(ctx, repo, cfg, id, "")
 		if err != nil {
