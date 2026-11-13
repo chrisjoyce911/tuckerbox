@@ -139,4 +139,3 @@ func TestModeChangeKeepsStartedMode(t *testing.T) {
 		t.Fatal("old run")
 	}
 }
-
