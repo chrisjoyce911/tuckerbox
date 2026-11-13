@@ -82,26 +82,26 @@
 
 ## 4. Dispatch (fleet-placement)
 
-- [ ] 4.1 `tuckerbox dispatch [change...] [--dry-run] [--json]`: one pass, changes in Approved order that pass the run gate and dependencies and have no claim, up to the fleet limit; document it in README with a scheduling example that uses the person's own scheduler
-- [ ] 4.2 Test "Nothing to do"
-- [ ] 4.3 Test "Unapproved change skipped"
-- [ ] 4.4 Candidates from parallel `machine --json` reports: answered, free capacity, checkout, each step's effective agent installed and not signed out
-- [ ] 4.5 Test "Agent signed out"
-- [ ] 4.6 Test "Sign-in unknown"
-- [ ] 4.7 Choice: preferred `machines`, then most free capacity, then name; capacity taken within the pass
-- [ ] 4.8 Test "Preferred machine full"
-- [ ] 4.9 Start with `tuckerbox run --for <remote> --dispatched <change>` locally, over SSH or herdr-core; `run --for` finds the checkout through the machine index
+- [x] 4.1 `tuckerbox dispatch [change...] [--dry-run] [--json]`: one pass, changes in Approved order that pass the run gate and dependencies and have no claim, up to the fleet limit; document it in README with a scheduling example that uses the person's own scheduler
+- [x] 4.2 Test "Nothing to do"
+- [x] 4.3 Test "Unapproved change skipped"
+- [x] 4.4 Candidates from parallel `machine --json` reports: answered, free capacity, checkout, each step's effective agent installed and not signed out
+- [x] 4.5 Test "Agent signed out"
+- [x] 4.6 Test "Sign-in unknown"
+- [x] 4.7 Choice: preferred `machines`, then most free capacity, then name; capacity taken within the pass
+- [x] 4.8 Test "Preferred machine full"
+- [x] 4.9 Start with `tuckerbox run --for <remote> --dispatched <change>` locally, over SSH or herdr-core; `run --for` finds the checkout through the machine index
 - [ ] 4.10 Test "Start over SSH"
-- [ ] 4.11 Report refused claims and failed starts without retrying in the pass
+- [x] 4.11 Report refused claims and failed starts without retrying in the pass
 - [ ] 4.12 Test "Two dispatchers"
-- [ ] 4.13 Test "Dry run" (fleet ref unchanged)
-- [ ] 4.14 Continuations in dispatch: approved changes with a `ready` claim and an incomplete run, continued on the holder only with `--tasks next` when scoped or `[autopilot] scope = "group"`, else reported; never complete ready runs or parked claims; continuations first, then new changes; read run state, `since`, scope, completeness and `dispatched` from the holder's machine report (extend `machine --json --for`)
+- [x] 4.13 Test "Dry run" (fleet ref unchanged)
+- [x] 4.14 Continuations in dispatch: approved changes with a `ready` claim and an incomplete run, continued on the holder only with `--tasks next` when scoped or `[autopilot] scope = "group"`, else reported; never complete ready runs or parked claims; continuations first, then new changes; read run state, `since`, scope, completeness and `dispatched` from the holder's machine report (extend `machine --json --for`)
 - [ ] 4.15 Test "Next group across passes" (two state directories, bare remote, `max_runs = 1`: first pass reports and starts nothing, second pass after the other change is ready continues on the holder)
-- [ ] 4.16 Test "Complete ready run"
-- [ ] 4.17 Test "Stopped by a person"
-- [ ] 4.18 Test "Continuations first"
-- [ ] 4.19 Test "Holder unreachable"
-- [ ] 4.20 `tuckerbox run --expect-state <s> --expect-since <t>`: after the fleet slot and under the change lock, check state, `since` and `approved` before any run or claim change; change nothing on a mismatch; dispatch passes what the holder's report said and reports mismatches (shares the engine check of `add-autopilot` task 3.1)
+- [x] 4.16 Test "Complete ready run"
+- [x] 4.17 Test "Stopped by a person"
+- [x] 4.18 Test "Continuations first"
+- [x] 4.19 Test "Holder unreachable"
+- [x] 4.20 `tuckerbox run --expect-state <s> --expect-since <t>`: after the fleet slot and under the change lock, check state, `since` and `approved` before any run or claim change; change nothing on a mismatch; dispatch passes what the holder's report said and reports mismatches (shares the engine check of `add-autopilot` task 3.1)
 - [ ] 4.21 Test "A person reran and stopped it meanwhile" (two state directories, bare remote; the person's rerun and stop land between the report and the command)
 - [ ] 4.22 Test "Unapproved before the command arrives"
 

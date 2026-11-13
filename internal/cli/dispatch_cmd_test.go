@@ -467,3 +467,55 @@ func TestRunExpectStateMismatch(t *testing.T) {
 		t.Errorf("--expect-state without --expect-since: %d", res.code)
 	}
 }
+
+// operating-modes: Changing mode. After a move from fleet to solo,
+// dispatch refuses, starts nothing on any machine, and leaves the fleet
+// claims as they were.
+func TestDispatchAfterFleetToSolo(t *testing.T) {
+	f := newFleet(t, []string{"add-login", "add-users"}, "", "", "mini")
+	f.approveAll("add-login", "add-users")
+	f.report("mini", mini)
+	f.answer("mini", "started\n", 0)
+	f.claim("add-login", "mini", dispatch.ClaimActive, time.Now())
+	before := f.fleetTip()
+	p := filepath.Join(f.repo, ".tuckerbox", "config.toml")
+	testenv.WriteFile(t, p, strings.Replace(readFile(t, p), "mode = \"fleet\"\n", "", 1))
+	f.commit("back to solo")
+	f.push()
+	res := f.tb("dispatch")
+	if res.code == 0 || !strings.Contains(res.stderr, "solo") {
+		t.Errorf("%d %s %s", res.code, res.stdout, res.stderr)
+	}
+	if c := f.startCalls("mini"); len(c) != 0 {
+		t.Errorf("started %v", c)
+	}
+	if after := f.fleetTip(); after != before {
+		t.Errorf("fleet ref moved: %s -> %s", before, after)
+	}
+}
+
+// Scenario: Unapproved before the command arrives (the holder's half): a
+// continuation that matches the run but finds the change unapproved
+// starts nothing.
+func TestRunExpectStateUnapproved(t *testing.T) {
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}, RequireApproval: true})
+	testenv.WriteFile(t, filepath.Join(f.repo, "openspec", "changes", "add-login", "tasks.md"), "# Tasks\n\n## 1. One\n\n- [ ] 1.1 A\n\n## 2. Two\n\n- [ ] 2.1 B\n")
+	f.commit("groups")
+	f.approveAll("add-login")
+	f.env.SetPlan(t, map[string]testenv.Action{"build": {Tick: []string{"1.1"}}})
+	if res := f.tb("run", "--foreground", "--tasks", "1", "add-login"); res.code != 0 {
+		t.Fatalf("scope 1: %d %s %s", res.code, res.stdout, res.stderr)
+	}
+	before := f.runOf("add-login")
+	if res := f.tb("unapprove", "add-login"); res.code != 0 {
+		t.Fatalf("unapprove: %d %s", res.code, res.stderr)
+	}
+	res := f.tb("run", "--expect-state", "ready", "--expect-since", before.Since.Format(time.RFC3339Nano), "--tasks", "next", "add-login")
+	if res.code == 0 {
+		t.Errorf("started while unapproved: %s", res.stdout)
+	}
+	after := f.runOf("add-login")
+	if after.State != before.State || !after.Since.Equal(before.Since) {
+		t.Errorf("run changed: %+v -> %+v", before, after)
+	}
+}
