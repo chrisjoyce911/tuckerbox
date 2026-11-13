@@ -8,6 +8,7 @@ import (
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/forge"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -56,7 +57,7 @@ func Base(ctx context.Context, root string, cfg *config.Config, c forge.TeamClie
 // Actual may be a retained branch or an edited worktree. Its own approval is
 // deliberately ignored. Resume checks settings, allowing a plan to edit text.
 func Judge(ctx context.Context, root, rev, change string, actual approval.Files, resume bool) (approval.Status, error) {
-	data, err := git(ctx, root, "show", rev+":"+config.RepoFile)
+	data, err := git(ctx, root, "show", rev+":"+filepath.ToSlash(config.RepoFile))
 	if err != nil {
 		return approval.Status{}, err
 	}
