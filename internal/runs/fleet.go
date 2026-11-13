@@ -123,13 +123,18 @@ func (e *Engine) watchFleet(ctx context.Context, cancelRun context.CancelFunc, r
 	}
 	go func() {
 		defer close(f.done)
-		t := time.NewTicker(lease / 5)
-		defer t.Stop()
+		ticks := e.FleetTicks
+		var ticker *time.Ticker
+		if ticks == nil {
+			ticker = time.NewTicker(max(lease/5, time.Nanosecond))
+			defer ticker.Stop()
+			ticks = ticker.C
+		}
 		for {
 			select {
 			case <-watch.Done():
 				return
-			case <-t.C:
+			case <-ticks:
 				if err := e.fleetStore().Renew(watch, f.claim); err != nil {
 					if watch.Err() != nil {
 						return

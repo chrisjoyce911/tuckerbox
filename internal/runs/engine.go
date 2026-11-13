@@ -138,6 +138,8 @@ type Engine struct {
 	OnLocked func(ws Workspace, r *Run)
 	// Now returns the time; nil means time.Now.
 	Now func() time.Time
+	// FleetTicks optionally supplies renewal ticks from a test clock.
+	FleetTicks <-chan time.Time
 	// TickEvery is how often the run process reads the worktree's tasks.md
 	// while a step runs, for task_ticked and task_unticked history events
 	// (default TickEvery, 10 seconds).
@@ -400,14 +402,26 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	if err := e.freezeMode(ctx, req); err != nil {
 		return nil, err
 	}
-	if req.Mode == Start && req.Dispatched {
+	// Every later scope of a dispatched run takes its machine slot again.
+	if !req.Dispatched {
+		path := req.Worktree
+		if path == "" {
+			path = e.Repo.WorktreePath(e.Config.Worktree, req.Change)
+		}
+		if existing, err := OpenWorkspace(ctx, path); err == nil {
+			if prior, err := ReadRun(existing.State.RunFile()); err == nil && prior.Dispatched {
+				req.Dispatched = true
+			}
+		}
+	}
+	if req.Dispatched {
 		if fleet, err = e.takeFleetSlot(); err != nil {
 			return nil, err
 		}
 	}
 	if req.Worktree != "" {
 		ws, err = OpenWorkspace(ctx, req.Worktree)
-		if err == nil && req.Mode != Start && fleet == nil {
+		if err == nil && fleet == nil {
 			if r, rerr := ReadRun(ws.State.RunFile()); rerr == nil && r.Dispatched {
 				fleet, err = e.takeFleetSlot()
 			}
@@ -452,7 +466,7 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 			}
 		}
 	}
-	if e.gated(req) {
+	if e.gated(req) && (e.fleetRun == nil || e.fleetRun.tip == "") {
 		// Under the change lock, which approve and unapprove also take:
 		// what is judged here is what the run starts with.
 		if err := e.Gate(ctx, req.Change, StartPoint{Worktree: ws.Path}); err != nil {
