@@ -5,10 +5,13 @@ import "context"
 type MR struct {
 	Number                                           int
 	URL, State, Title, Body, Head, Base, MergeStatus string
+	Author                                           string
+	Draft                                            bool
 	Mergeable, Behind                                bool
 }
 type OpenRequest struct {
 	Title, Body, Branch, Base string
+	Draft                     bool
 	Labels                    []string
 }
 type Access struct {
@@ -42,4 +45,15 @@ type Client interface {
 	Threads(context.Context, int) ([]Thread, error)
 	Reply(context.Context, int, string, string) error
 	Merge(context.Context, int, string, string) error
+}
+
+// TeamClient adds authenticated ownership and protected-base operations.
+// Keeping this separate lets solo shipping use a smaller forge surface.
+type TeamClient interface {
+	Client
+	Login(context.Context) (string, error)
+	ProtectedBase(context.Context, string) (bool, error)
+	ListOpenMRs(context.Context) ([]MR, error)
+	UpdateMR(context.Context, int, OpenRequest) (*MR, error)
+	MarkReady(context.Context, int) error
 }
