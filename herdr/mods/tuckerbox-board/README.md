@@ -326,6 +326,36 @@ Open merge request uses the local browser through the GPUI click context's
 `open_url`; Resume is offered on Ready with an open MR in mr mode. No merge
 action is exposed. Shipping is active for edit, task tick and approval gates.
 
+## Operating modes
+
+The board document adds `mode` (`solo`, `fleet` or `team`); in fleet mode
+`fleet` (`max_runs`, `0` for no limit, and `claims`, the active and parked
+claims counted against it). In fleet and team mode it adds `claims_read`
+(`source`: `fleet` or `forge`; `at`, when they were read; `stale` and
+`error` when the source couldn't be read and a kept copy is shown). A card
+with a claim adds `claim`: `machine`, `state` (`active`, `parked`,
+`expired` or `ready` in fleet mode, `open` in team mode), and in fleet mode
+`epoch` and `renewed_at`; in team mode `login`, the merge request author's
+forge login. A claimed change shows its claim even when no connected machine
+has a run of it. The JSON version stays 1.
+
+Fleet claims come from `refs/tuckerbox/fleet`, fetched at most once a
+minute (the stamp is `tuckerbox/fleet-fetched` in the git common directory);
+team claims from the forge's open merge requests with markers, read at most
+once a minute and kept in the state directory.
+
+The header shows the mode (`fleet 2/3 claimed`, `team`) and, when the
+claims are a kept copy, how old they are. In fleet mode it offers
+**Dispatch** while an Approved card has no claim: `tuckerbox dispatch` on
+the board's machine, in its checkout (in a herdr-core terminal when that
+machine isn't this computer, as for Start), showing where each change was
+placed or why not. A card shows `claim: <state> on <machine>` (`<login> on
+<machine>` in a team). A claimed card offers no Start. A card whose fleet
+claim expired offers **Take over**, which asks first, since work on the old
+machine is left behind, then runs `tuckerbox run --take-over <change>` on
+the board's own machine, in its checkout, whichever machine the card's run
+is on.
+
 ## Settings
 
 Settings in the board header (the window and a docked pane, not the drawer)

@@ -7,7 +7,7 @@ import { v_flex, h_flex, TextView, Textarea, TextareaState } from "gpui-base";
 import { theme, props, closeOverlay } from "herdr";
 import { loadDetail } from "./data.js";
 import { normaliseCard, cardAt, columnName, newestFirst, eventText, fmtLocal, fmtBrisbane, taskGroups, approvalBadge, isActive, activityRows, waitingForYou, ago, answerable, showsApproval } from "./model.js";
-import { detailActions, invocation, actionLabel, defaultStep, rerunSteps, runGroups, canEdit, EDIT_FILES, ACTIONS, answerActions } from "./actions.js";
+import { detailActions, invocation, actionLabel, defaultStep, rerunSteps, runGroups, canEdit, EDIT_FILES, ACTIONS, answerActions, confirmText, claimLine, actionCard } from "./actions.js";
 import { perform, validate, watchEdits, changed } from "./perform.js";
 import { editOf, editNote } from "./edits.js";
 import { settingsRows, choose, canPick } from "./settings.js";
@@ -20,6 +20,10 @@ export class CardView extends View {
     const pr = props() ?? p ?? {};
     this.change = pr.change ?? "";
     this.board = pr.board ?? { columns: [], require_approval: true };
+    // The board's own machine and checkout, where Take over runs. The
+    // detail read below happens on the card's machine and replaces
+    // this.board.path with that machine's, so it is kept here.
+    this.home = { on: this.board.on ?? null, path: this.board.path ?? "", os: this.board.os ?? "" };
     // Keep the card's machine, checkout and operating system: the answer
     // actions pick their standard-input transport from os (stdinCall) and
     // may run before, or without, the detail read below.
@@ -59,7 +63,7 @@ export class CardView extends View {
         this.error = null;
         const card = d.cards.find((c) => c.change === this.change);
         if (card) this.card = { ...card, on: at.on, path: d.path || at.cwd, os: card.os || d.os || this.card?.os || "" };
-        this.board = { ...this.board, ship:d.ship,columns: d.columns, steps: d.steps, require_approval: d.require_approval, path: d.path };
+        this.board = { ...this.board, ship:d.ship,mode:d.mode,columns: d.columns, steps: d.steps, require_approval: d.require_approval, path: d.path };
         this.detail = d.detail && d.detail.change === this.change ? d.detail : null;
         if (!this.detail) this.error = `No detail for ${this.change} in what tuckerbox printed.`;
       }
@@ -73,6 +77,9 @@ export class CardView extends View {
 
   act(action, extra, cx) {
     if (this.busy) return;
+    // Take over asks first: work on the old machine is left behind.
+    const ask = confirmText(action, this.card);
+    if (ask && !extra?.confirmed) { this.pending = { action, extra: { ...extra, confirmed: true }, confirm: ask }; cx.notify(); return; }
     if (action === "validate") {
       this.busy = action;
       cx.notify();
@@ -85,7 +92,7 @@ export class CardView extends View {
       return;
     }
     let inv;
-    try { inv = invocation(action, this.card, extra); }
+    try { inv = invocation(action, actionCard(action, this.card, this.home), extra); }
     catch (e) { this.notice = { text: String(e?.message ?? e), kind: "error" }; cx.notify(); return; }
     inv.card = this.card;
     inv.board = this.board;
@@ -189,7 +196,7 @@ export class CardView extends View {
     const p = this.pending;
     return h_flex().items_start().gap(8)
       .child(div().flex_1().child(note("confirm-set", p.confirm, "error")))
-      .child(button("confirm-set-yes", "Change it", (_e, cx) => { this.pending = null; this.act("set", p.extra, cx); }, { danger: true, disabled: Boolean(this.busy) }))
+      .child(button("confirm-set-yes", p.action ? actionLabel(p.action) : "Change it", (_e, cx) => { this.pending = null; this.act(p.action ?? "set", p.extra, cx); }, { danger: true, disabled: Boolean(this.busy) }))
       .child(button("confirm-set-no", "Cancel", (_e, cx) => { this.pending = null; cx.notify(); }));
   }
 
@@ -353,6 +360,12 @@ export class CardView extends View {
         .when(c.tasks.total > 0, (el) => el.child(progressBar(c.tasks, 70)))
         .child(div().flex_1())
         .when(Boolean(c.machine), (el) => el.child(div().text_color(tm.dim).child(c.machine))))
+      // modes-board: who holds the change, and in fleet mode its epoch and last renewal.
+      .when(Boolean(claimLine(c, this.board)), (el) => el.child(h_flex().id("claim").pt(4).gap(8).text_size(11.5)
+        .text_color(c.claim.state === "expired" ? tm.blocked : tm.muted)
+        .child(div().child(`claim: ${claimLine(c, this.board)}`))
+        .when(c.claim.epoch > 0, (el) => el.child(div().text_color(tm.dim).child(`epoch ${c.claim.epoch}`)))
+        .when(Boolean(c.claim.renewed_at), (el) => el.child(div().text_color(tm.dim).child(`renewed ${fmtLocal(c.claim.renewed_at)}`)))))
       .when(Boolean(c.mr), (el)=>el.child(h_flex().items_center().gap(6).text_size(11)
         .child(div().id(`mr-link-${c.change}`).cursor_pointer().text_color(tm.accent).hover(s=>s.underline())
           .on_mouse_down("left",(_e,cx)=>cx.stop_propagation())

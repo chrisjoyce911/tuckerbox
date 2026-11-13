@@ -24,10 +24,17 @@ type Document struct {
 	// Autopilot says whether tuckerbox autopilot runs for the repository
 	// on this machine (add-autopilot).
 	Autopilot Autopilot `json:"autopilot"`
-	Steps     []string  `json:"steps"`
-	Columns   []Column  `json:"columns"`
-	Cards     []Card    `json:"cards"`
-	Detail    *Detail   `json:"detail,omitempty"`
+	// Mode is the repository's operating mode: solo, fleet or team
+	// (modes-board: Mode in the board document).
+	Mode string `json:"mode"`
+	// Fleet is fleet mode's limit and the claims counted against it.
+	Fleet *FleetCount `json:"fleet,omitempty"`
+	// ClaimsRead says where fleet or team claims came from, and when.
+	ClaimsRead *ClaimsRead `json:"claims_read,omitempty"`
+	Steps      []string    `json:"steps"`
+	Columns    []Column    `json:"columns"`
+	Cards      []Card      `json:"cards"`
+	Detail     *Detail     `json:"detail,omitempty"`
 }
 type Column struct {
 	ID   string `json:"id"`
@@ -100,6 +107,9 @@ type Card struct {
 	Settings []StepSettings `json:"settings"`
 	// Machines is the change's machines list from its tuckerbox.toml.
 	Machines []string `json:"machines"`
+	// Claim is the change's claim in fleet or team mode (modes-board:
+	// Claims on cards); absent when it has none.
+	Claim *Claim `json:"claim,omitempty"`
 	// NeedsYou says why the card needs a person; absent when it doesn't.
 	NeedsYou string `json:"needs_you,omitempty"`
 }

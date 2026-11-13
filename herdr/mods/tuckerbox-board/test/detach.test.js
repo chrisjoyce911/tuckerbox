@@ -61,8 +61,8 @@ const ran = (address, exit_code, output, extra = {}) => ({
     wait: { children: [], ended: true, exit_code, reason: "exit", signal: null, status: null, terminal: address, turn: 0, ...extra } }),
 });
 
-test("which actions run detached: a remote card's start, group, resume, rerun and answer and resume", () => {
-  assert.deepEqual([...DETACHED].sort(), ["answer_resume", "group", "rerun", "resume", "start"]);
+test("which actions run detached: a remote card's start, group, resume, rerun, answer and resume, take over, and dispatch", () => {
+  assert.deepEqual([...DETACHED].sort(), ["answer_resume", "dispatch", "group", "rerun", "resume", "start", "takeover"]);
   const extra = { step: "build", group: 2 };
   for (const a of ["start", "group", "resume", "rerun"]) {
     const r = invocation(a, remote, extra);

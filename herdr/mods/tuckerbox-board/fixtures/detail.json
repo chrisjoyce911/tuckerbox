@@ -5,6 +5,7 @@
   "machine": "studio",
   "os": "darwin",
   "require_approval": true,
+  "mode": "solo",
   "autopilot": { "running": false },
   "steps": [
     "plan",
