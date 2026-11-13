@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 )
 
 const RefName = "refs/tuckerbox/fleet"
@@ -178,26 +179,54 @@ func (s Store) Read(ctx context.Context) (map[string]Claim, error) {
 	st, err := s.read(ctx)
 	return st.claims, err
 }
-func validName(n string) bool {
-	return n != "" && n != "." && n != ".." && !strings.ContainsAny(n, "/\\\x00\n\r\t ")
-}
+func validName(n string) bool { return statedir.CheckID("change", n) == nil }
+
 func (s Store) prune(ctx context.Context, st *snapshot) error {
-	if s.Base == "" {
+	base := s.Base
+	if base == "" {
+		out, err := s.git(ctx, "", "ls-remote", "--symref", "--", s.remote(), "HEAD")
+		if err != nil {
+			return err
+		}
+		for _, line := range strings.Split(out, "\n") {
+			parts := strings.Fields(line)
+			if len(parts) == 3 && parts[0] == "ref:" {
+				base = parts[1]
+				break
+			}
+		}
+	} else {
+		base = strings.TrimPrefix(base, "refs/remotes/")
+		base = strings.TrimPrefix(base, s.remote()+"/")
+		if !strings.HasPrefix(base, "refs/heads/") {
+			base = "refs/heads/" + base
+		}
+	}
+	if base == "" {
 		return nil
 	}
-	paths, err := s.git(ctx, "", "ls-tree", "--name-only", s.Base, "openspec/changes/archive/")
+	tip, err := s.fetch(ctx, base)
+	if err != nil {
+		return err
+	}
+	if tip == "" {
+		return nil
+	}
+	paths, err := s.git(ctx, "", "ls-tree", "--name-only", tip, "openspec/changes/archive/")
 	if err != nil {
 		return err
 	}
 	for _, p := range strings.Split(paths, "\n") {
-		for n := range st.claims {
-			if strings.HasSuffix(p, "-"+n) {
-				delete(st.claims, n)
+		name := strings.TrimPrefix(p, "openspec/changes/archive/")
+		if len(name) > 11 && name[10] == '-' {
+			if _, err := time.Parse("2006-01-02", name[:10]); err == nil {
+				delete(st.claims, name[11:])
 			}
 		}
 	}
 	return nil
 }
+
 func (s Store) commit(ctx context.Context, st snapshot) (string, error) {
 	trees := map[string]string{}
 	for _, folder := range []string{"claims", "epochs"} {
@@ -306,6 +335,7 @@ func (s Store) update(ctx context.Context, decide func(*snapshot) (*branchMove, 
 		}
 		out, err := s.git(ctx, "", args...)
 		if err == nil {
+			_, _ = s.git(ctx, "", "update-ref", RefName, commit)
 			return nil
 		}
 		msg := out + err.Error()

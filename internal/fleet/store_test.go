@@ -299,6 +299,7 @@ func TestPruneArchivedAndLocalRead(t *testing.T) {
 	}
 	gitTest(t, a.Dir, "add", ".")
 	gitTest(t, a.Dir, "commit", "-m", "archive")
+	gitTest(t, a.Dir, "push", "origin", "main")
 	a.Base = "main"
 	claim(t, a, "users", "one")
 	all, err := a.Read(ctx)
@@ -309,5 +310,26 @@ func TestPruneArchivedAndLocalRead(t *testing.T) {
 	local, err := a.ReadLocal(ctx)
 	if err != nil || len(local) != 1 {
 		t.Fatalf("local: %v %v", local, err)
+	}
+}
+
+func TestArchivePruningMatchesWholeChangeName(t *testing.T) {
+	a, _, _ := stores(t)
+	claim(t, a, "login", "one")
+	claim(t, a, "add-login", "one")
+	path := filepath.Join(a.Dir, "openspec", "changes", "archive", "2026-01-01-add-login")
+	if err := os.MkdirAll(path, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "tasks.md"), []byte("done"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, a.Dir, "add", ".")
+	gitTest(t, a.Dir, "commit", "-m", "archive add-login")
+	gitTest(t, a.Dir, "push", "origin", "main")
+	claim(t, a, "users", "one")
+	all, err := a.Read(ctx)
+	if err != nil || len(all) != 2 || all["login"].Change != "login" {
+		t.Fatalf("pruned a suffix match: %v %v", all, err)
 	}
 }

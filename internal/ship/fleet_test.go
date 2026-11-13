@@ -120,21 +120,30 @@ func TestFleetTakeoverWaitingForCIAndMarkerRecovery(t *testing.T) {
 	}
 }
 func TestFleetReleaseAfterPremergeRenewalRefusesPinnedMerge(t *testing.T) {
-	e, api, f, _ := fleetStage(t, config.ShipMerge)
-	other := fleet.Store{Dir: f.two}
-	api.beforeMerge = func() {
-		if err := other.Release(context.Background(), "add-login", "mini", "add-login", true); err != nil {
-			t.Fatal(err)
-		}
-	}
-	out := e.Run(context.Background(), false)
-	if out.State != "blocked" || !strings.Contains(out.Reason, "branch changed") {
-		t.Fatal(out)
-	}
-	if api.mergeCalls != 0 {
-		t.Fatal("forge accepted stale pin")
+	for _, force := range []bool{false, true} {
+		t.Run(fmt.Sprint(force), func(t *testing.T) {
+			e, api, f, _ := fleetStage(t, config.ShipMerge)
+			other := fleet.Store{Dir: f.two}
+			machine := "studio"
+			if force {
+				machine = "mini"
+			}
+			api.beforeMerge = func() {
+				if err := other.Release(context.Background(), "add-login", machine, "add-login", force); err != nil {
+					t.Fatal(err)
+				}
+			}
+			out := e.Run(context.Background(), false)
+			if out.State != "blocked" || !strings.Contains(out.Reason, "branch changed") {
+				t.Fatal(out)
+			}
+			if api.mergeCalls != 0 {
+				t.Fatal("forge accepted stale pin")
+			}
+		})
 	}
 }
+
 func TestFleetRenewBeforeMergeRefusesLostClaim(t *testing.T) {
 	e, api, f, _ := fleetStage(t, config.ShipMerge)
 	other := fleet.Store{Dir: f.two}

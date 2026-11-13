@@ -79,8 +79,8 @@ func StopOrphan(ctx context.Context, st statedir.Dir, end func(ctx context.Conte
 	if err := WriteRun(st.RunFile(), rs); err != nil {
 		return rs, err
 	}
-	ev := history.Event{Time: now, Kind: history.Stopped, Change: rs.Change, Step: rs.Step, Round: rs.Round,
-		Reason: StoppedOrphan, Machine: history.Machine()}
+	ev := history.Event{Time: now, Kind: finishKind(rs.State), Change: rs.Change, Step: rs.Step, Round: rs.Round,
+		Reason: rs.Reason, Machine: history.Machine()}
 	_ = history.Append(history.File(st), ev)
 	_ = os.Remove(StopFile(st))
 	return rs, nil

@@ -33,6 +33,9 @@ func (e *Engine) claimFleet(ctx context.Context, req Request, sp StartPoint) err
 		}
 		return nil
 	}
+	if sp.Worktree == "" && req.Expect != nil && !req.Expect.NoRun {
+		return &ChangedError{Change: req.Change, Why: "its run is gone"}
+	}
 	if sp.Worktree != "" && !req.TakeOver {
 		return nil
 	}
@@ -49,7 +52,7 @@ func (e *Engine) claimFleet(ctx context.Context, req Request, sp StartPoint) err
 		return err
 	}
 	store := e.fleetStore()
-	store.Base = sp.Ref
+	store.Base = e.Config.Worktree.Base
 	got, err := store.Acquire(ctx, req.Change, machine, strconv.FormatInt(e.now().UnixNano(), 10), e.Repo.BranchName(e.Config.Worktree, req.Change), req.TakeOver, req.Force)
 	if err != nil {
 		return err
@@ -92,6 +95,7 @@ func (e *Engine) activateFleet(ctx context.Context, req Request, ws Workspace, r
 	// both persisted run and claim ready. Conditional Expect was checked first.
 	store := e.fleetStore()
 	store.Base = rs.Base
+	store.Remote = rs.FleetRemote
 	if err = store.SetState(ctx, *rs.FleetClaim, fleet.Active); err != nil {
 		return err
 	}
@@ -104,6 +108,7 @@ func (e *Engine) fleetFence(rs *Run) *fleet.Fence {
 	}
 	store := e.fleetStore()
 	store.Remote = rs.FleetRemote
+	store.Base = rs.Base
 	return &fleet.Fence{Store: store, Claim: *rs.FleetClaim}
 }
 func (e *Engine) fleetEpoch(rs *Run) uint64 {
@@ -124,6 +129,7 @@ func (e *Engine) watchFleet(ctx context.Context, cancelRun context.CancelFunc, r
 	if lease <= 0 {
 		lease = 10 * time.Minute
 	}
+	fence := e.fleetFence(rs)
 	go func() {
 		defer close(f.done)
 		ticks := e.FleetTicks
@@ -138,7 +144,7 @@ func (e *Engine) watchFleet(ctx context.Context, cancelRun context.CancelFunc, r
 			case <-watch.Done():
 				return
 			case <-ticks:
-				if err := e.fleetStore().Renew(watch, f.claim); err != nil {
+				if err := fence.Renew(watch); err != nil {
 					if watch.Err() != nil {
 						return
 					}
@@ -169,7 +175,7 @@ func (e *Engine) finishFleet(rs *Run, state State, reason string) (State, string
 		f.mu.Lock()
 		lost := f.lost
 		f.mu.Unlock()
-		if lost != nil {
+		if lost != nil && state != Merged {
 			return Blocked, lost.Error()
 		}
 	}
@@ -177,6 +183,7 @@ func (e *Engine) finishFleet(rs *Run, state State, reason string) (State, string
 	defer cancel()
 	store := e.fleetStore()
 	store.Base = rs.Base
+	store.Remote = rs.FleetRemote
 	var err error
 	switch state {
 	case Merged:

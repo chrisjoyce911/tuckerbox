@@ -33,52 +33,52 @@
 
 ## 3. Fleet claims (fleet-claims)
 
-- [ ] 3.1 Fleet ref read and write: fetch `refs/tuckerbox/fleet` by name, one TOML file per claim, every write a `--force-with-lease` push on the fetched version, fetch and re-decide on refusal; tested against a local bare remote
-- [ ] 3.2 Test "Two machines write at once" (two state directories, one bare remote)
-- [ ] 3.3 Claim in `tuckerbox run` after the run gate and before the change lock and worktree, with the next epoch; refuse live claims held elsewhere
-- [ ] 3.4 Test "Two machines pick the same change"
-- [ ] 3.5 Test "Claimed elsewhere"
-- [ ] 3.6 Fleet limit in the same compare-and-swap; count active and parked claims
-- [ ] 3.7 Test "Limit reached"
-- [ ] 3.8 Renewal from the run's process every `lease`/5 while queued, running or shipping; on a lost claim stop the agent and block with `claim taken by <machine>`; tested with a fake clock
-- [ ] 3.9 Test "Claim taken while running"
-- [ ] 3.10 Park on stop, block and fail; re-activate on `resume` and `rerun`, refusing a claim no longer ours
-- [ ] 3.11 Test "Blocked overnight"
-- [ ] 3.12 Expiry from `renewed_at`, `lease` and a 1-minute skew allowance; never removed automatically
-- [ ] 3.13 Test "Machine crashed"
-- [ ] 3.14 `tuckerbox run --take-over [--force]` without a remote branch: next epoch, start at the first step from the base, leave the old worktree alone
-- [ ] 3.15 Test "Take over before shipping"
-- [ ] 3.16 Test "Parked without force"
-- [ ] 3.17 Take-over with a remote branch: one atomic push of the fleet claim and an empty `Take over <change> from <machine>` commit, leasing both refs at what was fetched; refetch on refusal
-- [ ] 3.18 Test "Branch moved during take-over"
-- [ ] 3.19 Every branch push in fleet mode (first and fix rounds) is `git push --atomic` with leases on the branch and the fleet ref (a renewal commit); block on refusal
-- [ ] 3.20 Test "Old holder wakes before its first push"
-- [ ] 3.21 Test "Old holder pushes a CI fix after take-over"
-- [ ] 3.22 Renew just before a merge and don't merge without the claim; the merge stays pinned to the commit seen green
-- [ ] 3.23 Test "Old holder merges after take-over" (fake forge that refuses a pinned merge when the tip moved)
-- [ ] 3.24 Marker `epoch=<n>` in fleet mode; a run whose fleet epoch is higher than the marker's, and whose push last moved the branch, rewrites the marker; `run`'s early claim check and ship-claim's refusals defer to the fleet claim in fleet mode
-- [ ] 3.25 Test "Marker of the old holder"
-- [ ] 3.26 Test "Crash before the marker is rewritten"
-- [ ] 3.27 After a take-over of a pushed branch, make the worktree from the take-over commit and continue in the ship stage: no step re-runs, no second archive, open a merge request if none is open
-- [ ] 3.28 Test "Take-over while waiting for CI" (end to end: two state directories, one bare remote, fake forge; the old holder's fix push and pinned merge are both refused)
-- [ ] 3.29 Test "Branch without a merge request"
-- [ ] 3.30 `ready` claims on ready runs; remove on merged; drop claims of archived changes on any write
-- [ ] 3.31 Test "Ready on one machine"
-- [ ] 3.32 `tuckerbox claim show [--json]` and `claim release [--force]`; `doctor` in a fleet repository reports whether the fleet ref can be fetched
-- [ ] 3.33 Test "Release another machine's claim"
-- [ ] 3.34 Release with a remote branch (with or without `--force`): one atomic push removing the claim and moving the branch to an empty `Release <change> from <machine>` commit, leasing both; without a branch, the fleet ref only; the old holder blocks with `claim released`
-- [ ] 3.35 Test "Forced release while the holder is about to merge" (two state directories, bare remote, fake forge refusing a pinned merge when the tip moved)
-- [ ] 3.36 Test "Release before any push"
-- [ ] 3.37 Any restart of a ready run with another scope or none, on the holder's machine: one lease push turns the claim active (same epoch) with the fleet limit in the same compare-and-swap; `fleet limit reached` keeps run and claim ready; refuse from another machine
-- [ ] 3.38 Test "Next group on the same machine"
-- [ ] 3.39 Test "Rest of the change after a scope" (`run` with no `--tasks` reuses and reactivates the claim)
-- [ ] 3.40 Test "Room taken meanwhile" (two state directories, bare remote, `max_runs = 1`)
-- [ ] 3.41 Test "Next scope from another machine"
-- [ ] 3.42 Next scope of a stopped, blocked or failed run reactivates its parked claim as `resume` does; record `dispatched` in `run.json`; free the fleet slot on ready; a dispatched run's next scope takes a fleet slot before the claim
-- [ ] 3.43 Test "Next scope after a block"
-- [ ] 3.44 Test "Dispatched run on a full machine"
-- [ ] 3.45 Run TLC on `formal/fleet.tla` and its broken variants (`scripts/tla-check.sh` locally, the `tla` job in CI): the model passes, all five variants are rejected
-- [ ] 3.46 Code review against model.md's mapping table: every fleet ref write is a lease push; every branch push, take-over and release in fleet mode is atomic with the fleet ref; every merge is pinned; dispatched runs take a fleet slot before claiming; a next scope's reactivation checks the limit
+- [x] 3.1 Fleet ref read and write: fetch `refs/tuckerbox/fleet` by name, one TOML file per claim, every write a `--force-with-lease` push on the fetched version, fetch and re-decide on refusal; tested against a local bare remote
+- [x] 3.2 Test "Two machines write at once" (two state directories, one bare remote)
+- [x] 3.3 Claim in `tuckerbox run` after the run gate and before the change lock and worktree, with the next epoch; refuse live claims held elsewhere
+- [x] 3.4 Test "Two machines pick the same change"
+- [x] 3.5 Test "Claimed elsewhere"
+- [x] 3.6 Fleet limit in the same compare-and-swap; count active and parked claims
+- [x] 3.7 Test "Limit reached"
+- [x] 3.8 Renewal from the run's process every `lease`/5 while queued, running or shipping; on a lost claim stop the agent and block with `claim taken by <machine>`; tested with a fake clock
+- [x] 3.9 Test "Claim taken while running"
+- [x] 3.10 Park on stop, block and fail; re-activate on `resume` and `rerun`, refusing a claim no longer ours
+- [x] 3.11 Test "Blocked overnight"
+- [x] 3.12 Expiry from `renewed_at`, `lease` and a 1-minute skew allowance; never removed automatically
+- [x] 3.13 Test "Machine crashed"
+- [x] 3.14 `tuckerbox run --take-over [--force]` without a remote branch: next epoch, start at the first step from the base, leave the old worktree alone
+- [x] 3.15 Test "Take over before shipping"
+- [x] 3.16 Test "Parked without force"
+- [x] 3.17 Take-over with a remote branch: one atomic push of the fleet claim and an empty `Take over <change> from <machine>` commit, leasing both refs at what was fetched; refetch on refusal
+- [x] 3.18 Test "Branch moved during take-over"
+- [x] 3.19 Every branch push in fleet mode (first and fix rounds) is `git push --atomic` with leases on the branch and the fleet ref (a renewal commit); block on refusal
+- [x] 3.20 Test "Old holder wakes before its first push"
+- [x] 3.21 Test "Old holder pushes a CI fix after take-over"
+- [x] 3.22 Renew just before a merge and don't merge without the claim; the merge stays pinned to the commit seen green
+- [x] 3.23 Test "Old holder merges after take-over" (fake forge that refuses a pinned merge when the tip moved)
+- [x] 3.24 Marker `epoch=<n>` in fleet mode; a run whose fleet epoch is higher than the marker's, and whose push last moved the branch, rewrites the marker; `run`'s early claim check and ship-claim's refusals defer to the fleet claim in fleet mode
+- [x] 3.25 Test "Marker of the old holder"
+- [x] 3.26 Test "Crash before the marker is rewritten"
+- [x] 3.27 After a take-over of a pushed branch, make the worktree from the take-over commit and continue in the ship stage: no step re-runs, no second archive, open a merge request if none is open
+- [x] 3.28 Test "Take-over while waiting for CI" (end to end: two state directories, one bare remote, fake forge; the old holder's fix push and pinned merge are both refused)
+- [x] 3.29 Test "Branch without a merge request"
+- [x] 3.30 `ready` claims on ready runs; remove on merged; drop claims of archived changes on any write
+- [x] 3.31 Test "Ready on one machine"
+- [x] 3.32 `tuckerbox claim show [--json]` and `claim release [--force]`; `doctor` in a fleet repository reports whether the fleet ref can be fetched
+- [x] 3.33 Test "Release another machine's claim"
+- [x] 3.34 Release with a remote branch (with or without `--force`): one atomic push removing the claim and moving the branch to an empty `Release <change> from <machine>` commit, leasing both; without a branch, the fleet ref only; the old holder blocks with `claim released`
+- [x] 3.35 Test "Forced release while the holder is about to merge" (two state directories, bare remote, fake forge refusing a pinned merge when the tip moved)
+- [x] 3.36 Test "Release before any push"
+- [x] 3.37 Any restart of a ready run with another scope or none, on the holder's machine: one lease push turns the claim active (same epoch) with the fleet limit in the same compare-and-swap; `fleet limit reached` keeps run and claim ready; refuse from another machine
+- [x] 3.38 Test "Next group on the same machine"
+- [x] 3.39 Test "Rest of the change after a scope" (`run` with no `--tasks` reuses and reactivates the claim)
+- [x] 3.40 Test "Room taken meanwhile" (two state directories, bare remote, `max_runs = 1`)
+- [x] 3.41 Test "Next scope from another machine"
+- [x] 3.42 Next scope of a stopped, blocked or failed run reactivates its parked claim as `resume` does; record `dispatched` in `run.json`; free the fleet slot on ready; a dispatched run's next scope takes a fleet slot before the claim
+- [x] 3.43 Test "Next scope after a block"
+- [x] 3.44 Test "Dispatched run on a full machine"
+- [x] 3.45 Run TLC on `formal/fleet.tla` and its broken variants (`scripts/tla-check.sh` locally, the `tla` job in CI): the model passes, all five variants are rejected
+- [x] 3.46 Code review against model.md's mapping table: every fleet ref write is a lease push; every branch push, take-over and release in fleet mode is atomic with the fleet ref; every merge is pinned; dispatched runs take a fleet slot before claiming; a next scope's reactivation checks the limit
 
 ## 4. Dispatch (fleet-placement)
 

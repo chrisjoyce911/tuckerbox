@@ -14,6 +14,7 @@ import (
 
 func TestTeamTakeoverRefused(t *testing.T) {
 	f := newCLI(t, testenv.RepoOptions{Changes: []string{"login"}})
+	testenv.Git(t, f.repo, "remote", "add", "origin", "https://github.com/example/shop.git")
 	path := filepath.Join(f.repo, ".tuckerbox", "config.toml")
 	data, err := os.ReadFile(path)
 	if err != nil {

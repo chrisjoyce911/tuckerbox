@@ -392,6 +392,7 @@ func OpenWorkspace(ctx context.Context, path string) (Workspace, error) {
 // Cancelling ctx stops the run: the agent is stopped and the run recorded
 // as stopped.
 func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
+	e.fleetRun = nil
 	var ws Workspace
 	var err error
 	// A dispatched run holds a fleet slot from before it claims or makes
