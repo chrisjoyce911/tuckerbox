@@ -99,6 +99,9 @@ type RunReport struct {
 	Scope      string `json:"scope"`
 	Complete   bool   `json:"complete"`
 	Dispatched bool   `json:"dispatched"`
+	// Mode is the mode the run started in (runs.Run.StartedMode): "solo",
+	// "fleet" or "team".
+	Mode string `json:"mode"`
 }
 
 // ParseReport reads a machine report.

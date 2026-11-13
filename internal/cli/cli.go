@@ -25,6 +25,10 @@ Commands:
                             one change, attached to this terminal;
                             --tasks <scope>: one change's group 2, task 2.3,
                             range 2.1-2.4 or next group)
+  dispatch [<change>...] [--dry-run] [--json]
+                            Fleet mode: place approved, unclaimed changes on
+                            the machines that fit, and continue ready runs on
+                            their machine, in one pass
   autopilot [--once] [--dry-run]
                             Keep starting approved changes, group by group,
                             until Ctrl-C (runs keep going when it stops)
@@ -157,6 +161,8 @@ func (a App) Run(args []string) int {
 		return a.initConfig()
 	case "autopilot":
 		return a.autopilot(rest)
+	case "dispatch":
+		return a.dispatch(rest)
 	case "run":
 		return a.run(rest)
 	case "engine":
