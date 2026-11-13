@@ -121,7 +121,7 @@
 - [x] 5.12 Test "Last step done in team mode"
 - [ ] 5.13 Refuse `--take-over` and `dispatch` in team mode
 - [ ] 5.14 Test "Take over refused"
-- [ ] 5.15 Test "Dispatch in a team repository"
+- [x] 5.15 Test "Dispatch in a team repository"
 - [x] 5.16 `approve` records the forge login; in team mode the run gate reads the approval only from the fetched base commit, requires a listed login, and refuses worktrees or retained branches whose files don't match it
 - [x] 5.17 Test "Approval by someone not listed"
 - [x] 5.18 Test "No approvers"
