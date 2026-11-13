@@ -161,13 +161,17 @@ func TestMachineNoCheckout(t *testing.T) {
 // With a checkout, the report finds it through the machine index and
 // lists its runs.
 func TestMachineCheckoutAndRuns(t *testing.T) {
-	f := newCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}})
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}, Extra: "\n[agents.omp]\ncommand = [\"omp-cli\", \"{brief}\"]\n"})
 	testenv.Git(t, f.repo, "remote", "add", "origin", "https://github.com/sam/app.git")
 	if res := f.tb("run", "--foreground", "add-login"); res.code != 0 {
 		t.Fatalf("run: %d %s", res.code, res.stderr)
 	}
-	a, out, _ := machineApp(t, nil, nil)
+	a, out, _ := machineApp(t, []string{"omp-cli"}, nil)
 	rep := machineReport(t, a, out, "--for", "git@github.com:sam/app.git")
+	// The repository's own custom agent is reported, found by its program.
+	if omp, ok := rep.Agent("omp"); !ok || !omp.Installed || omp.SignIn != "unknown" {
+		t.Fatalf("repository agent omp: %+v %v", omp, ok)
+	}
 	if !rep.Checkout || !sameDir(rep.Path, f.repo) {
 		t.Fatalf("checkout %v path %q, want %s", rep.Checkout, rep.Path, f.repo)
 	}

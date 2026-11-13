@@ -133,9 +133,9 @@ func (a App) machine(args []string) int {
 
 // machineReport is what this machine says about itself (machine-inventory:
 // Machine report). It holds no token or permission flag.
-func (a App) machineReport(ctx context.Context, cfg *config.Config, forRemote string) (machines.Report, error) {
+func (a App) machineReport(ctx context.Context, cfg *config.Config, forRemote string) (rep machines.Report, err error) {
 	info := version.Get()
-	rep := machines.Report{
+	rep = machines.Report{
 		Format: machines.ReportVersion, Name: machineName(cfg), Version: info.Version, OS: info.OS,
 		FleetCapacity: cfg.FleetCapacity, Agents: []machines.AgentReport{}, Runs: []machines.RunReport{},
 	}
@@ -146,15 +146,18 @@ func (a App) machineReport(ctx context.Context, cfg *config.Config, forRemote st
 	if rep.FleetRuns, err = fleetslot.InUse(home, cfg.FleetCapacity); err != nil {
 		return rep, err
 	}
-	for _, r := range doctor.Check(a.DoctorEnv, doctor.AgentTools(customAgents(cfg))) {
-		ag := machines.AgentReport{Name: r.Tool.Name, Installed: r.Found}
-		if r.Found {
-			ag.SetSignIn(r.SignIn)
-		} else {
-			ag.SetSignIn(machines.Unknown)
+	agents := customAgents(cfg)
+	defer func() {
+		for _, r := range doctor.Check(a.DoctorEnv, doctor.AgentTools(agents)) {
+			ag := machines.AgentReport{Name: r.Tool.Name, Installed: r.Found}
+			if r.Found {
+				ag.SetSignIn(r.SignIn)
+			} else {
+				ag.SetSignIn(machines.Unknown)
+			}
+			rep.Agents = append(rep.Agents, ag)
 		}
-		rep.Agents = append(rep.Agents, ag)
-	}
+	}()
 	if forRemote == "" {
 		return rep, nil
 	}
@@ -169,6 +172,15 @@ func (a App) machineReport(ctx context.Context, cfg *config.Config, forRemote st
 		return rep, nil // no checkout: Checkout stays false
 	}
 	rep.Checkout, rep.Path = true, checkout
+	// Agents the repository's own config defines count too: a step may
+	// name one.
+	if opts, err := config.Discover(env, checkout); err == nil {
+		if repoCfg, err := config.Load(opts); repoCfg != nil && (err == nil || errors.As(err, new(config.Problems))) {
+			for name, prog := range customAgents(repoCfg) {
+				agents[name] = prog
+			}
+		}
+	}
 	ix, err := runs.ReadIndex(home)
 	if err != nil {
 		return rep, err

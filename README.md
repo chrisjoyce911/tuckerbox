@@ -287,7 +287,7 @@ tuckerbox machine --json --for github.com/sam/app # also this machine's checkout
 tuckerbox status --all-machines [--json]          # runs here and on every [machines.*], each with its machine
 ```
 
-`machine --json` never prints tokens or permission flags. `status --all-machines --json` has the same format and version as `status --json`. Each run gains a `machine` field, and `unreachable` lists the machines that didn't answer.
+`machine --json` never prints tokens or permission flags. With `--for` it also lists the agents that the checkout's repository config defines. It finds the checkout through the machine index, which lists every repository that has had a run on this machine. A fresh clone is found once it has had a run there, so `dispatch` doesn't place work in it before then. `status --all-machines --json` has the same format and version as `status --json`. Each run gains a `machine` field, and `unreachable` lists the machines that didn't answer.
 
 ## Forge configuration
 
