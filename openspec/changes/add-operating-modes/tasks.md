@@ -151,7 +151,7 @@
 
 ## 7. Integration
 
-- [ ] 7.1 Fleet end to end with two machines (or two state directories and a fake `ssh`) and one bare remote: dispatch places two changes, one machine is killed during its steps and another while waiting for CI, their claims expire, the other machine takes both over, and the killed ones wake and are refused at their next push, merge or renewal
+- [x] 7.1 Fleet end to end with two machines (or two state directories and a fake `ssh`) and one bare remote: dispatch places two changes, one machine is killed during its steps and another while waiting for CI, their claims expire, the other machine takes both over, and the killed ones wake and are refused at their next push, merge or renewal
 - [ ] 7.2 Team end to end against a throwaway GitHub repository: two people start the same change, one wins, the draft becomes ready at the ship stage
 - [ ] 7.3 `go vet ./...`, `go test -race ./...`, `CGO_ENABLED=0 go build ./...` and `scripts/tla-check.sh` pass on Linux, macOS and Windows CI
 
