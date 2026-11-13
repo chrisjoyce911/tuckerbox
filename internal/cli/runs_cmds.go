@@ -441,6 +441,15 @@ func (a App) newEngine(repo runs.Repo, cfg *config.Config, log io.Writer) (*runs
 			return nil
 		}
 	}
+	if cfg.Mode == config.ModeTeam {
+		e.Gate = func(ctx context.Context, change string, sp runs.StartPoint) error {
+			return a.teamGate(ctx, repo, cfg, change, sp, false)
+		}
+		e.SettingsGate = func(ctx context.Context, change, worktree string) error {
+			return a.teamSettingsGate(ctx, repo, cfg, change, worktree)
+		}
+		e.ResumeGate = e.SettingsGate
+	}
 	if home, err := a.stateHome(); err == nil {
 		e.StateHome = home
 	} else {
@@ -689,7 +698,11 @@ func (a App) restart(cmd string, fg bool, change string, req runs.Request) int {
 	if err := runs.CheckOverrides(context.Background(), cfg, repo.Root, change, runs.StartPoint{Worktree: req.Worktree}); err != nil {
 		return a.errf(cmd, "%v", err)
 	}
-	if cfg.RequireApproval {
+	if cfg.Mode == config.ModeTeam {
+		if err := a.teamSettingsGate(context.Background(), repo, cfg, change, req.Worktree); err != nil {
+			return a.errf(cmd, "%v", err)
+		}
+	} else if cfg.RequireApproval {
 		if err := settingsGate(context.Background(), repo.Root, change, req.Worktree); err != nil {
 			return a.errf(cmd, "%v", err)
 		}

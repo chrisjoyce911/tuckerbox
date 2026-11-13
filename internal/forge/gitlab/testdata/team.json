@@ -1,0 +1,145 @@
+[
+  {
+    "Method": "GET",
+    "Path": "/user",
+    "Response": {
+      "username": "sam"
+    }
+  },
+  {
+    "Method": "GET",
+    "Path": "/projects/team%2Ftools%2Fapp/protected_branches?per_page=100&page=1",
+    "Response": [
+      {
+        "name": "main",
+        "push_access_levels": [
+          {
+            "access_level": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "Method": "GET",
+    "Path": "/projects/team%2Ftools%2Fapp/approvals",
+    "Response": {
+      "disable_overriding_approvers_per_merge_request": true
+    }
+  },
+  {
+    "Method": "GET",
+    "Path": "/projects/team%2Ftools%2Fapp/approval_rules?per_page=100&page=1",
+    "Response": [
+      {
+        "approvals_required": 1,
+        "applies_to_all_protected_branches": true
+      }
+    ]
+  },
+  {
+    "Method": "POST",
+    "Path": "/projects/team%2Ftools%2Fapp/merge_requests",
+    "Request": {
+      "title": "Draft: login",
+      "description": "marker",
+      "source_branch": "login",
+      "target_branch": "main",
+      "labels": "",
+      "remove_source_branch": false
+    },
+    "Response": {
+      "iid": 12,
+      "title": "Draft: login",
+      "draft": true,
+      "author": {
+        "username": "sam"
+      },
+      "state": "opened"
+    }
+  },
+  {
+    "Method": "GET",
+    "Path": "/projects/team%2Ftools%2Fapp/merge_requests?state=opened&per_page=100&page=1",
+    "Response": [
+      {
+        "iid": 12,
+        "draft": true,
+        "author": {
+          "username": "sam"
+        },
+        "state": "opened"
+      }
+    ]
+  },
+  {
+    "Method": "PUT",
+    "Path": "/projects/team%2Ftools%2Fapp/merge_requests/12",
+    "Request": {
+      "title": "Login ready",
+      "description": "proposal"
+    },
+    "Response": {
+      "iid": 12,
+      "title": "Login ready",
+      "description": "proposal",
+      "author": {
+        "username": "sam"
+      },
+      "state": "opened"
+    }
+  },
+  {
+    "Method": "GET",
+    "Path": "/projects/team%2Ftools%2Fapp/merge_requests/12",
+    "Response": {
+      "iid": 12,
+      "title": "Draft: Login ready",
+      "description": "proposal",
+      "draft": true
+    }
+  },
+  {
+    "Method": "PUT",
+    "Path": "/projects/team%2Ftools%2Fapp/merge_requests/12",
+    "Request": {
+      "title": "Login ready",
+      "description": "proposal"
+    },
+    "Response": {
+      "iid": 12,
+      "title": "Login ready",
+      "draft": false
+    }
+  },
+  {
+    "Method": "GET",
+    "Path": "/projects/team%2Ftools%2Fapp/protected_branches?per_page=100&page=1",
+    "Response": [
+      {
+        "name": "main",
+        "push_access_levels": [
+          {
+            "access_level": 0
+          }
+        ]
+      },
+      {
+        "name": "*",
+        "push_access_levels": [
+          {
+            "access_level": 40
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "Method": "GET",
+    "Path": "/projects/team%2Ftools%2Fapp/protected_branches?per_page=100&page=1",
+    "Status": 403,
+    "Response": {
+      "message": "forbidden"
+    }
+  }
+]

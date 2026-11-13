@@ -34,6 +34,34 @@ func (a App) shippingPreflight(ctx context.Context, repo runs.Repo, cfg *config.
 		a.errf("run", "%v", err)
 		return false
 	}
+	if cfg.Mode == config.ModeTeam {
+		tc, ok := client.(forge.TeamClient)
+		if !ok {
+			a.errf("run", "forge does not support team mode")
+			return false
+		}
+		login, err := tc.Login(ctx)
+		if err != nil {
+			a.errf("run", "%s", mask(err.Error()))
+			return false
+		}
+		for _, id := range changes {
+			mr, err := tc.FindMR(ctx, repo.BranchName(cfg.Worktree, id))
+			if err != nil {
+				a.errf("run", "%s", mask(err.Error()))
+				return false
+			}
+			if mr == nil {
+				continue
+			}
+			owner, ok := ship.ParseMarker(mr.Body)
+			if !ok || owner.By != login || mr.Author != login || owner.Machine != machine {
+				a.errf("run", "%s: claimed by %s on %s: %s", id, mr.Author, owner.Machine, mr.URL)
+				return false
+			}
+		}
+		return true
+	}
 	for _, id := range changes {
 		err := runs.ShipPreflight(ctx, client, machine, repo.BranchName(cfg.Worktree, id))
 		if err == nil {

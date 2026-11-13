@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"github.com/chrisjoyce911/tuckerbox/internal/runs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,6 +103,16 @@ func (a App) check() int {
 	}
 	if depErr != nil {
 		return 1
+	}
+
+	if cfg.Mode == config.ModeTeam {
+		repo, e := runs.OpenRepo(context.Background(), opts.RepoRoot)
+		if e == nil {
+			_, e = a.teamBase(context.Background(), repo, cfg)
+		}
+		if e != nil {
+			return a.errf("check", "%v", e)
+		}
 	}
 
 	machine := "none"

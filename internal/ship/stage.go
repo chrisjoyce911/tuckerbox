@@ -209,6 +209,11 @@ func (e *Engine) Run(ctx context.Context, resume bool) Outcome {
 		return e.blocked(fmt.Errorf("branch has no commits beyond the base"))
 	}
 	claim := &Claim{Identity: e.Identity, Git: e.Git, Lease: r.LastPush}
+	if e.Identity.By != "" {
+		if err := claim.Check(ctx, e.Forge); err != nil {
+			return e.blocked(err)
+		}
+	}
 	hadMR := r.MR != nil
 	var mr *forge.MR
 	if resume {
@@ -226,6 +231,25 @@ func (e *Engine) Run(ctx context.Context, resume bool) Outcome {
 	}
 	if err != nil {
 		return e.blocked(err)
+	}
+	if e.Identity.By != "" {
+		tc, ok := e.Forge.(forge.TeamClient)
+		if !ok {
+			return e.blocked(fmt.Errorf("forge does not support team shipping"))
+		}
+		// A successful lease push precedes every shared marker/body update.
+		marker, err := e.Identity.Marker()
+		if err != nil {
+			return e.blocked(err)
+		}
+		request := e.Request
+		request.Body = strings.TrimSpace(request.Body) + "\n\n" + marker
+		if _, err = tc.UpdateMR(ctx, mr.Number, request); err != nil {
+			return e.blocked(err)
+		}
+		if err = tc.MarkReady(ctx, mr.Number); err != nil {
+			return e.blocked(err)
+		}
 	}
 	r.MR = info(mr)
 	if err := e.save(); err != nil {

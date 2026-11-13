@@ -22,7 +22,8 @@ const SidecarName = "tuckerbox.toml"
 
 // Approval is the [approval] table of a change's tuckerbox.toml.
 type Approval struct {
-	Hash string `toml:"hash"`
+	Hash  string `toml:"hash"`
+	Login string `toml:"login,omitempty"`
 	// SettingsHash is the hash of the change's agent and permissions
 	// overrides when it was approved (see [SettingsHash]). Empty, as in an
 	// approval from before settings were hashed, means no overrides.
@@ -183,6 +184,9 @@ func SetApproval(data []byte, a Approval) ([]byte, error) {
 		}
 		keys = append(keys, "settings = ["+strings.Join(vs, ", ")+"]")
 	}
+	if a.Login != "" {
+		keys = append(keys, "login = "+tomlString(a.Login))
+	}
 	keys = append(keys, "by = "+tomlString(a.By), "at = "+a.At.Format(time.RFC3339))
 	table := strings.Join(keys, eol) + eol
 	lines := splitLines(data)
@@ -274,7 +278,7 @@ func checkRewrite(data []byte, want *Approval) error {
 	}
 	got, err := ParseSidecar(data)
 	if err != nil || got == nil || got.Hash != want.Hash || got.SettingsHash != want.SettingsHash ||
-		!slices.Equal(got.Settings, want.Settings) || got.By != want.By || !got.At.Equal(want.At) {
+		!slices.Equal(got.Settings, want.Settings) || got.Login != want.Login || got.By != want.By || !got.At.Equal(want.At) {
 		return fmt.Errorf("%s: cannot rewrite the [approval] table safely; edit it by hand", SidecarName)
 	}
 	return nil
