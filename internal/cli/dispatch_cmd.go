@@ -76,27 +76,9 @@ func (a App) dispatch(args []string) int {
 	if remote == "" {
 		return a.errf("dispatch", "fleet mode needs a remote; nothing started")
 	}
-	in, err := a.dispatchInput(ctx, repo, cfg, remote, pos)
+	res, _, err := a.dispatchPass(ctx, repo, cfg, remote, pos, dry)
 	if err != nil {
 		return a.errf("dispatch", "%v", err)
-	}
-	plan := dispatch.Decide(in)
-	res := dispatchResult{Remote: remote, DryRun: dry, Plan: plan, Started: []dispatch.Action{}, Failed: []dispatchFailure{}}
-	if !dry {
-		byName := map[string]dispatch.Machine{}
-		for _, m := range in.Machines {
-			byName[m.Name] = m
-		}
-		// Placement is advice: a refused claim or a failed start is
-		// reported and not retried elsewhere in this pass.
-		for _, act := range plan.Actions {
-			out, err := a.dispatchOn(ctx, repo, cfg, byName[act.Machine], act.Args(remote), dispatchStartTimeout)
-			if err != nil {
-				res.Failed = append(res.Failed, dispatchFailure{Action: act, Error: startError(out, err)})
-				continue
-			}
-			res.Started = append(res.Started, act)
-		}
 	}
 	if asJSON {
 		enc := json.NewEncoder(a.Stdout)
@@ -108,6 +90,37 @@ func (a App) dispatch(args []string) int {
 	}
 	a.printDispatch(res)
 	return 0
+}
+
+// dispatchPass makes one dispatch pass for the changes in only (all
+// active changes when empty): it reads the input, decides, and, unless
+// dry, starts each action on its machine. It returns the input it decided
+// on, for autopilot's reports.
+func (a App) dispatchPass(ctx context.Context, repo runs.Repo, cfg *config.Config, remote string, only []string, dry bool) (dispatchResult, dispatch.Input, error) {
+	in, err := a.dispatchInput(ctx, repo, cfg, remote, only)
+	if err != nil {
+		return dispatchResult{}, in, err
+	}
+	plan := dispatch.Decide(in)
+	res := dispatchResult{Remote: remote, DryRun: dry, Plan: plan, Started: []dispatch.Action{}, Failed: []dispatchFailure{}}
+	if dry {
+		return res, in, nil
+	}
+	byName := map[string]dispatch.Machine{}
+	for _, m := range in.Machines {
+		byName[m.Name] = m
+	}
+	// Placement is advice: a refused claim or a failed start is reported
+	// and not retried elsewhere in this pass.
+	for _, act := range plan.Actions {
+		out, err := a.dispatchOn(ctx, repo, cfg, byName[act.Machine], act.Args(remote), dispatchStartTimeout)
+		if err != nil {
+			res.Failed = append(res.Failed, dispatchFailure{Action: act, Error: startError(out, err)})
+			continue
+		}
+		res.Started = append(res.Started, act)
+	}
+	return res, in, nil
 }
 
 func (a App) printDispatch(res dispatchResult) {

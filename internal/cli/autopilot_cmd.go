@@ -11,7 +11,9 @@ import (
 
 	"github.com/chrisjoyce911/tuckerbox/internal/approval"
 	"github.com/chrisjoyce911/tuckerbox/internal/autopilot"
+	"github.com/chrisjoyce911/tuckerbox/internal/board"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
+	"github.com/chrisjoyce911/tuckerbox/internal/dispatch"
 	"github.com/chrisjoyce911/tuckerbox/internal/history"
 	"github.com/chrisjoyce911/tuckerbox/internal/priority"
 	"github.com/chrisjoyce911/tuckerbox/internal/runs"
@@ -28,7 +30,7 @@ func (a App) autopilot(args []string) int {
 	if err != nil || len(pos) > 0 {
 		return a.usageErr("autopilot", "usage: tuckerbox autopilot [--once] [--dry-run]")
 	}
-	_, getwd := a.configEnv()
+	env, getwd := a.configEnv()
 	wd, err := getwd()
 	if err != nil {
 		return a.errf("autopilot", "%v", err)
@@ -36,6 +38,15 @@ func (a App) autopilot(args []string) int {
 	repo, cfg, ok := a.loadRepo("autopilot", wd)
 	if !ok {
 		return 1
+	}
+	if cfg.Mode == config.ModeTeam {
+		return a.errf("autopilot", "%v; nothing started", autopilot.ErrTeam)
+	}
+	remote := ""
+	if cfg.Mode == config.ModeFleet {
+		if remote = board.RepoKey(context.Background(), config.Remote(env, repo.Main)); remote == "" {
+			return a.errf("autopilot", "fleet mode needs a remote; nothing started")
+		}
 	}
 	if !cfg.RequireApproval {
 		return a.errf("autopilot", "autopilot needs approval to be required, and this repository sets require_approval = false; approval is the one gate it keeps")
@@ -86,6 +97,9 @@ func (a App) autopilot(args []string) int {
 		Order: func(_ context.Context, ids []string) ([]string, error) {
 			return admissionOrder(repo, ids)
 		},
+		Dispatch: func(ctx context.Context, dryRun bool) (map[string]string, error) {
+			return a.autopilotDispatch(ctx, repo, cfg, remote, dryRun)
+		},
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), stopSignals...)
 	defer stop()
@@ -135,6 +149,50 @@ func (a App) autopilot(args []string) int {
 			fmt.Fprintf(a.Stderr, "tuckerbox autopilot: %v\n", err)
 		}
 	}
+}
+
+// autopilotDispatch is a fleet pass's tuckerbox dispatch: it prints what
+// dispatch started (or would), and returns the runs other machines report
+// blocked or failed, which need a person. Skipped changes aren't printed:
+// a pass would repeat them every interval.
+func (a App) autopilotDispatch(ctx context.Context, repo runs.Repo, cfg *config.Config, remote string, dry bool) (map[string]string, error) {
+	res, in, err := a.dispatchPass(ctx, repo, cfg, remote, nil, dry)
+	if err != nil {
+		return nil, err
+	}
+	verb := func(act dispatch.Action) string {
+		if act.Kind == dispatch.Continue {
+			return "continue " + act.Change + " --tasks next on " + act.Machine
+		}
+		return "start " + act.Change + " on " + act.Machine
+	}
+	for _, u := range res.Unreachable {
+		fmt.Fprintf(a.Stderr, "tuckerbox autopilot: warning: %s\n", u)
+	}
+	if dry {
+		for _, act := range res.Actions {
+			fmt.Fprintf(a.Stdout, "would dispatch: %s\n", verb(act))
+		}
+	}
+	for _, act := range res.Started {
+		fmt.Fprintf(a.Stdout, "dispatch: %s\n", verb(act))
+	}
+	for _, f := range res.Failed {
+		fmt.Fprintf(a.Stdout, "dispatch: %s failed: %s\n", verb(f.Action), f.Error)
+	}
+	needs := map[string]string{}
+	for _, m := range in.Machines {
+		if m.Local || m.Report == nil {
+			continue
+		}
+		for _, r := range m.Report.Runs {
+			switch runs.State(r.State) {
+			case runs.Blocked, runs.Failed:
+				needs[r.Change] = r.State + " on " + m.Name
+			}
+		}
+	}
+	return needs, nil
 }
 
 // runState is what autopilot's watch compares between reads.
