@@ -8,9 +8,9 @@ import (
 
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/doctor"
-	"github.com/chrisjoyce911/tuckerbox/internal/machines"
 	"github.com/chrisjoyce911/tuckerbox/internal/forge"
 	"github.com/chrisjoyce911/tuckerbox/internal/herdrmod"
+	"github.com/chrisjoyce911/tuckerbox/internal/machines"
 	"github.com/chrisjoyce911/tuckerbox/internal/version"
 )
 

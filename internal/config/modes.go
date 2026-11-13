@@ -3,8 +3,8 @@ package config
 import (
 	"errors"
 	"io/fs"
-	"os"
 	"maps"
+	"os"
 	"slices"
 	"strings"
 	"time"
