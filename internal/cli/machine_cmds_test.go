@@ -25,12 +25,15 @@ const fakeSSHEnv = "FAKE_SSH_TUCKERBOX"
 
 func fakeSSH() int {
 	args := os.Args[1:]
-	// -T -o BatchMode=yes <dest> -- <command>
-	if len(args) != 6 || args[0] != "-T" || args[2] != "BatchMode=yes" || args[4] != "--" {
+	// -T -o BatchMode=yes -o SendEnv=-* <dest> -- <command>
+	if len(args) != 8 || args[0] != "-T" || args[2] != "BatchMode=yes" || args[4] != "SendEnv=-*" || args[6] != "--" {
 		fmt.Fprintf(os.Stderr, "fake ssh: unexpected arguments %q\n", args)
 		return 2
 	}
-	dest, remote := args[3], strings.Fields(args[5])
+	if rec := os.Getenv("FAKE_SSH_ENV_RECORD"); rec != "" {
+		_ = os.WriteFile(rec, []byte(strings.Join(os.Environ(), "\n")), 0o644)
+	}
+	dest, remote := args[5], strings.Fields(args[7])
 	state := os.Getenv("FAKE_SSH_STATE_" + dest)
 	if state == "" {
 		fmt.Fprintf(os.Stderr, "ssh: Could not resolve hostname %s\n", dest)
@@ -82,7 +85,7 @@ func machineApp(t *testing.T, installed []string, signIn map[string]string) (App
 			},
 		},
 		DoctorTools:   doctor.DefaultTools,
-		MachineRunner: machines.Runner{SSH: exe, Environ: env},
+		MachineRunner: machines.Runner{SSH: exe, Environ: env, Keep: []string{"FAKE"}},
 	}, &out, &errOut
 }
 
@@ -266,5 +269,35 @@ func TestRunsOnTwoMachines(t *testing.T) {
 				t.Fatalf("run lacks %q: %v", k, r)
 			}
 		}
+	}
+}
+
+// A forge token variable named in machine config ([forges.<host>]
+// token_env) never reaches the transport, so ssh's SendEnv can't carry it
+// to another machine; nor does any other variable named like a secret.
+func TestRemoteRunnerSendsNoConfiguredToken(t *testing.T) {
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}})
+	miniState := filepath.Join(f.env.Home, "mini-state")
+	rec := filepath.Join(f.env.Home, "ssh-env")
+	t.Setenv("FAKE_SSH_STATE_mini", miniState)
+	t.Setenv("FAKE_SSH_ENV_RECORD", rec)
+	t.Setenv("WORK_GITLAB_TOKEN", "glpat-secret-1")
+	t.Setenv("FAKE_WORK_KEY", "kept-for-the-fake")
+	t.Setenv("FAKE_DEPLOY_TOKEN", "secret-2")
+	writeMachineConfig(t, f.env, "machine = \"studio\"\n\n[machines.mini]\nssh = \"mini\"\n\n[forges.\"gitlab.example.org\"]\nkind = \"gitlab\"\ntoken_env = \"WORK_GITLAB_TOKEN\"\n")
+	a, _, errOut := machineApp(t, nil, nil)
+	// The fake's Keep would pass any FAKE_ or configured name; Strip wins.
+	a.MachineRunner.Keep = append(a.MachineRunner.Keep, "WORK_")
+	if code := a.Run([]string{"status", "--all-machines", "--json"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	env := readFile(t, rec)
+	for _, secret := range []string{"glpat-secret-1", "secret-2", "WORK_GITLAB_TOKEN"} {
+		if strings.Contains(env, secret) {
+			t.Fatalf("ssh started with %s in its environment:\n%s", secret, env)
+		}
+	}
+	if !strings.Contains(env, "FAKE_WORK_KEY=kept-for-the-fake") || !strings.Contains(env, "PATH=") {
+		t.Fatalf("ssh lacks the variables it needs:\n%s", env)
 	}
 }

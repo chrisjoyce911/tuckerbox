@@ -51,8 +51,8 @@ func fake(t *testing.T, mode string) (Runner, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := append(os.Environ(), "FAKE_REMOTE="+mode, "FAKE_RECORD="+rec, "GITHUB_TOKEN=secret-gh", "TUCKERBOX_FORGE_TOKEN=secret-tb")
-	return Runner{SSH: exe, HC: exe, Environ: env}, rec
+	env := append(os.Environ(), "FAKE_REMOTE="+mode, "FAKE_RECORD="+rec, "GITHUB_TOKEN=secret-gh", "TUCKERBOX_FORGE_TOKEN=secret-tb", "WORK_GITLAB_TOKEN=secret-work", "FAKE_API_KEY=secret-key", "AWS_ACCESS_KEY_ID=secret-aws")
+	return Runner{SSH: exe, HC: exe, Environ: env, Keep: []string{"FAKE_"}, Strip: []string{"WORK_GITLAB_TOKEN"}}, rec
 }
 
 func recorded(t *testing.T, rec string) (args []string, env string) {
@@ -72,7 +72,7 @@ func TestSSHCommand(t *testing.T) {
 		t.Fatalf("out %q err %v", out, err)
 	}
 	args, env := recorded(t, rec)
-	want := []string{"-T", "-o", "BatchMode=yes", "mini", "--", "tuckerbox machine --json --for github.com/sam/app"}
+	want := []string{"-T", "-o", "BatchMode=yes", "-o", "SendEnv=-*", "mini", "--", "tuckerbox machine --json --for github.com/sam/app"}
 	if strings.Join(args, "|") != strings.Join(want, "|") {
 		t.Fatalf("ssh args %q, want %q", args, want)
 	}
@@ -177,5 +177,14 @@ func TestReportRoundTrip(t *testing.T) {
 	}
 	if _, err := ParseReport([]byte(`{"format":9,"name":"mini"}`)); err == nil {
 		t.Fatal("a newer format must be refused")
+	}
+}
+
+func TestForConfigStripsTokenEnv(t *testing.T) {
+	cfg := &config.Config{Forges: map[string]config.ForgeHost{"gitlab.example.org": {TokenEnv: "WORK_GITLAB_TOKEN"}}}
+	r := Runner{Environ: []string{"PATH=/bin", "WORK_GITLAB_TOKEN=x", "LC_WORK_GITLAB=y", "HOME=/h", "RANDOM_VAR=z"}, Keep: []string{"WORK_"}}.ForConfig(cfg)
+	got := strings.Join(r.environ(), " ")
+	if got != "PATH=/bin LC_WORK_GITLAB=y HOME=/h" {
+		t.Fatalf("environment %q", got)
 	}
 }

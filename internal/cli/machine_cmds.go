@@ -227,12 +227,14 @@ type remoteResult struct {
 func (a App) onMachines(ctx context.Context, cfg *config.Config, args []string, timeout time.Duration) []remoteResult {
 	names := slices.Sorted(maps.Keys(cfg.Machines))
 	out := make([]remoteResult, len(names))
+	// Never pass on a configured forge token variable.
+	runner := a.MachineRunner.ForConfig(cfg)
 	var wg sync.WaitGroup
 	for i, name := range names {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			b, err := a.MachineRunner.Run(ctx, cfg.Machines[name], args, timeout)
+			b, err := runner.Run(ctx, cfg.Machines[name], args, timeout)
 			out[i] = remoteResult{Machine: name, Out: b, Err: err}
 		}()
 	}

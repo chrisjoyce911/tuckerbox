@@ -8,8 +8,11 @@
 //	hc run --on <name> --rm -- tuckerbox <args>
 //
 // without a terminal and without asking for a password. No token or
-// credential is sent: the arguments are Tuckerbox's own, and forge token
-// variables are removed from the environment ssh and hc are started with.
+// credential is sent: the arguments are Tuckerbox's own; ssh and hc start
+// with a clean environment (a fixed list of variables a transport needs,
+// never a configured token_env variable or anything named like a secret);
+// and ssh is told to send no environment variables (SendEnv=-*), whatever
+// ssh_config says.
 package machines
 
 import (
@@ -42,9 +45,28 @@ const Program = "tuckerbox"
 type Runner struct {
 	// SSH and HC are the programs used; "" means "ssh" and "hc".
 	SSH, HC string
-	// Environ is the environment ssh and hc start with; nil means
-	// os.Environ(). Token variables are removed from it either way.
+	// Environ is the environment the clean one is taken from; nil means
+	// os.Environ().
 	Environ []string
+	// Strip names more variables never passed on: the token_env of every
+	// [forges.<host>] in machine config (see [ForConfig]).
+	Strip []string
+	// Keep names more variable prefixes passed on (tests).
+	Keep []string
+}
+
+// ForConfig returns r set up for machine config cfg: every configured
+// forge token variable is stripped.
+func (r Runner) ForConfig(cfg *config.Config) Runner {
+	if cfg == nil {
+		return r
+	}
+	for _, h := range cfg.Forges {
+		if h.TokenEnv != "" {
+			r.Strip = append(r.Strip, h.TokenEnv)
+		}
+	}
+	return r
 }
 
 // Error is a command that ran on the machine and failed.
@@ -97,7 +119,7 @@ func (r Runner) Command(e config.MachineEntry, args []string) ([]string, error) 
 		for _, a := range args {
 			remote = append(remote, shellQuote(a))
 		}
-		return []string{ssh, "-T", "-o", "BatchMode=yes", e.SSH, "--", strings.Join(remote, " ")}, nil
+		return []string{ssh, "-T", "-o", "BatchMode=yes", "-o", "SendEnv=-*", e.SSH, "--", strings.Join(remote, " ")}, nil
 	}
 	return nil, fmt.Errorf("machines.%s: give ssh or hc", e.Name)
 }
@@ -114,7 +136,7 @@ func (r Runner) Run(ctx context.Context, e config.MachineEntry, args []string, t
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Env = withoutTokens(r.Environ)
+	cmd.Env = r.environ()
 	cmd.Stdin = nil
 	cmd.WaitDelay = 2 * time.Second
 	var stdout, stderr bytes.Buffer
@@ -165,32 +187,61 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// tokenVars are environment variables that hold forge tokens. They are not
-// passed to ssh or hc, so no SendEnv or herdr-core forwarding can carry
-// them to another machine.
-var tokenVars = []string{"GITHUB_TOKEN", "GH_TOKEN", "GITLAB_TOKEN", "GL_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "CI_JOB_TOKEN"}
+// passVars are the variables ssh and hc are started with, by name, and
+// passPrefixes by prefix: what finding programs, the home and config
+// directories, the SSH agent and herdr-core need. Everything else stays
+// behind.
+var (
+	passVars = []string{
+		"PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TZ", "TMPDIR", "TMP", "TEMP",
+		"SSH_AUTH_SOCK", "SSH_AGENT_PID",
+		// Windows.
+		"SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE", "USERNAME",
+		"HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)",
+	}
+	passPrefixes = []string{"LC_", "XDG_", "HC_", "HERDR"}
+	// secretWords mark a variable as a credential even when its prefix
+	// is passed.
+	secretWords = []string{"TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "API_KEY", "PRIVATE_KEY"}
+)
 
-func withoutTokens(env []string) []string {
+// environ is the clean environment ssh and hc start with.
+func (r Runner) environ() []string {
+	env := r.Environ
 	if env == nil {
 		env = os.Environ()
 	}
-	out := make([]string, 0, len(env))
+	out := []string{}
 	for _, kv := range env {
 		k, _, _ := strings.Cut(kv, "=")
-		if isTokenVar(k) {
-			continue
+		if r.passes(k) {
+			out = append(out, kv)
 		}
-		out = append(out, kv)
 	}
 	return out
 }
 
-func isTokenVar(k string) bool {
-	for _, t := range tokenVars {
-		if strings.EqualFold(k, t) {
+func (r Runner) passes(k string) bool {
+	u := strings.ToUpper(k)
+	for _, s := range r.Strip {
+		if strings.EqualFold(k, s) {
+			return false
+		}
+	}
+	for _, w := range secretWords {
+		if strings.Contains(u, w) {
+			return false
+		}
+	}
+	for _, v := range passVars {
+		if u == v {
 			return true
 		}
 	}
-	u := strings.ToUpper(k)
-	return strings.HasPrefix(u, "TUCKERBOX_") && strings.HasSuffix(u, "TOKEN")
+	for _, p := range append(passPrefixes, r.Keep...) {
+		if strings.HasPrefix(u, strings.ToUpper(p)) {
+			return true
+		}
+	}
+	return false
 }
