@@ -2,34 +2,34 @@
 
 ## 1. Config and modes (repo-config, operating-modes)
 
-- [ ] 1.1 Parse `mode`, `[fleet]` (`max_runs`, `lease`) and `[team]` (`approvers`) from repository config only; parse `fleet_capacity` and `[machines.<name>]` (`ssh` or `hc`) from machine config only; `tuckerbox init` comments show examples; document them in README
-- [ ] 1.2 Test "Machine config sets a fleet limit"
-- [ ] 1.3 Test "Repository lists machines"
-- [ ] 1.4 Test "Default mode"
-- [ ] 1.5 Test "Machine config sets the mode"
-- [ ] 1.6 `tuckerbox check` per mode: fleet needs a remote; team needs `ship = "mr"` or `"merge"` and approvers when approval is required; list leftover fleet claims
-- [ ] 1.7 Test "Fleet without a remote"
-- [ ] 1.8 Test "Team with local shipping"
-- [ ] 1.9 Test "Fleet to solo with a claim left"
+- [x] 1.1 Parse `mode`, `[fleet]` (`max_runs`, `lease`) and `[team]` (`approvers`) from repository config only; parse `fleet_capacity` and `[machines.<name>]` (`ssh` or `hc`) from machine config only; `tuckerbox init` comments show examples; document them in README
+- [x] 1.2 Test "Machine config sets a fleet limit"
+- [x] 1.3 Test "Repository lists machines"
+- [x] 1.4 Test "Default mode"
+- [x] 1.5 Test "Machine config sets the mode"
+- [x] 1.6 `tuckerbox check` per mode: fleet needs a remote; team needs `ship = "mr"` or `"merge"` and approvers when approval is required; list leftover fleet claims
+- [x] 1.7 Test "Fleet without a remote"
+- [x] 1.8 Test "Team with local shipping"
+- [x] 1.9 Test "Fleet to solo with a claim left"
 - [ ] 1.10 Test "Dispatch in a solo repository"
 
 ## 2. Machines (machine-inventory)
 
-- [ ] 2.1 Remote command runner: `ssh -T -o BatchMode=yes <dest> -- tuckerbox ...` or `hc run --on <name> -- tuckerbox ...`, timeout, no credentials sent; tested with fake `ssh` and `hc` scripts
-- [ ] 2.2 Test "Machine reached by herdr-core"
-- [ ] 2.3 Test "Both ways given"
-- [ ] 2.4 Test "Machine asleep"
-- [ ] 2.5 Sign-in check for built-in agents in `doctor` (signed in, signed out, unknown; 5 s timeout, no session); README drops "sign-in not checked"
-- [ ] 2.6 Test "Unknown sign-in"
-- [ ] 2.7 `tuckerbox machine --json [--for <remote>]`: name, version, OS, `fleet_capacity` and fleet runs, agents installed and signed in, checkout via the machine index
-- [ ] 2.8 Test "Machine not in the fleet"
-- [ ] 2.9 Test "Codex signed out"
-- [ ] 2.10 Test "No checkout"
-- [ ] 2.11 Machine-wide fleet slots: `run --dispatched` takes one of `fleet_capacity` OS file locks under the machine state directory before claiming, holds it while queued, running or shipping, frees it on end, stop or block; `resume` of a dispatched run takes one again; refuse with `<machine> is full`
-- [ ] 2.12 Test "Two repositories, one place" (two processes from two repositories, `fleet_capacity = 1`; one claims, the other refuses and claims nothing)
-- [ ] 2.13 Test "Person's own run" (no fleet slot taken)
-- [ ] 2.14 `tuckerbox status --all-machines [--json]` with a `machine` field per run, version unchanged; update the status JSON snapshot
-- [ ] 2.15 Test "Runs on two machines"
+- [x] 2.1 Remote command runner: `ssh -T -o BatchMode=yes <dest> -- tuckerbox ...` or `hc run --on <name> -- tuckerbox ...`, timeout, no credentials sent; tested with fake `ssh` and `hc` scripts
+- [x] 2.2 Test "Machine reached by herdr-core"
+- [x] 2.3 Test "Both ways given"
+- [x] 2.4 Test "Machine asleep"
+- [x] 2.5 Sign-in check for built-in agents in `doctor` (signed in, signed out, unknown; 5 s timeout, no session); README drops "sign-in not checked"
+- [x] 2.6 Test "Unknown sign-in"
+- [x] 2.7 `tuckerbox machine --json [--for <remote>]`: name, version, OS, `fleet_capacity` and fleet runs, agents installed and signed in, checkout via the machine index
+- [x] 2.8 Test "Machine not in the fleet"
+- [x] 2.9 Test "Codex signed out"
+- [x] 2.10 Test "No checkout"
+- [x] 2.11 Machine-wide fleet slots: `run --dispatched` takes one of `fleet_capacity` OS file locks under the machine state directory before claiming, holds it while queued, running or shipping, frees it on end, stop or block; `resume` of a dispatched run takes one again; refuse with `<machine> is full`
+- [x] 2.12 Test "Two repositories, one place" (two processes from two repositories, `fleet_capacity = 1`; one claims, the other refuses and claims nothing)
+- [x] 2.13 Test "Person's own run" (no fleet slot taken)
+- [x] 2.14 `tuckerbox status --all-machines [--json]` with a `machine` field per run, version unchanged; update the status JSON snapshot
+- [x] 2.15 Test "Runs on two machines"
 
 ## 3. Fleet claims (fleet-claims)
 
