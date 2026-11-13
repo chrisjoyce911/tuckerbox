@@ -377,7 +377,8 @@ func TestDispatchHolderUnreachable(t *testing.T) {
 	if res.code != 0 {
 		t.Fatalf("%d %s %s", res.code, res.stdout, res.stderr)
 	}
-	for _, want := range []string{"lab: unreachable", "add-login: ready on lab, which is unreachable", "start add-users on mini"} {
+	for _, want := range []string{"lab: unreachable", "add-login: ready on lab, which is unreachable", "start add-users on mini",
+		"  warning: lab did not answer; if it still runs add-users in solo mode, this may start it twice"} {
 		if !strings.Contains(res.stdout, want) {
 			t.Errorf("output lacks %q:\n%s", want, res.stdout)
 		}
@@ -554,5 +555,28 @@ func TestDispatchSoloRunStillActiveAfterMoveToFleet(t *testing.T) {
 	}
 	if s, _ := f.state("add-login"); s != "running" {
 		t.Errorf("original run is %s", s)
+	}
+}
+
+// machine-inventory: Running commands on other machines sends no token or
+// credential, also one in a configured token_env whose name the runner's
+// own filters would pass.
+func TestDispatchSendsNoConfiguredToken(t *testing.T) {
+	f := newFleet(t, []string{"add-login"}, "", "[forges.\"github.com\"]\ntoken_env = \"LC_FORGE_AUTH\"\n", "mini")
+	f.approveAll("add-login")
+	f.report("mini", mini)
+	f.answer("mini", "started\n", 0)
+	t.Setenv("LC_FORGE_AUTH", "dummy-credential-4f1c")
+	t.Setenv("LC_OTHER_SETTING", "kept")
+	r := f.dispatchJSON()
+	if len(r.Started) != 1 {
+		t.Fatalf("%+v", r)
+	}
+	env := readFile(t, filepath.Join(f.ssh, "env.log"))
+	if strings.Contains(env, "dummy-credential-4f1c") || strings.Contains(env, "LC_FORGE_AUTH=") {
+		t.Errorf("the configured token reached ssh")
+	}
+	if !strings.Contains(env, "LC_OTHER_SETTING=kept") {
+		t.Errorf("the control variable didn't reach ssh, so the test proves nothing")
 	}
 }

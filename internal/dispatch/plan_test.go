@@ -319,3 +319,32 @@ func TestExistingRunNotPlacedAgain(t *testing.T) {
 		t.Errorf("add-users: %q", s.Why)
 	}
 }
+
+// A new start warns about each machine that didn't answer: it may still
+// run the change unclaimed, in solo mode. Continuations, which go to the
+// claim's holder, don't.
+func TestUnreachableMachineWarning(t *testing.T) {
+	p := Decide(Input{
+		Changes: []Change{approved("add-login"), approved("add-users")},
+		Claims:  map[string]Claim{"add-users": {Machine: "mini", State: ClaimReady}},
+		Machines: []Machine{{Name: "studio", Err: errors.New("timed out")},
+			holder("mini", 2, 0, RunReport{Change: "add-users", State: "ready", Since: since, Scope: "1"})},
+		GroupScope: true,
+	})
+	if len(p.Actions) != 2 {
+		t.Fatalf("%+v", p)
+	}
+	for _, a := range p.Actions {
+		switch a.Kind {
+		case Start:
+			want := []string{"studio did not answer; if it still runs add-login in solo mode, this may start it twice"}
+			if !reflect.DeepEqual(a.Warnings, want) {
+				t.Errorf("start warnings %v", a.Warnings)
+			}
+		case Continue:
+			if len(a.Warnings) != 0 {
+				t.Errorf("continuation warnings %v", a.Warnings)
+			}
+		}
+	}
+}

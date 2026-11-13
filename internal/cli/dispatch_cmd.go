@@ -127,13 +127,20 @@ func (a App) printDispatch(res dispatchResult) {
 		}
 		return " (" + strings.Join(act.Notes, "; ") + ")"
 	}
+	warn := func(act dispatch.Action) {
+		for _, x := range act.Warnings {
+			fmt.Fprintf(w, "  warning: %s\n", x)
+		}
+	}
 	if res.DryRun {
 		for _, act := range res.Actions {
 			fmt.Fprintf(w, "would %s on %s%s\n", verb(act), act.Machine, notes(act))
+			warn(act)
 		}
 	}
 	for _, act := range res.Started {
 		fmt.Fprintf(w, "%s on %s%s\n", verb(act), act.Machine, notes(act))
+		warn(act)
 	}
 	for _, f := range res.Failed {
 		fmt.Fprintf(w, "%s on %s failed: %s\n", verb(f.Action), f.Machine, f.Error)
@@ -361,7 +368,9 @@ func (a App) dispatchOn(ctx context.Context, repo runs.Repo, cfg *config.Config,
 		if e.Name == "" {
 			e.Name = m.Name
 		}
-		return a.machineRunner().Run(ctx, e, args, timeout)
+		// Configured token variables are stripped too, whatever their
+		// names (machine-inventory: no credential is sent).
+		return a.MachineRunner.ForConfig(cfg).Run(ctx, e, args, timeout)
 	}
 	exe, err := a.executable()
 	if err != nil {
@@ -381,10 +390,4 @@ func (a App) dispatchOn(ctx context.Context, repo runs.Repo, cfg *config.Config,
 		return out, &machines.Error{Machine: m.Name, Stderr: stderr.String(), Err: err}
 	}
 	return out, nil
-}
-
-// machineRunner is how commands reach other machines; tests point it at
-// fake ssh and hc programs.
-func (a App) machineRunner() machines.Runner {
-	return a.MachineRunner
 }

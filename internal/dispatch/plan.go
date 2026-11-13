@@ -166,6 +166,10 @@ type Action struct {
 	ExpectSince *time.Time `json:"expect_since,omitempty"`
 	// Notes are the candidate reasons, for --dry-run and the output.
 	Notes []string `json:"notes,omitempty"`
+	// Warnings, on a new start, name machines that didn't answer: one of
+	// them may still run the change unclaimed (a run started in solo mode
+	// before the repository became a fleet), and dispatch can't tell.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // Args is the tuckerbox command the action runs on its machine.
@@ -205,6 +209,12 @@ func Decide(in Input) Plan {
 			free[m.Name] = m.Report.Free()
 		} else {
 			p.Unreachable = append(p.Unreachable, fmt.Sprintf("%s: unreachable (%v)", m.Name, m.Err))
+		}
+	}
+	var silent []string
+	for _, m := range in.Machines {
+		if m.Report == nil {
+			silent = append(silent, m.Name)
 		}
 	}
 	used := 0
@@ -320,7 +330,11 @@ func Decide(in Input) Plan {
 		pick := choose(cands, ch.Machines, free)
 		free[pick]--
 		used++
-		p.Actions = append(p.Actions, Action{Kind: Start, Change: ch.ID, Machine: pick, Notes: notes})
+		var warn []string
+		for _, m := range silent {
+			warn = append(warn, fmt.Sprintf("%s did not answer; if it still runs %s in solo mode, this may start it twice", m, ch.ID))
+		}
+		p.Actions = append(p.Actions, Action{Kind: Start, Change: ch.ID, Machine: pick, Notes: notes, Warnings: warn})
 	}
 	return p
 }

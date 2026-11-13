@@ -3,7 +3,8 @@
 //
 //	ssh -T -o BatchMode=yes <dest> -- <remote command line>
 //
-// and appends its arguments, as one JSON array, to <dir>/calls.log, where
+// and appends its arguments, as one JSON array, to <dir>/calls.log (and
+// its environment to <dir>/env.log), where
 // <dir> is "fakessh" beside $XDG_STATE_HOME (the remote runner passes only
 // a clean environment, and XDG_ variables are in it). What it does next is
 // set in <dir>/<dest>/:
@@ -33,6 +34,10 @@ func main() {
 	if f, err := os.OpenFile(filepath.Join(dir, "calls.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
 		data, _ := json.Marshal(args)
 		fmt.Fprintf(f, "%s\n", data)
+		f.Close()
+	}
+	if f, err := os.OpenFile(filepath.Join(dir, "env.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+		fmt.Fprintf(f, "%s\n", strings.Join(os.Environ(), "\n"))
 		f.Close()
 	}
 	dest, line := "", ""
