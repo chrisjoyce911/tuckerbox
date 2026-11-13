@@ -119,8 +119,8 @@
 - [x] 5.10 Test "Someone else's next scope"
 - [x] 5.11 Ship stage in team mode: update the run's draft and mark it ready on GitHub and GitLab, open none
 - [x] 5.12 Test "Last step done in team mode"
-- [ ] 5.13 Refuse `--take-over` and `dispatch` in team mode
-- [ ] 5.14 Test "Take over refused"
+- [x] 5.13 Refuse `--take-over` and `dispatch` in team mode
+- [x] 5.14 Test "Take over refused"
 - [x] 5.15 Test "Dispatch in a team repository"
 - [x] 5.16 `approve` records the forge login; in team mode the run gate reads the approval only from the fetched base commit, requires a listed login, and refuses worktrees or retained branches whose files don't match it
 - [x] 5.17 Test "Approval by someone not listed"
