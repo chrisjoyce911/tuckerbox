@@ -336,3 +336,64 @@ func TestArchivePruningMatchesWholeChangeName(t *testing.T) {
 	wantErr(t, err, "already archived")
 
 }
+
+func TestMergedTombstonePreventsReclaimWithoutArchive(t *testing.T) {
+	a, b, _ := stores(t)
+	c := claim(t, a, "login", "one")
+	if err := a.RemoveMerged(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	all, err := b.Read(ctx)
+	if err != nil || len(all) != 0 {
+		t.Fatalf("merged claim not removed: %v %v", all, err)
+	}
+	_, err = b.Acquire(ctx, "login", "two", "new", "login", false, false)
+	wantErr(t, err, "already merged")
+}
+func TestTakeoverRefusesMergedPublishedHeadWithOrWithoutBranch(t *testing.T) {
+	for _, deleted := range []bool{false, true} {
+		t.Run(map[bool]string{false: "retained", true: "deleted"}[deleted], func(t *testing.T) {
+			a, b, _ := stores(t)
+			now := time.Now()
+			a.Now = func() time.Time { return now }
+			b.Now = func() time.Time { return now.Add(time.Hour) }
+			c := claim(t, a, "login", "one")
+			gitTest(t, a.Dir, "checkout", "-b", "login")
+			gitTest(t, a.Dir, "commit", "--allow-empty", "-m", "change")
+			head := gitTest(t, a.Dir, "rev-parse", "HEAD")
+			if err := a.Push(ctx, c, "login", "", head); err != nil {
+				t.Fatal(err)
+			}
+			gitTest(t, a.Dir, "checkout", "main")
+			gitTest(t, a.Dir, "merge", "--no-ff", "login", "-m", "merge login")
+			gitTest(t, a.Dir, "push", "origin", "main")
+			if deleted {
+				gitTest(t, a.Dir, "push", "origin", "--delete", "login")
+			}
+			_, err := b.Acquire(ctx, "login", "two", "new", "login", true, false)
+			wantErr(t, err, "already merged")
+			all, _ := b.Read(ctx)
+			if all["login"].Machine != "one" {
+				t.Fatal("merged takeover mutated claim", all)
+			}
+		})
+	}
+}
+func TestAbandonCannotReleaseReplacementClaim(t *testing.T) {
+	a, b, _ := stores(t)
+	now := time.Now()
+	a.Now = func() time.Time { return now }
+	b.Now = func() time.Time { return now.Add(time.Hour) }
+	c := claim(t, a, "login", "one")
+	if _, err := b.Acquire(ctx, "login", "two", "new", "login", true, false); err != nil {
+		t.Fatal(err)
+	}
+	err := a.Abandon(ctx, c, "login")
+	if !OwnershipLost(err) {
+		t.Fatalf("ownership loss not typed: %v", err)
+	}
+	all, _ := b.Read(ctx)
+	if all["login"].Machine != "two" {
+		t.Fatal("rollback removed replacement", all)
+	}
+}

@@ -32,6 +32,7 @@ type Claim struct {
 	Run       string    `toml:"run" json:"run"`
 	Epoch     uint64    `toml:"epoch" json:"epoch"`
 	State     string    `toml:"state" json:"state"`
+	LastPush  string    `toml:"last_push,omitempty" json:"last_push,omitempty"`
 	RenewedAt time.Time `toml:"renewed_at" json:"renewed_at"`
 }
 
@@ -81,7 +82,7 @@ func (s Store) git(ctx context.Context, input string, args ...string) (string, e
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return out.String(), fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+		return out.String(), transport("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return strings.TrimSpace(out.String()), nil
 }
@@ -113,6 +114,8 @@ type snapshot struct {
 	claims   map[string]Claim
 	epochs   map[string]uint64
 	archived map[string]bool
+	merged   map[string]bool
+	baseTip  string
 }
 
 func (s Store) read(ctx context.Context) (snapshot, error) {
@@ -137,7 +140,7 @@ func (s Store) ReadLocal(ctx context.Context) (map[string]Claim, error) {
 	return st.claims, err
 }
 func (s Store) readTip(ctx context.Context, tip string) (snapshot, error) {
-	st := snapshot{claims: map[string]Claim{}, epochs: map[string]uint64{}}
+	st := snapshot{claims: map[string]Claim{}, epochs: map[string]uint64{}, merged: map[string]bool{}}
 	var err error
 	st.tip = tip
 	if err != nil || st.tip == "" {
@@ -148,12 +151,16 @@ func (s Store) readTip(ctx context.Context, tip string) (snapshot, error) {
 		return st, err
 	}
 	for _, p := range strings.Split(paths, "\n") {
-		if !strings.HasPrefix(p, "claims/") && !strings.HasPrefix(p, "epochs/") {
+		if !strings.HasPrefix(p, "claims/") && !strings.HasPrefix(p, "epochs/") && !strings.HasPrefix(p, "merged/") {
 			continue
 		}
 		data, err := s.git(ctx, "", "show", st.tip+":"+p)
 		if err != nil {
 			return st, err
+		}
+		if strings.HasPrefix(p, "merged/") {
+			st.merged[strings.TrimPrefix(p, "merged/")] = true
+			continue
 		}
 		if strings.HasPrefix(p, "epochs/") {
 			v, err := strconv.ParseUint(data, 10, 64)
@@ -213,6 +220,7 @@ func (s Store) prune(ctx context.Context, st *snapshot) error {
 	if tip == "" {
 		return nil
 	}
+	st.baseTip = tip
 	paths, err := s.git(ctx, "", "ls-tree", "--name-only", tip, "openspec/changes/archive/")
 	if err != nil {
 		return err
@@ -234,10 +242,14 @@ func (s Store) prune(ctx context.Context, st *snapshot) error {
 
 func (s Store) commit(ctx context.Context, st snapshot) (string, error) {
 	trees := map[string]string{}
-	for _, folder := range []string{"claims", "epochs"} {
+	for _, folder := range []string{"claims", "epochs", "merged"} {
 		var names []string
 		if folder == "claims" {
 			for n := range st.claims {
+				names = append(names, n)
+			}
+		} else if folder == "merged" {
+			for n := range st.merged {
 				names = append(names, n)
 			}
 		} else {
@@ -257,6 +269,8 @@ func (s Store) commit(ctx context.Context, st snapshot) (string, error) {
 				}
 				data = b.String()
 				file += ".toml"
+			} else if folder == "merged" {
+				data = "merged\n"
 			} else {
 				data = strconv.FormatUint(st.epochs[n], 10) + "\n"
 			}
@@ -272,7 +286,7 @@ func (s Store) commit(ctx context.Context, st snapshot) (string, error) {
 		}
 		trees[folder] = t
 	}
-	root, err := s.git(ctx, "040000 tree "+trees["claims"]+"\tclaims\n040000 tree "+trees["epochs"]+"\tepochs\n", "mktree")
+	root, err := s.git(ctx, "040000 tree "+trees["claims"]+"\tclaims\n040000 tree "+trees["epochs"]+"\tepochs\n040000 tree "+trees["merged"]+"\tmerged\n", "mktree")
 	if err != nil {
 		return "", err
 	}
@@ -285,10 +299,10 @@ func (s Store) commit(ctx context.Context, st snapshot) (string, error) {
 func (s Store) owned(st snapshot, c Claim) (Claim, error) {
 	cur, ok := st.claims[c.Change]
 	if !ok {
-		return Claim{}, fmt.Errorf("claim released")
+		return Claim{}, &OwnershipError{}
 	}
 	if !cur.same(c) {
-		return Claim{}, fmt.Errorf("claim taken by %s", cur.Machine)
+		return Claim{}, &OwnershipError{Machine: cur.Machine}
 	}
 	return cur, nil
 }
@@ -348,7 +362,7 @@ func (s Store) update(ctx context.Context, decide func(*snapshot) (*branchMove, 
 			return err
 		}
 	}
-	return fmt.Errorf("fleet refs kept moving; try again")
+	return transport("fleet refs kept moving; try again")
 }
 
 // Acquire claims an unclaimed change or explicitly takes one over. Returning
@@ -363,7 +377,13 @@ func (s Store) Acquire(ctx context.Context, change, machine, run, branch string,
 	if !validName(change) || machine == "" || run == "" {
 		return result, fmt.Errorf("invalid fleet identity")
 	}
+	if err := s.checkBranch(ctx, branch); err != nil {
+		return result, err
+	}
 	err := s.update(ctx, func(st *snapshot) (*branchMove, error) {
+		if st.merged[change] {
+			return nil, fmt.Errorf("change %s is already merged", change)
+		}
 		if st.archived[change] {
 			return nil, fmt.Errorf("change %s is already archived on the base branch", change)
 		}
@@ -378,16 +398,34 @@ func (s Store) Acquire(ctx context.Context, change, machine, run, branch string,
 		} else if takeOver {
 			return nil, fmt.Errorf("no claim to take over for %s", change)
 		}
+		if takeOver && st.baseTip != "" {
+			published := old.LastPush
+			if published == "" {
+				var err error
+				published, err = s.fetch(ctx, "refs/heads/"+branch)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if published != "" {
+				if _, err := s.git(ctx, "", "merge-base", "--is-ancestor", published, st.baseTip); err == nil {
+					return nil, fmt.Errorf("change %s is already merged", change)
+				}
+			}
+		}
 		if err := s.admit(*st, change); err != nil {
 			return nil, err
 		}
-		c := Claim{Change: change, Machine: machine, Run: run, Epoch: st.epochs[change] + 1, State: Active, RenewedAt: s.now().UTC()}
+		c := Claim{Change: change, Machine: machine, Run: run, Epoch: st.epochs[change] + 1, State: Active, RenewedAt: s.now().UTC(), LastPush: old.LastPush}
 		st.claims[change] = c
 		st.epochs[change] = c.Epoch
 		result = Acquired{Claim: c}
 		if exists {
 			move, err := s.moveBranch(ctx, branch, "Take over "+change+" from "+old.Machine)
 			if move != nil {
+				c.LastPush = move.new
+				st.claims[change] = c
+				result.Claim = c
 				result.BranchTip = move.new
 			}
 			return move, err
@@ -397,10 +435,16 @@ func (s Store) Acquire(ctx context.Context, change, machine, run, branch string,
 	return result, err
 }
 func (s Store) SetState(ctx context.Context, c Claim, state string) error {
+	_, err := s.Transition(ctx, c, state)
+	return err
+}
+
+func (s Store) Transition(ctx context.Context, c Claim, state string) (Claim, error) {
+	var previous Claim
 	if state != Active && state != Parked && state != Ready {
-		return fmt.Errorf("invalid fleet state")
+		return previous, fmt.Errorf("invalid fleet state")
 	}
-	return s.update(ctx, func(st *snapshot) (*branchMove, error) {
+	err := s.update(ctx, func(st *snapshot) (*branchMove, error) {
 		cur, err := s.owned(*st, c)
 		if err != nil {
 			return nil, err
@@ -410,12 +454,15 @@ func (s Store) SetState(ctx context.Context, c Claim, state string) error {
 				return nil, err
 			}
 		}
+		previous = cur
 		cur.State = state
 		cur.RenewedAt = s.now().UTC()
 		st.claims[c.Change] = cur
 		return nil, nil
 	})
+	return previous, err
 }
+
 func (s Store) Renew(ctx context.Context, c Claim) error {
 	return s.update(ctx, func(st *snapshot) (*branchMove, error) {
 		cur, err := s.owned(*st, c)
@@ -447,6 +494,9 @@ func (s Store) Push(ctx context.Context, c Claim, branch, lease, head string) er
 			return nil, fmt.Errorf("branch changed on the forge")
 		}
 		cur.RenewedAt = s.now().UTC()
+		if head != "" {
+			cur.LastPush = head
+		}
 		st.claims[c.Change] = cur
 		return &branchMove{branch, lease, head}, nil
 	})
@@ -456,7 +506,7 @@ func (s Store) checkBranch(ctx context.Context, branch string) error {
 		return fmt.Errorf("invalid fleet branch")
 	}
 	if _, err := s.git(ctx, "", "check-ref-format", "refs/heads/"+branch); err != nil {
-		return err
+		return fmt.Errorf("invalid fleet branch: %v", err)
 	}
 	out, err := s.git(ctx, "", "ls-remote", "--symref", "--", s.remote(), "HEAD")
 	if err != nil {
@@ -492,7 +542,7 @@ func (s Store) Release(ctx context.Context, change, machine, branch string, forc
 	return s.update(ctx, func(st *snapshot) (*branchMove, error) {
 		c, ok := st.claims[change]
 		if !ok {
-			return nil, fmt.Errorf("claim released")
+			return nil, &OwnershipError{}
 		}
 		if c.Machine != machine && !force {
 			return nil, fmt.Errorf("claimed by %s; --force removes it", c.Machine)
@@ -505,15 +555,33 @@ func (s Store) Release(ctx context.Context, change, machine, branch string, forc
 		return move, nil
 	})
 }
-func (s Store) RemoveMerged(ctx context.Context, c Claim) error {
+func (s Store) RemoveMerged(ctx context.Context, c Claim) error { return s.RecordMerged(ctx, c.Change) }
+
+// RecordMerged records authoritative forge evidence independently of an old
+// holder's identity. A merge may have completed just before a takeover; the
+// tombstone closes that race and prevents any subsequent initial claim.
+func (s Store) RecordMerged(ctx context.Context, change string) error {
+	if !validName(change) {
+		return fmt.Errorf("invalid change")
+	}
 	return s.update(ctx, func(st *snapshot) (*branchMove, error) {
-		if _, ok := st.claims[c.Change]; !ok {
-			return nil, nil
-		}
+		st.merged[change] = true
+		delete(st.claims, change)
+		return nil, nil
+	})
+}
+
+// Abandon rolls back only this exact startup claim, fencing any takeover branch.
+func (s Store) Abandon(ctx context.Context, c Claim, branch string) error {
+	return s.update(ctx, func(st *snapshot) (*branchMove, error) {
 		if _, err := s.owned(*st, c); err != nil {
 			return nil, err
 		}
+		move, err := s.moveBranch(ctx, branch, "Release "+c.Change+" from "+c.Machine)
+		if err != nil {
+			return nil, err
+		}
 		delete(st.claims, c.Change)
-		return nil, nil
+		return move, nil
 	})
 }

@@ -1,0 +1,4 @@
+[
+ {"method":"GET","path":"/projects/team%2Ftools%2Fapp/merge_requests?state=merged&source_branch=add-login&per_page=100","response":[{"iid":9,"state":"merged","sha":"merged-head","target_branch":"main"}]},
+ {"method":"GET","path":"/projects/team%2Ftools%2Fapp/merge_requests?state=merged&source_branch=unmerged&per_page=100","response":[]}
+]

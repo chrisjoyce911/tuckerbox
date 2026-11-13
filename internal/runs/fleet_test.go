@@ -397,3 +397,13 @@ func TestFleetEngineReuseStillChecksNextScopeAdmission(t *testing.T) {
 	_, err = e.Run(context.Background(), Request{Change: "add-login", Scope: "2"})
 	fleetErr(t, err, "fleet limit reached")
 }
+
+func (f *fleetShippingForge) FindMergedMR(context.Context, string) (*forge.MR, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.mr != nil && f.mr.State == "merged" {
+		m := *f.mr
+		return &m, nil
+	}
+	return nil, nil
+}

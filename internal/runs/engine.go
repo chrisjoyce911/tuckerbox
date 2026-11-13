@@ -14,6 +14,7 @@ import (
 
 	"github.com/chrisjoyce911/tuckerbox/internal/agent"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
+	"github.com/chrisjoyce911/tuckerbox/internal/fleet"
 	"github.com/chrisjoyce911/tuckerbox/internal/fleetslot"
 	"github.com/chrisjoyce911/tuckerbox/internal/forge"
 	"github.com/chrisjoyce911/tuckerbox/internal/history"
@@ -110,10 +111,14 @@ func (x *Expect) mismatch(rs *Run) string {
 // Engine runs one change's workflow in this process.
 type Engine struct {
 	// Forge overrides the authenticated session in local fake-forge tests.
-	Forge        func(context.Context) (forge.Client, func(string) string, error)
-	ShipSleep    func(context.Context, time.Duration) error
-	workflowSlot *Slot
-	fleetRun     *fleetSession
+	Forge         func(context.Context) (forge.Client, func(string) string, error)
+	ShipSleep     func(context.Context, time.Duration) error
+	workflowSlot  *Slot
+	fleetRun      *fleetSession
+	fleetRenew    func(context.Context, *fleet.Fence) error
+	fleetSetState func(context.Context, *fleet.Fence, string) error
+	fleetRemove   func(context.Context, *fleet.Fence) error
+	fleetWait     func(context.Context, time.Duration) error
 	// DependencyRefresh controls base-ref refresh during shipping dependency waits.
 	DependencyRefresh time.Duration
 	Repo              Repo
@@ -391,8 +396,17 @@ func OpenWorkspace(ctx context.Context, path string) (Workspace, error) {
 //
 // Cancelling ctx stops the run: the agent is stopped and the run recorded
 // as stopped.
-func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
+func (e *Engine) Run(ctx context.Context, req Request) (out *Run, runErr error) {
 	e.fleetRun = nil
+	var heldChange *ChangeLock
+	defer func() {
+		if err := e.rollbackFleet(); err != nil {
+			runErr = errors.Join(runErr, err)
+		}
+		if heldChange != nil {
+			heldChange.Release()
+		}
+	}()
 	var ws Workspace
 	var err error
 	// A dispatched run holds a fleet slot from before it claims or makes
@@ -445,7 +459,7 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer lock.Release()
+	heldChange = lock
 	// We hold the lock, so an edit marker is from an edit that died, and an
 	// answer in the inbox is one a dead run process never recorded.
 	RemoveEditMarker(ws.State)
@@ -546,6 +560,9 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	rs.Reason, rs.Tail = "", ""
 	if err := e.save(ws, rs); err != nil {
 		return nil, err
+	}
+	if e.fleetRun != nil {
+		e.fleetRun.durable = true
 	}
 	e.startEvents(ws, rs, req.Mode, prev, req.By)
 	if e.StateHome != "" {

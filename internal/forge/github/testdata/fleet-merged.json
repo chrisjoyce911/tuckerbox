@@ -1,0 +1,5 @@
+[
+ {"method":"GET","path":"/repos/sam/app/pulls?state=closed&head=sam%3Aadd-login&per_page=100&page=1","headers":{"Link":"<https://github.example/pulls?page=2>; rel=\"next\""},"response":[{"number":8,"state":"closed","merged_at":null}]},
+ {"method":"GET","path":"/repos/sam/app/pulls?state=closed&head=sam%3Aadd-login&per_page=100&page=2","response":[{"number":9,"state":"closed","merged_at":"2026-11-13T01:00:00Z","head":{"sha":"merged-head"},"base":{"ref":"main"}}]},
+ {"method":"GET","path":"/repos/sam/app/pulls?state=closed&head=sam%3Aunmerged&per_page=100&page=1","response":[{"number":10,"state":"closed","merged_at":null}]}
+]
