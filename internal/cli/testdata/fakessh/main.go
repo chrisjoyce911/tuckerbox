@@ -10,6 +10,9 @@
 // set in <dir>/<dest>/:
 //
 //   - asleep: exit 255 (unreachable), as ssh does
+//   - hold-<verb> (verb: machine or run): write held-<verb>, then wait
+//     until release-<verb> exists before going on, so a test can act
+//     between a dispatcher's read and its command
 //   - report.json: printed for "tuckerbox machine ..." commands
 //   - tuckerbox: run the real tuckerbox at this path with the remote
 //     command's arguments, in the folder named by cwd, with each line of
@@ -26,6 +29,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func main() {
@@ -63,6 +67,17 @@ func main() {
 	if _, err := os.Stat(filepath.Join(d, "asleep")); err == nil {
 		fmt.Fprintf(os.Stderr, "ssh: connect to host %s port 22: Operation timed out\n", dest)
 		os.Exit(255)
+	}
+	if len(words) > 0 {
+		verb := words[0]
+		if _, err := os.Stat(filepath.Join(d, "hold-"+verb)); err == nil {
+			os.WriteFile(filepath.Join(d, "held-"+verb), nil, 0o644)
+			for deadline := time.Now().Add(60 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+				if _, err := os.Stat(filepath.Join(d, "release-"+verb)); err == nil {
+					break
+				}
+			}
+		}
 	}
 	if len(words) > 0 && words[0] == "machine" {
 		if data, err := os.ReadFile(filepath.Join(d, "report.json")); err == nil {

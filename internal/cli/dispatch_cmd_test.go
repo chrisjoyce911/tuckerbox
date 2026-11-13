@@ -55,7 +55,7 @@ func useFakeSSH(t *testing.T) string {
 }
 
 // fleetFixture is a fleet repository with a bare remote, this machine
-// (studio, no fleet capacity) and the machines reached over the fake ssh.
+// (desk, no fleet capacity) and the machines reached over the fake ssh.
 type fleetFixture struct {
 	*cliFixture
 	ssh string
@@ -75,7 +75,7 @@ func newFleet(t *testing.T, changes []string, repoTop, machineExtra string, ssh 
 	f.setTop("mode = \"fleet\"\n" + repoTop)
 	f.withRemote()
 	var m strings.Builder
-	m.WriteString("machine = \"studio\"\n" + machineExtra + "\n")
+	m.WriteString("machine = \"desk\"\n" + machineExtra + "\n")
 	for _, name := range ssh {
 		fmt.Fprintf(&m, "[machines.%s]\nssh = %q\n", name, name)
 	}
