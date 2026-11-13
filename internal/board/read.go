@@ -65,7 +65,13 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 	if err != nil {
 		return nil, err
 	}
-	refs := refApprovals(ctx, repo.Root)
+	// In team mode approvals count only from tuckerbox.toml on the
+	// protected base, so the board ignores refs/tuckerbox/approvals
+	// (team-claims: Approvals only from the protected base).
+	var refs refView
+	if cfg.Mode != config.ModeTeam {
+		refs = refApprovals(ctx, repo.Root)
+	}
 	doc := &Document{Version: Version, Ship: string(cfg.Ship), Repo: key, Path: repo.Root, Machine: history.Machine(), OS: runtime.GOOS, RequireApproval: cfg.RequireApproval, Columns: columns(cfg), Cards: []Card{}}
 	if m := autopilot.ReadMarker(repo.Common); m != nil {
 		doc.Autopilot = Autopilot{Running: true, Pid: m.Pid, Machine: m.Machine, Started: timestamp(m.Started), Terminal: m.Terminal}

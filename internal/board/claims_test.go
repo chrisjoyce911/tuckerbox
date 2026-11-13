@@ -10,7 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chrisjoyce911/tuckerbox/internal/approval"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
+	"github.com/chrisjoyce911/tuckerbox/internal/runs"
+	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 	"github.com/chrisjoyce911/tuckerbox/internal/testenv"
 )
 
@@ -150,21 +153,7 @@ func TestOwnerInATeam(t *testing.T) {
 		}
 		return TeamSnapshot{Claims: map[string]TeamClaim{"add-login": {Change: "add-login", Login: "sam", Machine: "studio", Run: "r9"}}, FetchedAt: at}, nil
 	}
-	env := config.SystemEnv()
-	realGit := env.Git
-	env.Git = func(dir string, args ...string) (string, error) {
-		if a := strings.Join(args, " "); a == "config --get remote.origin.url" || a == "remote get-url --push -- origin" {
-			return "https://github.com/example/shop.git", nil
-		}
-		return realGit(dir, args...)
-	}
-	teamRead := func() *Document {
-		d, err := Read(context.Background(), root, "", env)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return d
-	}
+	teamRead := func() *Document { return teamRead(t, root) }
 	d := teamRead()
 	if d.Mode != "team" || d.Fleet != nil || d.ClaimsRead == nil || d.ClaimsRead.Source != "forge" {
 		t.Fatalf("mode %q fleet %+v read %+v", d.Mode, d.Fleet, d.ClaimsRead)
@@ -182,6 +171,78 @@ func TestOwnerInATeam(t *testing.T) {
 	d = teamRead()
 	if !d.ClaimsRead.Stale || d.ClaimsRead.At != timestamp(at) || card(t, d, "add-login").Claim.Login != "sam" {
 		t.Fatalf("stale %+v", d.ClaimsRead)
+	}
+}
+
+// teamRead reads a team repository's board as if its remote were on a forge.
+func teamRead(t *testing.T, root string) *Document {
+	t.Helper()
+	env := config.SystemEnv()
+	realGit := env.Git
+	env.Git = func(dir string, args ...string) (string, error) {
+		if a := strings.Join(args, " "); a == "config --get remote.origin.url" || a == "remote get-url --push -- origin" {
+			return "https://github.com/example/shop.git", nil
+		}
+		return realGit(dir, args...)
+	}
+	d, err := Read(context.Background(), root, "", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// team-claims 5.30: in a team repository the board's approval ignores
+// refs/tuckerbox/approvals; only tuckerbox.toml counts.
+func TestTeamBoardIgnoresApprovalsRef(t *testing.T) {
+	ctx := context.Background()
+	root := modeRepo(t, "team", "ship = 'mr'\n", "", "add-login")
+	old := TeamClaims
+	t.Cleanup(func() { TeamClaims = old })
+	TeamClaims = func(context.Context, string, *config.Config, time.Time) (TeamSnapshot, error) { return TeamSnapshot{}, nil }
+	hash, err := approval.Hash(approval.DirOf(root, "add-login"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The remote is gone: the entry stays in the local ref, unpublished.
+	if err := (approval.Store{Dir: root}).Record(ctx, "add-login", approval.Entry{State: approval.EntryApproved, Hash: hash, By: "Owner", At: time.Now()}); !errors.Is(err, approval.ErrOffline) {
+		t.Fatalf("Record = %v", err)
+	}
+	if a := card(t, teamRead(t, root), "add-login").Approval; a.State != "none" || !a.Published {
+		t.Fatalf("team card approval from the ref: %+v", a)
+	}
+}
+
+// A run made while the repository was solo, after it became a fleet
+// repository: the board is a fleet board, the run's card has no claim and
+// still shows its run, and Dispatch doesn't count it (it has a run).
+func TestRunFromBeforeFleetMode(t *testing.T) {
+	testTools.Setup(t)
+	root := testTools.NewRepo(t, testenv.RepoOptions{Changes: []string{"add-login"}})
+	worktree := filepath.Join(filepath.Dir(root), "repo-worktrees", "add-login")
+	testenv.Git(t, root, "worktree", "add", "-qb", "add-login", worktree)
+	st, err := statedir.Resolve(context.Background(), worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runs.WriteRun(st.RunFile(), &runs.Run{Change: "add-login", State: runs.Stopped, Step: "build", Round: 1, Branch: "add-login", Worktree: worktree, Since: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if d := read(t, root, ""); d.Mode != "solo" || card(t, d, "add-login").State != "stopped" {
+		t.Fatalf("solo %q %+v", d.Mode, card(t, d, "add-login"))
+	}
+	p := filepath.Join(root, config.RepoFile)
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testenv.WriteFile(t, p, "mode = 'fleet'\n"+string(data))
+	testenv.Git(t, root, "remote", "add", "origin", filepath.Join(t.TempDir(), "remote.git"))
+	withFleet(t, &fakeFleet{remote: map[string]FleetRecord{}}, time.Now())
+	d := read(t, root, "")
+	c := card(t, d, "add-login")
+	if d.Mode != "fleet" || d.Fleet.Claims != 0 || c.Claim != nil || c.State != "stopped" {
+		t.Fatalf("fleet %q %+v card %+v", d.Mode, d.Fleet, c)
 	}
 }
 
