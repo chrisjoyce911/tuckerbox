@@ -14,6 +14,7 @@ import (
 
 	"github.com/chrisjoyce911/tuckerbox/internal/agent"
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
+	"github.com/chrisjoyce911/tuckerbox/internal/fleet"
 	"github.com/chrisjoyce911/tuckerbox/internal/fleetslot"
 	"github.com/chrisjoyce911/tuckerbox/internal/forge"
 	"github.com/chrisjoyce911/tuckerbox/internal/history"
@@ -37,8 +38,9 @@ const (
 
 // Request is one run to make.
 type Request struct {
-	Change string
-	Mode   Mode
+	Change          string
+	TakeOver, Force bool
+	Mode            Mode
 	// Step is the step to start from, for Rerun.
 	Step string
 	// Worktree is the change's existing worktree, for Resume and Rerun.
@@ -109,9 +111,14 @@ func (x *Expect) mismatch(rs *Run) string {
 // Engine runs one change's workflow in this process.
 type Engine struct {
 	// Forge overrides the authenticated session in local fake-forge tests.
-	Forge        func(context.Context) (forge.Client, func(string) string, error)
-	ShipSleep    func(context.Context, time.Duration) error
-	workflowSlot *Slot
+	Forge         func(context.Context) (forge.Client, func(string) string, error)
+	ShipSleep     func(context.Context, time.Duration) error
+	workflowSlot  *Slot
+	fleetRun      *fleetSession
+	fleetRenew    func(context.Context, *fleet.Fence) error
+	fleetSetState func(context.Context, *fleet.Fence, string) error
+	fleetRemove   func(context.Context, *fleet.Fence) error
+	fleetWait     func(context.Context, time.Duration) error
 	// DependencyRefresh controls base-ref refresh during shipping dependency waits.
 	DependencyRefresh time.Duration
 	Repo              Repo
@@ -136,6 +143,8 @@ type Engine struct {
 	OnLocked func(ws Workspace, r *Run)
 	// Now returns the time; nil means time.Now.
 	Now func() time.Time
+	// FleetTicks optionally supplies renewal ticks from a test clock.
+	FleetTicks <-chan time.Time
 	// TickEvery is how often the run process reads the worktree's tasks.md
 	// while a step runs, for task_ticked and task_unticked history events
 	// (default TickEvery, 10 seconds).
@@ -387,7 +396,17 @@ func OpenWorkspace(ctx context.Context, path string) (Workspace, error) {
 //
 // Cancelling ctx stops the run: the agent is stopped and the run recorded
 // as stopped.
-func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
+func (e *Engine) Run(ctx context.Context, req Request) (out *Run, runErr error) {
+	e.fleetRun = nil
+	var heldChange *ChangeLock
+	defer func() {
+		if err := e.rollbackFleet(); err != nil {
+			runErr = errors.Join(runErr, err)
+		}
+		if heldChange != nil {
+			heldChange.Release()
+		}
+	}()
 	var ws Workspace
 	var err error
 	// A dispatched run holds a fleet slot from before it claims or makes
@@ -398,14 +417,26 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	if err := e.freezeMode(ctx, req); err != nil {
 		return nil, err
 	}
-	if req.Mode == Start && req.Dispatched {
+	// Every later scope of a dispatched run takes its machine slot again.
+	if !req.Dispatched {
+		path := req.Worktree
+		if path == "" {
+			path = e.Repo.WorktreePath(e.Config.Worktree, req.Change)
+		}
+		if existing, err := OpenWorkspace(ctx, path); err == nil {
+			if prior, err := ReadRun(existing.State.RunFile()); err == nil && prior.Dispatched {
+				req.Dispatched = true
+			}
+		}
+	}
+	if req.Dispatched {
 		if fleet, err = e.takeFleetSlot(); err != nil {
 			return nil, err
 		}
 	}
 	if req.Worktree != "" {
 		ws, err = OpenWorkspace(ctx, req.Worktree)
-		if err == nil && req.Mode != Start && fleet == nil {
+		if err == nil && fleet == nil {
 			if r, rerr := ReadRun(ws.State.RunFile()); rerr == nil && r.Dispatched {
 				fleet, err = e.takeFleetSlot()
 			}
@@ -428,7 +459,7 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer lock.Release()
+	heldChange = lock
 	// We hold the lock, so an edit marker is from an edit that died, and an
 	// answer in the inbox is one a dead run process never recorded.
 	RemoveEditMarker(ws.State)
@@ -450,7 +481,7 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 			}
 		}
 	}
-	if e.gated(req) {
+	if e.gated(req) && (e.fleetRun == nil || e.fleetRun.tip == "") {
 		// Under the change lock, which approve and unapprove also take:
 		// what is judged here is what the run starts with.
 		if err := e.Gate(ctx, req.Change, StartPoint{Worktree: ws.Path}); err != nil {
@@ -481,7 +512,11 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 		return nil, err
 	}
 	if req.Mode == Start {
-		rs.Dispatched = req.Dispatched
+		rs.Dispatched = rs.Dispatched || req.Dispatched
+	}
+	if err := e.activateFleet(ctx, req, ws, rs); err != nil {
+		return nil, err
+
 	}
 	if err := e.teamStart(ctx, ws, rs); err != nil {
 		return nil, err
@@ -526,6 +561,9 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	if err := e.save(ws, rs); err != nil {
 		return nil, err
 	}
+	if e.fleetRun != nil {
+		e.fleetRun.durable = true
+	}
 	e.startEvents(ws, rs, req.Mode, prev, req.By)
 	if e.StateHome != "" {
 		if err := Remember(e.StateHome, IndexEntry{Repo: e.Repo.Main, Change: req.Change, Worktree: ws.Path, State: string(ws.State)}); err != nil {
@@ -534,6 +572,8 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	ctx = e.watchFleet(ctx, cancel, rs)
+	defer e.stopFleet()
 	stopReq := e.watchStop(ctx, cancel, ws)
 	notified := false
 	notify := func() {
@@ -700,6 +740,12 @@ func (e *Engine) ensureWorktree(ctx context.Context, req Request) (Workspace, er
 		if err := CheckOverrides(ctx, e.Config, e.Repo.Root, req.Change, sp); err != nil {
 			return Workspace{}, err
 		}
+	}
+	if err := e.claimFleet(ctx, req, sp); err != nil {
+		return Workspace{}, err
+	}
+	if e.fleetRun != nil && e.fleetRun.tip != "" {
+		return e.takeoverWorkspace(ctx, req, e.fleetRun.tip)
 	}
 	return e.Repo.EnsureWorktreeFrom(ctx, e.Config.Worktree, req.Change, &sp, warn)
 }
@@ -1027,6 +1073,7 @@ func (e *Engine) unwatched(ws Workspace, rs *Run, err *agent.EndError) (*Run, er
 // finish records the run's final state for this process. The caller's
 // deferred releases then free the slot and the change lock.
 func (e *Engine) finish(ws Workspace, rs *Run, s State, reason string) (*Run, error) {
+	s, reason = e.finishFleet(rs, s, reason)
 	rs.State, rs.Reason = s, reason
 	rs.Pid, rs.AgentPid = 0, 0
 	rs.Slot, rs.Terminal, rs.AgentState = nil, nil, ""

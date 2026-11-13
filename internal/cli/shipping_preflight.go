@@ -34,11 +34,18 @@ func (a App) shippingPreflight(ctx context.Context, repo runs.Repo, cfg *config.
 		a.errf("run", "%v", err)
 		return false
 	}
+
 	for _, id := range changes {
-		effective, err := runConfig(ctx, repo, cfg, id, "")
+		effective := cfg
+		if repo.Root != "" {
+			effective, err = runConfig(ctx, repo, cfg, id, "")
+		}
 		if err != nil {
 			a.errf("run", "%v", err)
 			return false
+		}
+		if effective.Mode == config.ModeFleet {
+			continue
 		}
 		if effective.Mode == config.ModeTeam {
 			tc, ok := client.(forge.TeamClient)

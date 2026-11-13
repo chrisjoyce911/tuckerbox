@@ -5,11 +5,15 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/chrisjoyce911/tuckerbox/internal/fleet"
 	"os/exec"
 	"strings"
 )
 
-type Git struct{ Worktree, Remote, Branch, Base, DefaultBranch string }
+type Git struct {
+	Worktree, Remote, Branch, Base, DefaultBranch string
+	Fleet                                         *fleet.Fence
+}
 
 func (g Git) run(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", g.Worktree}, args...)...)
@@ -88,6 +92,12 @@ func (g Git) Push(ctx context.Context, lease string) (string, error) {
 		if _, err := g.run(ctx, "merge-base", "--is-ancestor", lease, local); err != nil {
 			return "", fmt.Errorf("shipping head does not contain the previous push")
 		}
+	}
+	if g.Fleet != nil {
+		if err := g.Fleet.Push(ctx, g.Branch, lease, local); err != nil {
+			return "", err
+		}
+		return local, nil
 	}
 	ref := "refs/heads/" + g.Branch
 	if _, err := g.run(ctx, "push", "--force-with-lease="+ref+":"+lease, "--", g.remote(), ref+":"+ref); err != nil {

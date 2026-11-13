@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/agent"
+	"github.com/chrisjoyce911/tuckerbox/internal/config"
+	"github.com/chrisjoyce911/tuckerbox/internal/fleet"
 	"github.com/chrisjoyce911/tuckerbox/internal/history"
 	"github.com/chrisjoyce911/tuckerbox/internal/statedir"
 )
@@ -69,11 +71,16 @@ func StopOrphan(ctx context.Context, st statedir.Dir, end func(ctx context.Conte
 	rs.Pid, rs.AgentPid = 0, 0
 	rs.Slot, rs.Terminal, rs.AgentState = nil, nil, ""
 	rs.Tail = ""
+	if rs.StartedMode() == config.ModeFleet && rs.FleetClaim != nil {
+		if err := (fleet.Store{Dir: rs.Repo, Remote: rs.FleetRemote}).SetState(ctx, *rs.FleetClaim, fleet.Parked); err != nil {
+			rs.State, rs.Reason = Blocked, err.Error()
+		}
+	}
 	if err := WriteRun(st.RunFile(), rs); err != nil {
 		return rs, err
 	}
-	ev := history.Event{Time: now, Kind: history.Stopped, Change: rs.Change, Step: rs.Step, Round: rs.Round,
-		Reason: StoppedOrphan, Machine: history.Machine()}
+	ev := history.Event{Time: now, Kind: finishKind(rs.State), Change: rs.Change, Step: rs.Step, Round: rs.Round,
+		Reason: rs.Reason, Machine: history.Machine()}
 	_ = history.Append(history.File(st), ev)
 	_ = os.Remove(StopFile(st))
 	return rs, nil

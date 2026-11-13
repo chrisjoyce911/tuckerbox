@@ -89,9 +89,9 @@ func (a App) loadRepo(cmd, dir string) (runs.Repo, *config.Config, bool) {
 // run: tuckerbox run [--foreground] [--tasks <scope>] [--for <remote>]
 // [--dispatched] [--expect-state <s> --expect-since <t>] <change>... | --all
 func (a App) run(args []string) int {
-	var all, fg, dispatched bool
+	var all, fg, dispatched, takeOver, force bool
 	var tasks, forRemote, expectState, expectSince string
-	pos, err := parseArgs(args, map[string]*bool{"all": &all, "foreground": &fg, "dispatched": &dispatched},
+	pos, err := parseArgs(args, map[string]*bool{"all": &all, "foreground": &fg, "dispatched": &dispatched, "take-over": &takeOver, "force": &force},
 		map[string]*string{"tasks": &tasks, "for": &forRemote, "expect-state": &expectState, "expect-since": &expectSince})
 	if err != nil {
 		return a.usageErr("run", err.Error())
@@ -105,6 +105,10 @@ func (a App) run(args []string) int {
 		expect = &runs.Expect{State: runs.State(expectState), Since: since}
 	}
 	switch {
+	case force && !takeOver:
+		return a.usageErr("run", "--force requires --take-over")
+	case takeOver && (all || len(pos) != 1 || tasks != ""):
+		return a.usageErr("run", "--take-over takes one change and no --tasks")
 	case (dispatched || expect != nil) && (all || len(pos) != 1):
 		return a.usageErr("run", "--dispatched and --expect-state take one change, not --all or several")
 	case (dispatched || expect != nil) && fg:
@@ -137,6 +141,9 @@ func (a App) run(args []string) int {
 	repo, cfg, ok := a.loadRepo("run", wd)
 	if !ok {
 		return 1
+	}
+	if takeOver && cfg.Mode != config.ModeFleet {
+		return a.errf("run", "--take-over requires fleet mode; in team mode close the merge request and delete its branch first")
 	}
 	// Before anything is validated or made: agent_backend = "terminal"
 	// without a working herdr-core refuses the run and leaves no state.
@@ -228,11 +235,17 @@ func (a App) run(args []string) int {
 		return 1
 	}
 	if fg {
-		return a.foreground(repo, cfg, runs.Request{Change: changes[0], Mode: runs.Start, StartRev: startRevs[changes[0]], Scope: tasks})
+		return a.foreground(repo, cfg, runs.Request{Change: changes[0], Mode: runs.Start, StartRev: startRevs[changes[0]], Scope: tasks, TakeOver: takeOver, Force: force})
 	}
 	code := 0
 	for _, id := range changes {
 		engineArgs := []string{"--mode", "start", id}
+		if takeOver {
+			engineArgs = append(engineArgs, "--take-over")
+		}
+		if force {
+			engineArgs = append(engineArgs, "--force")
+		}
 		if rev := startRevs[id]; rev != "" {
 			engineArgs = append([]string{"--start-rev", rev}, engineArgs...)
 		}
@@ -360,15 +373,15 @@ func (s *switchWriter) set(w io.Writer) {
 //
 //	tuckerbox engine [--handshake] --mode start|resume|rerun [--step s] [--worktree p] [--start-rev c] [--tasks scope] <change>
 func (a App) engine(args []string) int {
-	var handshake, expectNone, dispatched bool
+	var handshake, expectNone, dispatched, takeOver, force bool
 	var mode, step, worktree, startRev, tasks, expectState, expectSince, by string
-	pos, err := parseArgs(args, map[string]*bool{"handshake": &handshake, "expect-none": &expectNone, "dispatched": &dispatched},
+	pos, err := parseArgs(args, map[string]*bool{"handshake": &handshake, "expect-none": &expectNone, "dispatched": &dispatched, "take-over": &takeOver, "force": &force},
 		map[string]*string{"mode": &mode, "step": &step, "worktree": &worktree, "start-rev": &startRev, "tasks": &tasks,
 			"expect-state": &expectState, "expect-since": &expectSince, "by": &by})
 	if err != nil || len(pos) != 1 {
 		return a.usageErr("engine", "usage: tuckerbox engine --mode start|resume|rerun [--step s] [--worktree p] <change>")
 	}
-	req := runs.Request{Change: pos[0], Step: step, Worktree: worktree, StartRev: startRev, Scope: tasks, By: by, Dispatched: dispatched}
+	req := runs.Request{Change: pos[0], Step: step, Worktree: worktree, StartRev: startRev, Scope: tasks, By: by, Dispatched: dispatched, TakeOver: takeOver, Force: force}
 	switch {
 	case expectNone:
 		req.Expect = &runs.Expect{NoRun: true}

@@ -33,6 +33,7 @@ Commands:
                             Keep starting approved changes, group by group,
                             until Ctrl-C (runs keep going when it stops)
   board [--json] [--change <id>]  Show this repository’s change board
+  claim show [--json] | release [--force] <change>  Inspect or release fleet claims
   status [--json]           Show every run on this machine
   status --all-machines [--json]
                             Show runs on this machine and every machine
@@ -140,6 +141,9 @@ func (a App) Run(args []string) int {
 		if line := a.forgeDoctorLine(); line != "" {
 			fmt.Fprintln(a.Stdout, line)
 		}
+		if line := a.fleetDoctorLine(); line != "" {
+			fmt.Fprintln(a.Stdout, line)
+		}
 		if line := a.approvalsDoctorLine(); line != "" {
 			fmt.Fprintln(a.Stdout, line)
 		}
@@ -163,6 +167,8 @@ func (a App) Run(args []string) int {
 		return a.autopilot(rest)
 	case "dispatch":
 		return a.dispatch(rest)
+	case "claim":
+		return a.claimCmd(rest)
 	case "run":
 		return a.run(rest)
 	case "engine":
