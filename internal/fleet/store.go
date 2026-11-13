@@ -109,9 +109,10 @@ func (s Store) fetch(ctx context.Context, ref string) (string, error) {
 }
 
 type snapshot struct {
-	tip    string
-	claims map[string]Claim
-	epochs map[string]uint64
+	tip      string
+	claims   map[string]Claim
+	epochs   map[string]uint64
+	archived map[string]bool
 }
 
 func (s Store) read(ctx context.Context) (snapshot, error) {
@@ -220,6 +221,10 @@ func (s Store) prune(ctx context.Context, st *snapshot) error {
 		name := strings.TrimPrefix(p, "openspec/changes/archive/")
 		if len(name) > 11 && name[10] == '-' {
 			if _, err := time.Parse("2006-01-02", name[:10]); err == nil {
+				if st.archived == nil {
+					st.archived = map[string]bool{}
+				}
+				st.archived[name[11:]] = true
 				delete(st.claims, name[11:])
 			}
 		}
@@ -359,6 +364,9 @@ func (s Store) Acquire(ctx context.Context, change, machine, run, branch string,
 		return result, fmt.Errorf("invalid fleet identity")
 	}
 	err := s.update(ctx, func(st *snapshot) (*branchMove, error) {
+		if st.archived[change] {
+			return nil, fmt.Errorf("change %s is already archived on the base branch", change)
+		}
 		old, exists := st.claims[change]
 		if exists {
 			if !takeOver {

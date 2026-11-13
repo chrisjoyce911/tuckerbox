@@ -332,4 +332,7 @@ func TestArchivePruningMatchesWholeChangeName(t *testing.T) {
 	if err != nil || len(all) != 2 || all["login"].Change != "login" {
 		t.Fatalf("pruned a suffix match: %v %v", all, err)
 	}
+	_, err = a.Acquire(ctx, "add-login", "one", "again", "add-login", false, false)
+	wantErr(t, err, "already archived")
+
 }
