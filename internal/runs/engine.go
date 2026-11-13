@@ -37,8 +37,9 @@ const (
 
 // Request is one run to make.
 type Request struct {
-	Change string
-	Mode   Mode
+	Change          string
+	TakeOver, Force bool
+	Mode            Mode
 	// Step is the step to start from, for Rerun.
 	Step string
 	// Worktree is the change's existing worktree, for Resume and Rerun.
@@ -112,6 +113,7 @@ type Engine struct {
 	Forge        func(context.Context) (forge.Client, func(string) string, error)
 	ShipSleep    func(context.Context, time.Duration) error
 	workflowSlot *Slot
+	fleetRun     *fleetSession
 	// DependencyRefresh controls base-ref refresh during shipping dependency waits.
 	DependencyRefresh time.Duration
 	Repo              Repo
@@ -481,7 +483,11 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 		return nil, err
 	}
 	if req.Mode == Start {
-		rs.Dispatched = req.Dispatched
+		rs.Dispatched = rs.Dispatched || req.Dispatched
+	}
+	if err := e.activateFleet(ctx, req, ws, rs); err != nil {
+		return nil, err
+
 	}
 	if err := e.teamStart(ctx, ws, rs); err != nil {
 		return nil, err
@@ -534,6 +540,8 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	ctx = e.watchFleet(ctx, cancel, rs)
+	defer e.stopFleet()
 	stopReq := e.watchStop(ctx, cancel, ws)
 	notified := false
 	notify := func() {
@@ -700,6 +708,12 @@ func (e *Engine) ensureWorktree(ctx context.Context, req Request) (Workspace, er
 		if err := CheckOverrides(ctx, e.Config, e.Repo.Root, req.Change, sp); err != nil {
 			return Workspace{}, err
 		}
+	}
+	if err := e.claimFleet(ctx, req, sp); err != nil {
+		return Workspace{}, err
+	}
+	if e.fleetRun != nil && e.fleetRun.tip != "" {
+		return e.takeoverWorkspace(ctx, req, e.fleetRun.tip)
 	}
 	return e.Repo.EnsureWorktreeFrom(ctx, e.Config.Worktree, req.Change, &sp, warn)
 }
@@ -1027,6 +1041,7 @@ func (e *Engine) unwatched(ws Workspace, rs *Run, err *agent.EndError) (*Run, er
 // finish records the run's final state for this process. The caller's
 // deferred releases then free the slot and the change lock.
 func (e *Engine) finish(ws Workspace, rs *Run, s State, reason string) (*Run, error) {
+	s, reason = e.finishFleet(rs, s, reason)
 	rs.State, rs.Reason = s, reason
 	rs.Pid, rs.AgentPid = 0, 0
 	rs.Slot, rs.Terminal, rs.AgentState = nil, nil, ""

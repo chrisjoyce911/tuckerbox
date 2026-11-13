@@ -211,6 +211,11 @@ func (e *Engine) watch(ctx context.Context, claim *Claim) Outcome {
 				}
 				return e.blocked(err)
 			}
+			if e.Git.Fleet != nil {
+				if err := e.Git.Fleet.Renew(ctx); err != nil {
+					return e.blocked(err)
+				}
+			}
 			if err := e.Forge.Merge(ctx, mr.Number, r.LastPush, e.Config.Shipping.MergeMethod); err != nil {
 				if api, ok := err.(*forge.APIError); ok && (api.Status == 409 || api.Status == 422) {
 					return e.blocked(fmt.Errorf("branch changed on the forge"))

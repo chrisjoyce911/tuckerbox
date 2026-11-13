@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/chrisjoyce911/tuckerbox/internal/agent"
+	"github.com/chrisjoyce911/tuckerbox/internal/fleet"
 	"github.com/chrisjoyce911/tuckerbox/internal/history"
 	"github.com/chrisjoyce911/tuckerbox/internal/scope"
 	"github.com/chrisjoyce911/tuckerbox/internal/ship"
@@ -48,9 +49,10 @@ const RunVersion = 1
 // when no process holds it.
 type Run struct {
 	ship.Record
-	TeamLogin string `json:"team_login,omitempty"`
-	Version   int    `json:"version"`
-	Change    string `json:"change"`
+	TeamLogin  string       `json:"team_login,omitempty"`
+	FleetClaim *fleet.Claim `json:"fleet_claim,omitempty"`
+	Version    int          `json:"version"`
+	Change     string       `json:"change"`
 	// Repo is the checkout the run was started from; its config is used.
 	Repo     string `json:"repo"`
 	Worktree string `json:"worktree"`

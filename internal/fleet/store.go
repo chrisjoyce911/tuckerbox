@@ -114,9 +114,30 @@ type snapshot struct {
 }
 
 func (s Store) read(ctx context.Context) (snapshot, error) {
+	tip, err := s.fetch(ctx, RefName)
+	if err != nil {
+		return snapshot{}, err
+	}
+	if tip != "" {
+		_, _ = s.git(ctx, "", "update-ref", RefName, tip)
+	} else {
+		_, _ = s.git(ctx, "", "update-ref", "-d", RefName)
+	}
+	return s.readTip(ctx, tip)
+}
+
+func (s Store) ReadLocal(ctx context.Context) (map[string]Claim, error) {
+	tip, err := s.git(ctx, "", "rev-parse", "--verify", "--quiet", RefName+"^{commit}")
+	if err != nil {
+		return map[string]Claim{}, nil
+	}
+	st, err := s.readTip(ctx, tip)
+	return st.claims, err
+}
+func (s Store) readTip(ctx context.Context, tip string) (snapshot, error) {
 	st := snapshot{claims: map[string]Claim{}, epochs: map[string]uint64{}}
 	var err error
-	st.tip, err = s.fetch(ctx, RefName)
+	st.tip = tip
 	if err != nil || st.tip == "" {
 		return st, err
 	}

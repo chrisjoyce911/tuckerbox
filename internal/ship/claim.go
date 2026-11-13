@@ -100,11 +100,46 @@ func (c *Claim) owner(mr *forge.MR) error {
 	return nil
 }
 func (c *Claim) read(ctx context.Context, f ClaimForge) (*forge.MR, string, error) {
+	if c.Git.Fleet != nil {
+		if err := c.Git.Fleet.Renew(ctx); err != nil {
+			return nil, "", err
+		}
+	}
 	mr, err := f.FindMR(ctx, c.Git.Branch)
 	if err != nil {
 		return nil, "", err
 	}
 	if mr != nil {
+		if c.Git.Fleet != nil {
+			id, ok := ParseMarker(mr.Body)
+			if ok && id.Change == c.Identity.Change && id.Epoch < c.Identity.Epoch {
+				tip, err := c.Git.Tip(ctx)
+				if err != nil {
+					return nil, "", err
+				}
+				if c.Lease == "" || tip != c.Lease {
+					return nil, "", fmt.Errorf("branch changed on the forge")
+				}
+				editor, ok := f.(interface {
+					UpdateMR(context.Context, int, forge.OpenRequest) (*forge.MR, error)
+				})
+				if !ok {
+					return nil, "", fmt.Errorf("forge cannot update fleet claim marker")
+				}
+				marker, err := c.Identity.Marker()
+				if err != nil {
+					return nil, "", err
+				}
+				body := markerRE.ReplaceAllString(mr.Body, marker)
+				mr, err = editor.UpdateMR(ctx, mr.Number, forge.OpenRequest{Title: mr.Title, Body: body, Branch: c.Git.Branch, Base: mr.Base, Draft: mr.Draft})
+				if err != nil {
+					return nil, "", err
+				}
+				if mr == nil {
+					return nil, "", fmt.Errorf("forge returned no merge request")
+				}
+			}
+		}
 		if err := c.owner(mr); err != nil {
 			return mr, "", err
 		}
