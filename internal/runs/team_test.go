@@ -154,3 +154,25 @@ func TestTeamModeChangeKeepsDraftClaim(t *testing.T) {
 		t.Fatal("mode change bypassed team claim", err)
 	}
 }
+
+func TestTeamStartCommitIsEmptyWithStagedWork(t *testing.T) {
+	f, e, _ := teamSetup(t)
+	ctx := context.Background()
+	ws, err := f.repo.EnsureWorktree(ctx, f.cfg.Worktree, "add-login", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testenv.WriteFile(t, ws.Path+"/staged.txt", "user work")
+	testenv.Git(t, ws.Path, "add", "staged.txt")
+	f.env.SetPlan(t, map[string]testenv.Action{"build": {Status: "blocked", Summary: "wait"}})
+	r, err := e.Run(ctx, Request{Change: "add-login"})
+	if err != nil || r.State != Blocked {
+		t.Fatal(r, err)
+	}
+	if files := testenv.Git(t, ws.Path, "diff-tree", "--no-commit-id", "--name-only", "-r", r.LastPush); files != "" {
+		t.Fatal("start commit contains staged work", files)
+	}
+	if status := testenv.Git(t, ws.Path, "status", "--porcelain"); !strings.Contains(status, "staged.txt") {
+		t.Fatal("staged work lost", status)
+	}
+}

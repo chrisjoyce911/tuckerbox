@@ -64,7 +64,7 @@ func (e *Engine) teamStart(ctx context.Context, ws Workspace, rs *Run) error {
 		if tip != "" {
 			return fmt.Errorf("remote branch exists")
 		}
-		if _, err := git(ctx, ws.Path, "commit", "--allow-empty", "-m", "Start "+rs.Change+"\n\n[skip ci]"); err != nil {
+		if _, err := git(ctx, ws.Path, "commit", "--allow-empty", "--only", "-m", "Start "+rs.Change+"\n\n[skip ci]"); err != nil {
 			return err
 		}
 	}
