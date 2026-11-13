@@ -192,6 +192,7 @@ func Read(ctx context.Context, dir, change string, env config.Env) (*Document, e
 		folders[a.id] = a.folder
 		doc.Cards = append(doc.Cards, c)
 	}
+	readClaims(ctx, doc, repo.Root, repo.Common, cfg)
 	for _, c := range doc.Cards {
 		knownColumns[c.Change] = c.Column
 	}

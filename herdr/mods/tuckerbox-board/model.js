@@ -98,6 +98,29 @@ function normaliseActivity(a) {
 
 const normaliseTick = (t) => ({ number: str(t?.number), at: str(t?.at), ticked: t?.ticked !== false, step: str(t?.step), round: num(t?.round) });
 
+// A card's claim (modes-board: Claims on cards): in fleet mode from the
+// fleet ref (state active, parked, expired or ready; epoch and last
+// renewal), in team mode from the forge (state open; the owner's login).
+const CLAIM_STATES = ["active", "parked", "expired", "ready", "open"];
+export function normaliseClaim(c) {
+  if (!c || typeof c !== "object" || !CLAIM_STATES.includes(c.state)) return null;
+  return { machine: str(c.machine), state: c.state, epoch: num(c.epoch), renewed_at: str(c.renewed_at), login: str(c.login), run: str(c.run) };
+}
+
+// What a card's claim says in a few words: "studio", "expired on mini",
+// "sam on studio".
+export function claimText(claim) {
+  if (!claim) return "";
+  const where = claim.machine ? `on ${claim.machine}` : "";
+  if (claim.state === "open") return [claim.login || "someone", where].filter(Boolean).join(" ");
+  return [claim.state, where].filter(Boolean).join(" ");
+}
+
+// The operating mode of a board document: solo, fleet or team.
+export function boardMode(board) {
+  return ["fleet", "team"].includes(board?.mode) ? board.mode : "solo";
+}
+
 // One card with every field the mod reads, missing ones filled in. Missing,
 // null and "" mean the same. `src` says where the card came from: the Herdr
 // machine (`on`, null for this computer) and the checkout path there.
@@ -144,6 +167,8 @@ export function normaliseCard(c, src = {}) {
     // (settings-board); `started` when a running step started with them.
     settings: list(c?.settings).map(stepSettings),
     machines: list(c?.machines).map(str).filter(Boolean),
+    // modes-board: the change's claim in fleet or team mode, or null.
+    claim: normaliseClaim(c?.claim),
     on: src.on ?? null,
     path: src.path ?? "",
     // The operating system of the card's machine (Go's GOOS), which says
@@ -172,6 +197,13 @@ export function normaliseBoard(doc, src = {}) {
       running: doc.autopilot?.running === true, pid: num(doc.autopilot?.pid), machine: str(doc.autopilot?.machine),
       started: str(doc.autopilot?.started), terminal: str(doc.autopilot?.terminal),
     },
+    // modes-board: the repository's mode, and in fleet mode its limit and
+    // how many claims count against it.
+    mode: ["fleet", "team"].includes(doc.mode) ? doc.mode : "solo",
+    fleet: doc.fleet && typeof doc.fleet === "object" ? { max_runs: num(doc.fleet.max_runs), claims: num(doc.fleet.claims) } : null,
+    // Where the claims came from and when: { source, at, stale, error }.
+    claims_read: doc.claims_read && typeof doc.claims_read === "object"
+      ? { source: str(doc.claims_read.source), at: str(doc.claims_read.at), stale: doc.claims_read.stale === true, error: str(doc.claims_read.error) } : null,
     steps: list(doc.steps).map(str),
     columns: list(doc.columns).map((c) => ({ id: str(c?.id), kind: str(c?.kind), step: str(c?.step), name: str(c?.name) || str(c?.id) })),
     cards: list(doc.cards).map((c) => normaliseCard(c, s)),
@@ -759,7 +791,10 @@ export function mergeBoards(own, others = []) {
       const mine = i === undefined ? null : own.cards[i] ?? null;
       const card = { ...c, column: fitColumn(c, own.columns), priority: mine?.priority ?? null, position: mine?.position ?? 0 };
       if (i === undefined) { at.set(card.change, cards.length); cards.push(card); }
-      else if (weight(card) > weight(cards[i])) cards[i] = card;
+      // Every machine reads the same fleet ref or forge, so a claim any
+      // copy has stays on the card that wins.
+      else if (weight(card) > weight(cards[i])) cards[i] = { ...card, claim: card.claim ?? cards[i].claim };
+      else if (!cards[i].claim && card.claim) cards[i] = { ...cards[i], claim: card.claim };
     }
   }
   return { ...own, cards, unreachable };

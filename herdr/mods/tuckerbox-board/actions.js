@@ -5,7 +5,7 @@
 // through Tuckerbox). Every action is a `tuckerbox` command on the card's
 // machine; the Herdr-only ones (Open proposal, Open worktree, Watch) open or
 // focus a view and change nothing.
-import { isActive, answerable } from "./model.js";
+import { isActive, answerable, boardMode, claimText } from "./model.js";
 
 export const ACTIONS = {
   mr: {label:"Open merge request ↗"},
@@ -28,6 +28,9 @@ export const ACTIONS = {
   priority: { label: "Move" },
   group: { label: "Run group…" },
   set: { label: "Set" },
+  // modes-board: Dispatch in the header, Take over on expired cards.
+  dispatch: { label: "Dispatch", primary: true },
+  takeover: { label: "Take over", danger: true },
 };
 
 // Files `tuckerbox edit` opens; a spec delta is `spec:<capability>`.
@@ -57,6 +60,8 @@ export function commandLine(action, change, extra = {}) {
       if (!GROUP_NUMBER.test(String(extra.group ?? ""))) throw new Error("group needs a task group number like 2");
       return ["tuckerbox", "run", change, "--tasks", String(extra.group)];
     case "approve": return ["tuckerbox", "approve", change];
+    // modes-board: Take over from the board (an expired fleet claim).
+    case "takeover": return ["tuckerbox", "run", "--take-over", change];
     case "unapprove": return ["tuckerbox", "unapprove", change];
     case "stop": return ["tuckerbox", "stop", change];
     case "resume": return ["tuckerbox", "resume", change];
@@ -111,7 +116,7 @@ export function commandLine(action, change, extra = {}) {
 // this computer leaves a detached child alone, so local cards keep exec. The
 // board shows their output or error either way. Answer and resume
 // (tuckerbox answer --resume) restarts the engine too, so it goes the same way.
-export const DETACHED = new Set(["start", "group", "resume", "rerun", "answer_resume"]);
+export const DETACHED = new Set(["start", "group", "resume", "rerun", "answer_resume", "takeover", "dispatch"]);
 
 // Where an action runs and how it shows (design: Actions):
 //   exec: run and show its output or error (`detach`: a remote card's run,
@@ -241,8 +246,11 @@ export function detailActions(card, board) {
   if (archived) return out;
   const active = isActive(card);
   const hasRun = Boolean(card.state);
-  const approvalOff = board?.require_approval === false;
-  if (!hasRun && (card.column === "approved" || (approvalOff && card.column === "proposed"))) out.push("start");
+  // In fleet and team mode a claimed change is someone's: no Start
+  // (tuckerbox run would refuse it); an expired fleet claim offers Take over.
+  const claimed = boardMode(board) !== "solo" && Boolean(card.claim);
+  if (!hasRun && !claimed && startable(card, board)) out.push("start");
+  if (takeoverOffered(card, board)) out.push("takeover");
   if (card.state === "stopped" || card.state === "blocked" || (card.state==="ready" && board?.ship==="mr" && card.mr?.state==="open")) out.push("resume");
   if (["stopped", "blocked", "failed", "ready"].includes(card.state) && rerunSteps(card, board).length) out.push("rerun");
   if (active) out.push("stop");
@@ -253,6 +261,48 @@ export function detailActions(card, board) {
   if (card.edit_folder) out.push("proposal");
   if (card.worktree) out.push("worktree");
   return out;
+}
+
+// A card Start would start: Approved, or Proposed with approval off.
+function startable(card, board) {
+  return card.column === "approved" || (board?.require_approval === false && card.column === "proposed");
+}
+
+// modes-board: Take over from the board. In fleet mode, a card whose claim
+// expired offers Take over.
+export function takeoverOffered(card, board) {
+  return boardMode(board) === "fleet" && card?.claim?.state === "expired" && card.column !== "done" && !card.archived;
+}
+
+// modes-board: Dispatch from the board. In fleet mode the header offers
+// Dispatch while at least one Approved card has no claim.
+export function dispatchOffered(board) {
+  if (!board || board.error || boardMode(board) !== "fleet") return false;
+  return (board.cards ?? []).some((c) => !c.claim && !c.state && !c.archived && startable(c, board));
+}
+
+// Dispatch runs `tuckerbox dispatch` on the board's own machine, in its
+// checkout (`at`: { cwd, on }). It starts runs, so on another machine it goes
+// through a short-lived herdr-core terminal, as Start does.
+export function dispatchInvocation(at = {}) {
+  const on = at.on ?? null;
+  const out = { action: "dispatch", place: "exec", argv: ["tuckerbox", "dispatch"], change: "", on, cwd: at.cwd || "" };
+  if (on) out.detach = true;
+  return out;
+}
+
+// What the person confirms before an action, or "" for none. Take over
+// leaves the old machine's work behind (fleet-claims: Taking over).
+export function confirmText(action, card) {
+  if (action !== "takeover") return "";
+  const from = card?.claim?.machine || "the other machine";
+  return `Take over ${card?.change} from ${from}? Its claim expired. Work on ${from} (its worktree and anything not pushed) is left behind there; this machine starts the change again from what is on the remote.`;
+}
+
+// The claim line on a card: "expired on mini", "sam on studio".
+export function claimLine(card, board) {
+  if (boardMode(board) === "solo" || !card?.claim) return "";
+  return claimText(card.claim);
 }
 
 // Run group… (add-task-scope): the task groups a card's detail offers to
@@ -272,7 +322,7 @@ export function runGroups(card, board, detail) {
 // The one or two buttons on the card itself: what moves it on.
 export function cardActions(card, board) {
   const all = detailActions(card, board);
-  const pick = ["start", "approve", "resume", "watch", "stop"].filter((a) => all.includes(a));
+  const pick = ["start", "approve", "takeover", "resume", "watch", "stop"].filter((a) => all.includes(a));
   if (!pick.length && all.includes("rerun") && card.state === "failed") pick.push("rerun");
   // Start not offered before approval: Approve is the way on (and only it).
   return pick.slice(0, 2);

@@ -4,8 +4,8 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar } from "gpui-base";
 import { theme, props, openOverlay, closeOverlay, spaces, panes, focused, run, notify } from "herdr";
 import { MOD, loadAll, locate, candidates, fixturesFolder } from "./data.js";
-import { group, counts, columnName, due, isShown, ago, needsYou, needsYouReason, newlyNeeding, toastCall, activityLine, candidatesKey, openGate, showsApproval, NO_CONFIG, sortedColumn, dropPosition, eventBox, liveDrop, priorityCard, oneLine } from "./model.js";
-import { cardActions, invocation, actionLabel, defaultStep, ACTIONS, dockCall, undockCalls } from "./actions.js";
+import { group, counts, columnName, due, isShown, ago, needsYou, needsYouReason, newlyNeeding, toastCall, activityLine, candidatesKey, openGate, showsApproval, NO_CONFIG, sortedColumn, dropPosition, eventBox, liveDrop, priorityCard, oneLine, boardMode, fmtLocal } from "./model.js";
+import { cardActions, invocation, actionLabel, defaultStep, ACTIONS, dockCall, undockCalls, dispatchOffered, dispatchInvocation, confirmText, claimLine } from "./actions.js";
 import { perform, watchEdits, changed } from "./perform.js";
 import { editOf, editNote } from "./edits.js";
 import { button, tiny, dot, stateChip, approvalChip, progressBar, note, closeButton, SPINNER } from "./ui.js";
@@ -133,8 +133,17 @@ export class BoardView extends View {
 
   act(action, card, extra, cx) {
     if (this.busy) return;
+    // Take over asks first: work on the old machine is left behind.
+    const ask = confirmText(action, card);
+    if (ask && !extra?.confirmed) { this.pending = { action, card, extra: { ...extra, confirmed: true }, text: ask }; cx.notify(); return; }
+    this.pending = null;
     let inv;
-    try { inv = invocation(action, card ?? { change: "", path: this.at?.cwd ?? "", on: this.at?.on ?? null }, extra); }
+    try {
+      // Dispatch runs on the board's own machine, in its checkout.
+      inv = action === "dispatch"
+        ? dispatchInvocation({ cwd: this.board?.path || this.at?.root || this.at?.cwd || "", on: this.board?.on ?? this.at?.on ?? null })
+        : invocation(action, card ?? { change: "", path: this.at?.cwd ?? "", on: this.at?.on ?? null }, extra);
+    }
     catch (e) { this.notice = { text: String(e?.message ?? e), kind: "error" }; cx.notify(); return; }
     inv.card = card;
     inv.board = this.boardProps();
@@ -151,7 +160,7 @@ export class BoardView extends View {
 
   boardProps() {
     const b = this.board ?? {};
-    return { ship:b.ship,repo: b.repo, path: b.path, require_approval: b.require_approval, columns: b.columns, steps: b.steps, on: b.on, fixtures: Boolean(b.fixtures) };
+    return { ship:b.ship,mode:b.mode,repo: b.repo, path: b.path, require_approval: b.require_approval, columns: b.columns, steps: b.steps, on: b.on, fixtures: Boolean(b.fixtures) };
   }
 
   // Dock: this window becomes a pane beside the shown space's terminals,
@@ -277,6 +286,12 @@ export class BoardView extends View {
         .when(Boolean(c.agent), (el) => el.child(div().child("·")).child(div().child(c.agent)))
         .child(div().flex_1())
         .when(Boolean(c.machine), (el) => el.child(div().truncate().max_w(90).child(c.machine)))))
+      // modes-board: the claim, its machine (and owner in a team), and in
+      // fleet mode its epoch and last renewal on hover.
+      .when(Boolean(claimLine(c, b)), (el) => el.child(div().id(`claim-${c.change}`).text_size(10.5).truncate()
+        .text_color(c.claim.state === "expired" ? tm.blocked : tm.dim)
+        .when(boardMode(b) === "fleet", (el) => el.tooltip(`epoch ${c.claim.epoch}${c.claim.renewed_at ? `, last renewed ${fmtLocal(c.claim.renewed_at)}` : ""}`))
+        .child(`claim: ${claimLine(c, b)}`)))
       .when(Boolean(activityLine(c)) && c.state === "running", (el) => el.child(this.activity(c)))
       .when(Boolean(c.mr), (el)=>el.child(h_flex().items_center().gap(6).text_size(11)
         .child(div().id(`mr-link-${c.change}`).cursor_pointer().text_color(tm.accent).hover(s=>s.underline())
@@ -332,6 +347,12 @@ export class BoardView extends View {
       .when(n.needs > 0, (el) => el.child(h_flex().items_center().gap(5).text_size(11.5).text_color(tm.blocked)
         .child(dot(tm.blocked, 8)).child(`${n.needs} need${n.needs === 1 ? "s" : ""} you`)))
       .when(Boolean(b && !b.require_approval), (el) => el.child(div().text_size(11).text_color(tm.dim).child("approval off")))
+      // modes-board: the mode, the fleet's claims against its limit, and
+      // how old a kept claims answer is when its source can't be read.
+      .when(boardMode(b) !== "solo", (el) => el.child(div().id("mode").text_size(11).text_color(tm.muted)
+        .child(boardMode(b) === "fleet" && b.fleet ? `fleet ${b.fleet.claims}${b.fleet.max_runs ? `/${b.fleet.max_runs}` : ""} claimed` : boardMode(b))))
+      .when(Boolean(b?.claims_read?.stale || b?.claims_read?.error), (el) => el.child(div().id("claims-stale").text_size(11).text_color(tm.blocked)
+        .tooltip(b.claims_read.error || "").child(b.claims_read.at ? `claims from ${ago(b.claims_read.at)}` : "claims unread")))
       .when(Boolean(b && !b.fixtures), (el) => el.child(div().text_size(11).text_color(b.autopilot?.running ? tm.working : tm.dim)
         .tooltip(b.autopilot?.running ? `tuckerbox autopilot, pid ${b.autopilot.pid}` : "tuckerbox autopilot is not running for this repository here")
         .child(b.autopilot?.running ? "autopilot on" : "autopilot off")))
@@ -341,6 +362,9 @@ export class BoardView extends View {
       .children((b?.unreachable ?? []).map((u, i) => div().id(`unreachable-${i}`).text_size(11).text_color(tm.blocked)
         .tooltip(u.message).child(`${u.machine ?? "this computer"} ${u.missing ? "has no tuckerbox" : "unreachable"}`)))
       .when(Boolean(b?.machine), (el) => el.child(div().text_size(11).text_color(tm.dim).child(b.machine)))
+      // modes-board: Dispatch from the board, while an Approved card has no claim.
+      .when(dispatchOffered(b), (el) => el.child(tiny("dispatch", this.busy === "dispatch-" ? "Dispatching…" : ACTIONS.dispatch.label,
+        (_e, cx) => this.act("dispatch", null, {}, cx), { primary: true, disabled: Boolean(this.busy), tooltip: "tuckerbox dispatch: place approved, unclaimed changes on the fleet's machines" })))
       // Settings in the window and a docked pane (the drawer has none).
       .when(Boolean(b), (el) => el.child(tiny("settings", this.settings ? "Board" : "Settings",
         (_e, cx) => (this.settings ? this.closeSettings(cx) : this.openSettings(cx)), { primary: Boolean(this.settings), tooltip: "This repository's and this machine's Tuckerbox settings" })))
@@ -399,6 +423,10 @@ export class BoardView extends View {
       .on_mouse_up("left", (e, cx) => this.endDrag(e, cx))
       .on_key_down((e, cx) => { if (e.key === "escape" && props()?.overlay) { closeOverlay(props().overlay); cx.stop_propagation(); } })
       .child(this.header())
+      .when(Boolean(this.pending), (el) => el.child(h_flex().px(14).pt(8).gap(8).items_start()
+        .child(div().flex_1().child(note("confirm", this.pending.text, "error")))
+        .child(tiny("confirm-yes", actionLabel(this.pending.action), (_e, cx) => { const p = this.pending; this.act(p.action, p.card, p.extra, cx); }, { danger: true, disabled: Boolean(this.busy) }))
+        .child(tiny("confirm-no", "Cancel", (_e, cx) => { this.pending = null; cx.notify(); }))))
       .when(Boolean(this.notice), (el) => el.child(h_flex().px(14).pt(8).gap(8).items_center()
         .child(div().flex_1().child(note("notice", this.notice.text, this.notice.kind)))
         .child(tiny("notice-x", "Dismiss", (_e, cx) => { this.notice = null; cx.notify(); }))))

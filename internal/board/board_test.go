@@ -367,6 +367,11 @@ func assertShape(t *testing.T, d *Document, fixture string) {
 	// A card may have no machines and a step no recorded settings; the
 	// allow-list's entries depend on the repository.
 	optional[".cards[].machines[]"] = true
+	// modes-board: fleet and team mode only.
+	for _, k := range []string{".fleet", ".fleet.max_runs", ".fleet.claims", ".claims_read", ".claims_read.source", ".claims_read.at", ".claims_read.stale", ".claims_read.error",
+		".cards[].claim", ".cards[].claim.machine", ".cards[].claim.state", ".cards[].claim.epoch", ".cards[].claim.renewed_at", ".cards[].claim.login", ".cards[].claim.run"} {
+		optional[k] = true
+	}
 	optional[".cards[].settings[].started"] = true
 	for _, k := range []string{"agents[]", "efforts[]", "permissions[]", "voids_approval[]"} {
 		optional[".detail.choices."+k] = true

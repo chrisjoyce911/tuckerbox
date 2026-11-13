@@ -142,12 +142,12 @@
 ## 6. Board (modes-board)
 
 - [ ] 6.1 `board --json`: `mode`, fleet `max_runs` and claim count, `claim` on cards (fleet ref or forge), claims shown for machines not connected; update the board JSON snapshot
-- [ ] 6.2 Test "Fleet board"
-- [ ] 6.3 Test "Expired claim on a card"
-- [ ] 6.4 Test "Owner in a team"
-- [ ] 6.5 Board mod: claim badge, owner, Dispatch in the header (only with unclaimed Approved cards), Take over on expired cards with a confirmation
-- [ ] 6.6 Node test "Dispatch from the board"
-- [ ] 6.7 Node test "Take over an expired card"
+- [x] 6.2 Test "Fleet board"
+- [x] 6.3 Test "Expired claim on a card"
+- [x] 6.4 Test "Owner in a team"
+- [x] 6.5 Board mod: claim badge, owner, Dispatch in the header (only with unclaimed Approved cards), Take over on expired cards with a confirmation
+- [x] 6.6 Node test "Dispatch from the board"
+- [x] 6.7 Node test "Take over an expired card"
 
 ## 7. Integration
 
