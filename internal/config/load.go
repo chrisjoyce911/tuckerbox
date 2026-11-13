@@ -169,6 +169,11 @@ func LoadData(opts Options, repoData, machineData []byte) (*Config, error) {
 		workflow[i] = s.ID
 	}
 	cfg.Values = values(machine, repo, creds, workflow)
+	if len(problems) == 0 && cfg.Mode == ModeFleet {
+		if p, ok := fleetRemoteProblem(opts, cfg, repoPath); !ok {
+			problems = append(problems, p)
+		}
+	}
 	if len(problems) == 0 && cfg.Ship != ShipLocal {
 		remote := opts.Remote
 		var lookupErr error
@@ -247,6 +252,28 @@ type rawFile struct {
 	// Overrides is repository-only; it is decoded from machine config
 	// too, so that setting it there gets a clear message.
 	Overrides *rawOverrides `toml:"overrides"`
+	// Mode, Fleet and Team are repository-only; FleetCapacity and
+	// Machines are machine-only. Each is decoded from both files, so that
+	// setting it in the wrong one gets a clear message.
+	Mode          *string               `toml:"mode"`
+	Fleet         rawFleet              `toml:"fleet"`
+	Team          rawTeam               `toml:"team"`
+	FleetCapacity *int                  `toml:"fleet_capacity"`
+	Machines      map[string]rawMachine `toml:"machines"`
+}
+
+type rawFleet struct {
+	MaxRuns *int    `toml:"max_runs"`
+	Lease   *string `toml:"lease"`
+}
+
+type rawTeam struct {
+	Approvers []string `toml:"approvers"`
+}
+
+type rawMachine struct {
+	SSH *string `toml:"ssh"`
+	HC  *string `toml:"hc"`
 }
 
 type rawOverrides struct {
@@ -375,11 +402,29 @@ func checkScopes(f *file, md toml.MetaData) {
 		if !wrong || !md.IsDefined(top) {
 			continue
 		}
-		f.problem(top, "%s", WrongFileMessage(top, scope))
+		if leafTops[top] {
+			// Name each key set, such as fleet.max_runs, not only the table.
+			named := false
+			for _, k := range md.Keys() {
+				if len(k) == 2 && k[0] == top {
+					f.problem(k.String(), "%s", WrongFileMessage(top, scope))
+					named = true
+				}
+			}
+			if !named {
+				f.problem(top, "%s", WrongFileMessage(top, scope))
+			}
+		} else {
+			f.problem(top, "%s", WrongFileMessage(top, scope))
+		}
 		clearTop(&f.raw, top)
 		delete(f.tree, top)
 	}
 }
+
+// leafTops are the tables whose wrong-file problems name each key set in
+// them, so `[fleet] max_runs` in machine config says fleet.max_runs.
+var leafTops = map[string]bool{"fleet": true, "team": true}
 
 // clearTop zeroes the field of raw decoded from the top-level key top.
 func clearTop(raw *rawFile, top string) {

@@ -189,6 +189,75 @@ type Config struct {
 	// [overrides] table, so no change may override anything. Repository
 	// only.
 	Overrides *Overrides
+
+	// Mode is how the repository's changes run: [ModeSolo] (the default),
+	// [ModeFleet] or [ModeTeam]. Repository only.
+	Mode Mode
+	// Fleet holds the [fleet] limits, used in fleet mode. Repository only.
+	Fleet Fleet
+	// Team holds the [team] settings, used in team mode. Repository only.
+	Team Team
+	// FleetCapacity is how many dispatched runs this machine takes at
+	// once, across repositories; 0 (the default) takes none. Machine only.
+	FleetCapacity int
+	// Machines lists the other machines this machine can reach, by name.
+	// Machine only.
+	Machines map[string]MachineEntry
+}
+
+// Mode is how a repository's changes run.
+type Mode string
+
+// Operating modes. Solo is one machine, as before modes existed; fleet is
+// one owner's several machines sharing claims in a git ref; team is
+// several people claiming changes with merge requests.
+const (
+	ModeSolo  Mode = "solo"
+	ModeFleet Mode = "fleet"
+	ModeTeam  Mode = "team"
+)
+
+// DefaultFleetLease is how long an active fleet claim lasts without a
+// renewal when [fleet] lease is not set.
+const DefaultFleetLease = 10 * time.Minute
+
+// MinFleetLease is the shortest [fleet] lease allowed. Renewals happen
+// every lease/5, so a shorter lease means a push every few seconds.
+const MinFleetLease = time.Minute
+
+// Fleet is the [fleet] table of repository config.
+type Fleet struct {
+	// MaxRuns is the most claims (active and parked) across all machines;
+	// 0 means no limit.
+	MaxRuns int
+	// Lease is how long an active claim lasts without being renewed.
+	Lease time.Duration
+}
+
+// Team is the [team] table of repository config.
+type Team struct {
+	// Approvers are the forge logins whose approval counts in team mode.
+	Approvers []string
+}
+
+// MachineEntry is one [machines.<name>] table of machine config: another
+// machine and how to reach it. Exactly one of SSH and HC is set.
+type MachineEntry struct {
+	// Name is the machine's name, the table's key.
+	Name string
+	// SSH is an SSH destination (an alias in ~/.ssh/config, host or
+	// user@host).
+	SSH string
+	// HC is a herdr-core machine name, reached with hc run --on.
+	HC string
+}
+
+// Via says how the machine is reached: "ssh" or "hc".
+func (m MachineEntry) Via() string {
+	if m.HC != "" {
+		return "hc"
+	}
+	return "ssh"
 }
 
 // Overrides is the [overrides] table of repository config: the values a

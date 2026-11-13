@@ -144,6 +144,7 @@ func resolve(root, remote string, m, r *file) (*Config, Problems) {
 	}
 
 	resolveShipping(cfg, m, r, add)
+	resolveModes(cfg, m, r, add)
 
 	// Agents: machine first, then repository additions.
 	for _, name := range slices.Sorted(maps.Keys(mr.Agents)) {
