@@ -105,6 +105,10 @@ func (a App) run(args []string) int {
 		expect = &runs.Expect{State: runs.State(expectState), Since: since}
 	}
 	switch {
+	case force && !takeOver:
+		return a.usageErr("run", "--force requires --take-over")
+	case takeOver && (all || len(pos) != 1 || tasks != ""):
+		return a.usageErr("run", "--take-over takes one change and no --tasks")
 	case (dispatched || expect != nil) && (all || len(pos) != 1):
 		return a.usageErr("run", "--dispatched and --expect-state take one change, not --all or several")
 	case (dispatched || expect != nil) && fg:

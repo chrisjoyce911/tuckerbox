@@ -25,6 +25,12 @@ func (g Git) DeleteMerged(ctx context.Context, merged string) (bool, error) {
 	if tip == "" || tip != merged {
 		return false, nil
 	}
+	if g.Fleet != nil {
+		if err := g.Fleet.Push(ctx, g.Branch, merged, ""); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
 	ref := "refs/heads/" + g.Branch
 	if _, err := g.run(ctx, "push", "--force-with-lease="+ref+":"+merged, "--", g.remote(), ":"+ref); err != nil {
 		return false, err

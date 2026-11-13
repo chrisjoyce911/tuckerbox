@@ -182,3 +182,23 @@ func TestFleetExpectMismatchDoesNotReactivateClaim(t *testing.T) {
 		t.Fatal("conditional mismatch changed claim")
 	}
 }
+
+func TestFleetModeChangeKeepsExistingClaimProtocol(t *testing.T) {
+	f := fleetSetup(t)
+	f.env.SetPlan(t, map[string]testenv.Action{"build": tick("1.1", "1.2")})
+	r := f.run(Request{Change: "add-login", Scope: "1"})
+	if r.Mode != config.ModeFleet {
+		t.Fatal("started mode not recorded")
+	}
+	f.cfg.Mode = config.ModeSolo
+	other := f.fleetStore()
+	other.Now = func() time.Time { return r.Created.Add(time.Hour) }
+	if err := other.Release(context.Background(), "add-login", "two", "add-login", true); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.runErr(Request{Change: "add-login", Scope: "2"})
+	fleetErr(t, err, "claim released")
+	if f.current("add-login").State != Ready {
+		t.Fatal("mode change bypassed old claim protocol")
+	}
+}

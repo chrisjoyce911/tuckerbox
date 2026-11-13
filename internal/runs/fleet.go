@@ -64,6 +64,7 @@ func (e *Engine) activateFleet(ctx context.Context, req Request, ws Workspace, r
 	if e.fleetRun != nil {
 		c := e.fleetRun.claim
 		rs.FleetClaim = &c
+		rs.FleetRemote = e.Config.Shipping.Remote
 		// Preserve the fleet run id through the existing ship identity format.
 		ns, err := strconv.ParseInt(c.Run, 10, 64)
 		if err != nil {
@@ -101,7 +102,9 @@ func (e *Engine) fleetFence(rs *Run) *fleet.Fence {
 	if rs.FleetClaim == nil || e.Config.Mode != config.ModeFleet {
 		return nil
 	}
-	return &fleet.Fence{Store: e.fleetStore(), Claim: *rs.FleetClaim}
+	store := e.fleetStore()
+	store.Remote = rs.FleetRemote
+	return &fleet.Fence{Store: store, Claim: *rs.FleetClaim}
 }
 func (e *Engine) fleetEpoch(rs *Run) uint64 {
 	if rs.FleetClaim != nil {
