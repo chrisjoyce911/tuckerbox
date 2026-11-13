@@ -35,3 +35,11 @@ func (c *Claim) PushTeam(ctx context.Context, f ClaimForge, save SaveLease) (*fo
 	}
 	return c.MR, nil
 }
+
+// pushClaim routes every later shipping push through the run's claim rules.
+func (e *Engine) pushClaim(ctx context.Context, claim *Claim) (*forge.MR, error) {
+	if e.Identity.By != "" {
+		return claim.PushTeam(ctx, e.Forge, e.persistPush)
+	}
+	return claim.Acquire(ctx, e.Forge, e.Request, e.persistPush)
+}

@@ -2,6 +2,8 @@ package ship
 
 import (
 	"context"
+	"github.com/chrisjoyce911/tuckerbox/internal/agent"
+	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/forge"
 	"os"
 	"path/filepath"
@@ -92,5 +94,80 @@ func TestTeamShippingNeverReopensClosedDraft(t *testing.T) {
 	_, err = c.PushTeam(context.Background(), closing, func(string) error { return nil })
 	if err == nil || !strings.Contains(err.Error(), "merge request closed") || api.opens != 1 {
 		t.Fatal(err, api.opens)
+	}
+}
+
+type closedOnLaterReadForge struct {
+	*fullForge
+	reads, closeAfter int
+}
+
+func (f *closedOnLaterReadForge) FindMR(ctx context.Context, b string) (*forge.MR, error) {
+	f.reads++
+	if f.reads > f.closeAfter {
+		return nil, nil
+	}
+	return f.fullForge.FindMR(ctx, b)
+}
+func TestTeamFixAndCITickNeverReopenClosedClaim(t *testing.T) {
+	for _, scenario := range []string{"fix", "CI tick"} {
+		t.Run(scenario, func(t *testing.T) {
+			e, api, f := stage(t, config.ShipMR)
+			e.Identity.By = "sam"
+			claim := &Claim{Identity: e.Identity, Git: e.Git}
+			mr, err := claim.Acquire(context.Background(), ownedForge{api.fakeForge, "sam"}, forge.OpenRequest{Draft: true}, e.persistPush)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.Record.MR = info(mr)
+			e.Record.CI = &CIInfo{State: "red"}
+			e.Forge = &closedOnLaterReadForge{fullForge: api, closeAfter: 1}
+			var out Outcome
+			if scenario == "fix" {
+				e.Fix = func(context.Context, string, []agent.Finding) (*agent.Result, error) {
+					gitTest(t, f.one, "commit", "--allow-empty", "-m", "review fix")
+					return &agent.Result{Status: agent.Done, Summary: "fixed"}, nil
+				}
+				out = e.fix(context.Background(), claim, Feedback{Step: "fix_ci"})
+			} else {
+				writeTasks(t, filepath.Join(f.one, "openspec", "changes", "add-login", "tasks.md"), ciTasks)
+				var msgs []string
+				e.Commit = gitCommit(t, f.one, &msgs)
+				_, out = e.tickCI(context.Background(), claim)
+			}
+			if out.State != "blocked" || !strings.Contains(out.Reason, "merge request closed") || api.opens != 1 {
+				t.Fatal(out, api.opens)
+			}
+		})
+	}
+}
+
+type behindTeamForge struct{ *closedOnLaterReadForge }
+
+func (f *behindTeamForge) GetMR(ctx context.Context, n int) (*forge.MR, error) {
+	m, err := f.fullForge.GetMR(ctx, n)
+	if err == nil {
+		m.Behind = true
+	}
+	return m, err
+}
+func TestTeamBaseUpdateNeverReopensClosedClaim(t *testing.T) {
+	e, api, f := stage(t, config.ShipMerge)
+	e.Identity.By = "sam"
+	claim := &Claim{Identity: e.Identity, Git: e.Git}
+	mr, err := claim.Acquire(context.Background(), ownedForge{api.fakeForge, "sam"}, forge.OpenRequest{Draft: true}, e.persistPush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Record.MR = info(mr)
+	gitTest(t, f.two, "checkout", "main")
+	writeTest(t, f.two, "newbase.txt", "base changed")
+	gitTest(t, f.two, "add", ".")
+	gitTest(t, f.two, "commit", "-m", "new base")
+	gitTest(t, f.two, "push", "origin", "main")
+	e.Forge = &behindTeamForge{&closedOnLaterReadForge{fullForge: api, closeAfter: 0}}
+	out := e.watch(context.Background(), claim)
+	if out.State != "blocked" || !strings.Contains(out.Reason, "merge request closed") || api.opens != 1 {
+		t.Fatal(out, api.opens)
 	}
 }

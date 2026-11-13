@@ -132,7 +132,7 @@ func (e *Engine) watch(ctx context.Context, claim *Claim) Outcome {
 			if sha == before {
 				return e.blocked(fmt.Errorf("forge requires a base update but merge changed nothing"))
 			}
-			if _, err := claim.Acquire(ctx, e.Forge, e.Request, e.persistPush); err != nil {
+			if _, err := e.pushClaim(ctx, claim); err != nil {
 				return e.blocked(err)
 			}
 			lastChange = e.now()

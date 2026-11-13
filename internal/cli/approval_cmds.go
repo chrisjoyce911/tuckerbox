@@ -53,7 +53,7 @@ func (a App) approve(args []string) int {
 	if !ok {
 		return 1
 	}
-	_, cfg, loaded := a.loadRepo("approve", p.Dir)
+	repo, cfg, loaded := a.loadRepo("approve", p.Dir)
 	if !loaded {
 		return 1
 	}
@@ -61,6 +61,16 @@ func (a App) approve(args []string) int {
 	var invalid *edits.Result
 	var pubErr error
 	err = edits.WithChangeLock(ctx, p, "tuckerbox approve", func() error {
+		worktree := ""
+		if p.Worktree {
+			worktree = p.Dir
+		}
+		effective, err := runConfig(ctx, repo, cfg, change, worktree)
+		if err != nil {
+			return err
+		}
+		cfg = effective
+
 		res, err := edits.Validator{}.Validate(ctx, p)
 		if err != nil {
 			return err
@@ -166,7 +176,7 @@ func (a App) unapprove(args []string) int {
 	if !ok {
 		return 1
 	}
-	_, cfg, loaded := a.loadRepo("unapprove", p.Dir)
+	repo, cfg, loaded := a.loadRepo("unapprove", p.Dir)
 	if !loaded {
 		return 1
 	}
@@ -174,6 +184,16 @@ func (a App) unapprove(args []string) int {
 	var pubErr error
 	ctx := context.Background()
 	err = edits.WithChangeLock(ctx, p, "tuckerbox unapprove", func() error {
+		worktree := ""
+		if p.Worktree {
+			worktree = p.Dir
+		}
+		effective, err := runConfig(ctx, repo, cfg, change, worktree)
+		if err != nil {
+			return err
+		}
+		cfg = effective
+
 		if cfg.Mode == config.ModeTeam {
 			return withSidecar(ctx, p.Dir, func() error {
 				var err error
@@ -181,7 +201,11 @@ func (a App) unapprove(args []string) int {
 				return err
 			})
 		}
-		st, err := currentApproval(ctx, p.Dir, change)
+		entry, err := refEntry(ctx, p.Dir, change)
+		if err != nil {
+			return err
+		}
+		st, err := approval.JudgeWith(approval.DirOf(p.Dir, change), entry)
 		if err != nil {
 			return err
 		}
@@ -394,6 +418,9 @@ func settingsGate(ctx context.Context, root, change, worktree string) error {
 	entry, err := refEntry(ctx, root, change)
 	if err != nil {
 		return fmt.Errorf("change %s: reading %s: %v", change, approval.RefName, err)
+	}
+	if entry != nil && entry.State == approval.EntryWithdrawn {
+		return &notApprovedError{State: approval.None, msg: fmt.Sprintf("change %s: approval was withdrawn; approve it again before resuming or rerunning", change)}
 	}
 	st, err := approval.JudgeWith(approval.DirOf(worktree, change), entry)
 	if err != nil {

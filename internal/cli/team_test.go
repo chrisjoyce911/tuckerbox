@@ -169,3 +169,48 @@ func TestTeamGateUsesSavedModeAfterConfigChange(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestUnapproveAfterSoloToTeamUsesStartedMode(t *testing.T) {
+	f := newCLI(t, testenv.RepoOptions{Changes: []string{"add-login"}, RequireApproval: true})
+	f.mustApprove("add-login")
+	f.env.SetPlan(t, map[string]testenv.Action{"build": {Status: "blocked", Summary: "wait"}})
+	_ = f.tb("run", "--foreground", "add-login")
+	r := f.runOf("add-login")
+	if r.State != runs.Blocked {
+		t.Fatal(r)
+	}
+	t.Setenv(config.TestForgeURLEnv, "https://github.com/sam/app.git")
+	for _, root := range []string{f.repo, r.Worktree} {
+		p := filepath.Join(root, config.RepoFile)
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := strings.Replace(string(b), "ship = \"local\"", "ship = \"mr\"", 1)
+		testenv.WriteFile(t, p, "mode = \"team\"\n"+text+"\n[team]\napprovers = [\"sam\"]\n")
+	}
+	if res := f.tb("unapprove", "add-login"); res.code != 0 {
+		t.Fatal(res.stderr)
+	}
+	entry := f.refEntryOf("add-login")
+	if entry.State != approval.EntryWithdrawn {
+		t.Fatal("solo run's ref approval survived withdrawal", entry)
+	}
+	before := len(f.env.Starts(t))
+	for _, args := range [][]string{{"resume", "--foreground", "add-login"}, {"rerun", "--foreground", "add-login", "build"}} {
+		res := f.tb(args...)
+		if res.code == 0 || !strings.Contains(res.stderr, "approval was withdrawn") {
+			t.Fatal(args, res.code, res.stderr)
+		}
+	}
+	if len(f.env.Starts(t)) != before {
+		t.Fatal("agent started after withdrawal")
+	}
+	// Reapproval follows that same saved mode, even in a team checkout.
+	if res := f.tb("approve", "add-login"); res.code != 0 {
+		t.Fatal(res.stderr)
+	}
+	if entry = f.refEntryOf("add-login"); entry.State != approval.EntryApproved {
+		t.Fatal(entry)
+	}
+}
