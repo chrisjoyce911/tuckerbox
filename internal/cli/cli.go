@@ -8,6 +8,7 @@ import (
 
 	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"github.com/chrisjoyce911/tuckerbox/internal/doctor"
+	"github.com/chrisjoyce911/tuckerbox/internal/machines"
 	"github.com/chrisjoyce911/tuckerbox/internal/forge"
 	"github.com/chrisjoyce911/tuckerbox/internal/herdrmod"
 	"github.com/chrisjoyce911/tuckerbox/internal/version"
@@ -29,6 +30,13 @@ Commands:
                             until Ctrl-C (runs keep going when it stops)
   board [--json] [--change <id>]  Show this repository’s change board
   status [--json]           Show every run on this machine
+  status --all-machines [--json]
+                            Show runs on this machine and every machine
+                            in machine config ([machines.<name>])
+  machine [--json] [--for <remote>]
+                            Report this machine: version, fleet capacity,
+                            agents and sign-in, and with --for its
+                            checkout and runs of that repository
   logs <change> [step]      Show a step's agent output (--follow to watch)
   stop <change>             Stop a run's agent and mark the run stopped
   resume <change>           Continue a stopped or blocked run
@@ -61,7 +69,8 @@ Commands:
                             be running; if not, nothing changes)
   herdr uninstall           Undo what herdr install did
   version [--json]          Print the version, commit, Go version and platform
-  doctor                    Check that git, openspec and the agent CLIs are installed
+  doctor                    Check that git, openspec and the agent CLIs are
+                            installed, and whether each agent is signed in
   check                     Validate .tuckerbox/config.toml with machine config
   init                      Write a commented starter .tuckerbox/config.toml
   help                      Show this help
@@ -89,6 +98,9 @@ type App struct {
 	// BorrowToken reads a token from gh or glab for config show; nil
 	// means the real CLIs.
 	BorrowToken func(ctx context.Context, program string, args ...string) (string, error)
+	// MachineRunner runs tuckerbox on the machines listed in machine
+	// config; the zero value uses ssh and hc from PATH.
+	MachineRunner machines.Runner
 }
 
 // Run runs the command in args (without the program name) and returns the
@@ -109,7 +121,7 @@ func (a App) Run(args []string) int {
 		if len(rest) > 0 {
 			return a.tooMany(cmd)
 		}
-		results := doctor.Check(a.DoctorEnv, a.DoctorTools)
+		results := doctor.Check(a.DoctorEnv, a.doctorTools())
 		if err := doctor.Write(a.Stdout, results); err != nil {
 			fmt.Fprintln(a.Stderr, "tuckerbox:", err)
 			return 1
@@ -155,6 +167,8 @@ func (a App) Run(args []string) int {
 		return a.agentHold(rest)
 	case "status":
 		return a.status(rest)
+	case "machine":
+		return a.machine(rest)
 	case "logs":
 		return a.logs(rest)
 	case "stop":

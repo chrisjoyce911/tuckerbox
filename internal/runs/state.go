@@ -77,6 +77,11 @@ type Run struct {
 	// write that leaves ready clears it. Dependents read it from this one
 	// file, never from tasks.md (formal/scope.tla).
 	Complete bool `json:"complete"`
+	// Dispatched is set on a run that tuckerbox dispatch started (run
+	// --dispatched). Such a run holds a machine-wide fleet slot while
+	// queued, running or shipping (package fleetslot); a person's own run
+	// holds none.
+	Dispatched bool `json:"dispatched,omitempty"`
 	// StepSettings is what the latest step to start began with: its
 	// effective agent, model, effort and permission profile name and the
 	// source of each, as in its step_started history event. A profile's

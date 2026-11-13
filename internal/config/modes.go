@@ -2,6 +2,8 @@ package config
 
 import (
 	"errors"
+	"io/fs"
+	"os"
 	"maps"
 	"slices"
 	"strings"
@@ -126,3 +128,35 @@ func fleetRemoteProblem(opts Options, cfg *Config, repoPath string) (Problem, bo
 }
 
 var errNoURL = errors.New("no remote URL")
+
+// LoadMachine reads only the machine config at path, for commands that run
+// outside a repository (tuckerbox machine --json, doctor). The result holds
+// the machine's settings: Machine, FleetCapacity, Machines, Agents and
+// Permissions; repository settings keep their defaults. A missing file is
+// an empty machine config. Problems are those of the machine file only.
+func LoadMachine(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		data = []byte{}
+	case err != nil:
+		return nil, err
+	}
+	m := parse(path, string(data), false)
+	if m.broken {
+		return &Config{MachinePath: path, Machines: map[string]MachineEntry{}}, m.problems
+	}
+	r := &file{path: "", repo: true, defined: func(...string) bool { return false }}
+	cfg, problems := resolve("", "", m, r)
+	cfg.MachinePath = path
+	var mine Problems
+	for _, p := range problems {
+		if p.File == path {
+			mine = append(mine, p)
+		}
+	}
+	if len(mine) > 0 {
+		return cfg, mine
+	}
+	return cfg, nil
+}
