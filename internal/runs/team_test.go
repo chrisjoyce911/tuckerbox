@@ -93,7 +93,7 @@ func TestTeamNextScopeAndRestReuseDraft(t *testing.T) {
 	}
 }
 func TestTeamContinuationRefusesClosedForeignCopiedAndMovedClaims(t *testing.T) {
-	for _, scenario := range []string{"closed", "foreign", "copied", "moved"} {
+	for _, scenario := range []string{"closed", "foreign", "copied", "moved", "ready"} {
 		t.Run(scenario, func(t *testing.T) {
 			f, e, api := teamSetup(t)
 			f.withTasks(scopedTasks, "add-login")
@@ -104,6 +104,8 @@ func TestTeamContinuationRefusesClosedForeignCopiedAndMovedClaims(t *testing.T) 
 				t.Fatal(err)
 			}
 			switch scenario {
+			case "ready":
+				api.mr.Draft = false
 			case "closed":
 				api.mr.State = "closed"
 			case "foreign":

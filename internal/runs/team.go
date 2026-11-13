@@ -45,6 +45,9 @@ func (e *Engine) teamStart(ctx context.Context, ws Workspace, rs *Run) error {
 		if err := claim.Check(ctx, tc); err != nil {
 			return err
 		}
+		if !rs.ShippingStarted && !claim.MR.Draft {
+			return fmt.Errorf("merge request is not a draft")
+		}
 		return nil
 	}
 	// Detect foreign MRs or leftover branches before adding a start commit.

@@ -107,37 +107,37 @@
 
 ## 5. Team mode (team-claims)
 
-- [ ] 5.1 Claim at start: empty `Start <change>` commit with `[skip ci]`, lease push expecting no branch, draft merge request with the marker and `by=<login>` from the forge; ship-claim's refusals
-- [ ] 5.2 Test "Two people start one change" (two state directories, one bare remote, fake forge)
-- [ ] 5.3 Test "Marker with the owner"
-- [ ] 5.4 Treat a marker whose `by` differs from the merge request's author as someone else's claim
-- [ ] 5.5 Test "Marker copied by someone else"
-- [ ] 5.6 Team restart with another scope or none: check the open draft's marker and login and that the remote tip is the run's last push; start with no new commit and no push; refuse with ship-claim's reasons; run gate from the protected base
-- [ ] 5.7 Test "Next group in a team" (fake forge: no push, same draft open)
-- [ ] 5.8 Test "Rest of the change in a team" (no push, same draft open)
-- [ ] 5.9 Test "Draft closed between scopes"
-- [ ] 5.10 Test "Someone else's next scope"
-- [ ] 5.11 Ship stage in team mode: update the run's draft and mark it ready on GitHub and GitLab, open none
-- [ ] 5.12 Test "Last step done in team mode"
+- [x] 5.1 Claim at start: empty `Start <change>` commit with `[skip ci]`, lease push expecting no branch, draft merge request with the marker and `by=<login>` from the forge; ship-claim's refusals
+- [x] 5.2 Test "Two people start one change" (two state directories, one bare remote, fake forge)
+- [x] 5.3 Test "Marker with the owner"
+- [x] 5.4 Treat a marker whose `by` differs from the merge request's author as someone else's claim
+- [x] 5.5 Test "Marker copied by someone else"
+- [x] 5.6 Team restart with another scope or none: check the open draft's marker and login and that the remote tip is the run's last push; start with no new commit and no push; refuse with ship-claim's reasons; run gate from the protected base
+- [x] 5.7 Test "Next group in a team" (fake forge: no push, same draft open)
+- [x] 5.8 Test "Rest of the change in a team" (no push, same draft open)
+- [x] 5.9 Test "Draft closed between scopes"
+- [x] 5.10 Test "Someone else's next scope"
+- [x] 5.11 Ship stage in team mode: update the run's draft and mark it ready on GitHub and GitLab, open none
+- [x] 5.12 Test "Last step done in team mode"
 - [ ] 5.13 Refuse `--take-over` and `dispatch` in team mode
 - [ ] 5.14 Test "Take over refused"
 - [ ] 5.15 Test "Dispatch in a team repository"
-- [ ] 5.16 `approve` records the forge login; in team mode the run gate reads the approval only from the fetched base commit, requires a listed login, and refuses worktrees or retained branches whose files don't match it
-- [ ] 5.17 Test "Approval by someone not listed"
-- [ ] 5.18 Test "No approvers"
-- [ ] 5.19 Test "Forged approval on a retained branch" (local branch with recomputed hashes and a listed login; nothing created locally or on the fake forge)
-- [ ] 5.20 Test "Worktree edited after approval"
-- [ ] 5.21 Team mode `resume` and `rerun`: compare the `agent` and `permissions` overrides with `settings_hash` from the approval on the fetched base (listed login), never the worktree's; refuse on mismatch; a stale text hash alone still passes
-- [ ] 5.22 Test "Forged settings approval on resume"
-- [ ] 5.23 Test "Forged settings approval on rerun"
-- [ ] 5.24 Test "Design rewritten by a plan step"
-- [ ] 5.25 Ask the forge whether the base branch refuses direct pushes and needs an approving review (GitHub branch rules, GitLab protected branches and approval rules); refuse in `run` and fail `check` when not, or when unreadable
-- [ ] 5.26 Test "Unprotected base"
-- [ ] 5.27 Test "Protection can't be read"
-- [ ] 5.28 Open claimed merge requests for the board, at most once a minute, kept in the state directory, with their age when the forge is down
-- [ ] 5.29 Test "Board read twice"
-- [ ] 5.30 (from fix-approval-publish 4.1) In team mode `approve` and `unapprove` write `tuckerbox.toml` as before and the approval gate ignores `refs/tuckerbox/approvals`
-- [ ] 5.31 (from fix-approval-publish 4.2) Test "Ref entry in a team repository"
+- [x] 5.16 `approve` records the forge login; in team mode the run gate reads the approval only from the fetched base commit, requires a listed login, and refuses worktrees or retained branches whose files don't match it
+- [x] 5.17 Test "Approval by someone not listed"
+- [x] 5.18 Test "No approvers"
+- [x] 5.19 Test "Forged approval on a retained branch" (local branch with recomputed hashes and a listed login; nothing created locally or on the fake forge)
+- [x] 5.20 Test "Worktree edited after approval"
+- [x] 5.21 Team mode `resume` and `rerun`: compare the `agent` and `permissions` overrides with `settings_hash` from the approval on the fetched base (listed login), never the worktree's; refuse on mismatch; a stale text hash alone still passes
+- [x] 5.22 Test "Forged settings approval on resume"
+- [x] 5.23 Test "Forged settings approval on rerun"
+- [x] 5.24 Test "Design rewritten by a plan step"
+- [x] 5.25 Ask the forge whether the base branch refuses direct pushes and needs an approving review (GitHub branch rules, GitLab protected branches and approval rules); refuse in `run` and fail `check` when not, or when unreadable
+- [x] 5.26 Test "Unprotected base"
+- [x] 5.27 Test "Protection can't be read"
+- [x] 5.28 Open claimed merge requests for the board, at most once a minute, kept in the state directory, with their age when the forge is down
+- [x] 5.29 Test "Board read twice"
+- [x] 5.30 (from fix-approval-publish 4.1) In team mode `approve` and `unapprove` write `tuckerbox.toml` as before and the approval gate ignores `refs/tuckerbox/approvals`
+- [x] 5.31 (from fix-approval-publish 4.2) Test "Ref entry in a team repository"
 
 ## 6. Board (modes-board)
 
