@@ -43,16 +43,16 @@
 ## 4. Shipping and modes (autopilot)
 
 - [x] 4.1 Rely on task-scope's completeness rules; autopilot never archives, pushes or merges; a change archived on the base is finished
-- [ ] 4.2 Modes: `solo` starts runs here; `fleet` runs `tuckerbox dispatch` each pass; `team` refuses
+- [x] 4.2 Modes: `solo` starts runs here; `fleet` runs `tuckerbox dispatch` each pass; `team` refuses
 - [x] 4.3 Test: First group in merge mode
-- [ ] 4.4 Test: Last group in merge mode (with a real `(ship)` archive task in the change)
+- [x] 4.4 Test: Last group in merge mode (with a real `(ship)` archive task in the change)
 - [x] 4.5 Test: Whole change left incomplete
 - [x] 4.6 Incomplete ready runs: continue with `--tasks next` when the run has a scope or in group mode; in change mode report once, request no start, mark the card `needs_you`
 - [x] 4.7 Test: Whole change left ready in local mode (several passes, no start requested)
 - [x] 4.8 Test: Group mode picks up the rest
 - [x] 4.9 Test: Whole change left ready (board)
-- [ ] 4.10 Test: Fleet mode
-- [ ] 4.11 Test: Team mode
+- [x] 4.10 Test: Fleet mode
+- [x] 4.11 Test: Team mode
 
 ## 5. Asking for a person (autopilot, autopilot-board)
 

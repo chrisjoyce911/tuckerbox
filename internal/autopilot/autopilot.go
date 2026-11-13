@@ -3,6 +3,11 @@
 // ones while max_parallel has room, group by group, resumes a crashed run
 // once per crash streak, and reports runs that need a person.
 //
+// That is solo mode. In fleet mode a pass runs tuckerbox dispatch for
+// placement instead and starts or resumes nothing on this machine itself;
+// it still reports runs that need a person. Team repositories refuse
+// autopilot (ErrTeam).
+//
 // It keeps no state of its own: every decision comes from OpenSpec at the
 // fetched base, run.json and history. Every start or resume it asks for is
 // conditional (runs.Expect): the engine goes ahead only if the run is still
@@ -12,6 +17,7 @@ package autopilot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -29,6 +35,9 @@ import (
 
 // By is the value of history's "by" on events autopilot asked for.
 const By = "autopilot"
+
+// ErrTeam is why autopilot refuses a team repository.
+var ErrTeam = errors.New(`autopilot is for solo and fleet repositories, and this repository is a team one (mode = "team"): each person starts their own runs with tuckerbox run`)
 
 // Request is a start or resume a pass asks for.
 type Request struct {
@@ -105,6 +114,10 @@ type Pilot struct {
 	BeginPass func(ctx context.Context) error
 	// Warn receives problems that don't stop a pass (offline fetch).
 	Warn func(string)
+	// Dispatch, in fleet mode, makes one tuckerbox dispatch pass (a dry
+	// run when dryRun) and returns the runs on other machines that need a
+	// person, with why.
+	Dispatch func(ctx context.Context, dryRun bool) (map[string]string, error)
 
 	// reported is what each change was last reported for, so a report is
 	// printed once per state change.
@@ -129,6 +142,16 @@ func (p *Pilot) printf(format string, args ...any) {
 // Pass makes one pass.
 func (p *Pilot) Pass(ctx context.Context) (Outcome, error) {
 	out := Outcome{NeedsYou: map[string]string{}}
+	fleet := false
+	switch p.Config.Mode {
+	case config.ModeTeam:
+		return out, ErrTeam
+	case config.ModeFleet:
+		if p.Dispatch == nil {
+			return out, errors.New("fleet mode needs tuckerbox dispatch")
+		}
+		fleet = true
+	}
 	if p.BeginPass != nil {
 		if err := p.BeginPass(ctx); err != nil {
 			return out, err
@@ -162,6 +185,10 @@ func (p *Pilot) Pass(ctx context.Context) (Outcome, error) {
 		}
 	}
 	room := p.Config.MaxParallel - busy
+	if fleet {
+		// Dispatch places new changes and next groups.
+		room = 0
+	}
 	lookup := runs.DependencyLookupFrom(local, p.Config)
 	active := map[string]bool{}
 	for _, id := range ids {
@@ -173,6 +200,11 @@ func (p *Pilot) Pass(ctx context.Context) (Outcome, error) {
 		if err != nil {
 			p.printf("%s: %v", id, err)
 			continue
+		}
+		if fleet && req != nil {
+			// Only a crash resume gets here with no room; in fleet mode
+			// it is a person's to make.
+			req, why = nil, "its run crashed; in fleet mode autopilot resumes nothing, resume it by hand"
 		}
 		if why != "" {
 			out.NeedsYou[id] = why
@@ -191,6 +223,17 @@ func (p *Pilot) Pass(ctx context.Context) (Outcome, error) {
 		out.Requested = append(out.Requested, *req)
 		if req.Mode == runs.Start {
 			room--
+		}
+	}
+	if fleet {
+		more, err := p.Dispatch(ctx, p.DryRun)
+		if err != nil {
+			p.printf("dispatch: %v", err)
+		}
+		for id, why := range more {
+			if _, ok := out.NeedsYou[id]; !ok {
+				out.NeedsYou[id] = why
+			}
 		}
 	}
 	p.report(out.NeedsYou)
