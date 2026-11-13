@@ -11,7 +11,7 @@
 - [x] 1.7 Test "Fleet without a remote"
 - [x] 1.8 Test "Team with local shipping"
 - [x] 1.9 Test "Fleet to solo with a claim left"
-- [ ] 1.10 Test "Dispatch in a solo repository"
+- [x] 1.10 Test "Dispatch in a solo repository"
 
 ## 2. Machines (machine-inventory)
 

@@ -217,7 +217,7 @@ func (a App) dispatchInput(ctx context.Context, repo runs.Repo, cfg *config.Conf
 		return in, err
 	}
 	shipping := cfg.Ship != "" && cfg.Ship != config.ShipLocal
-	claims, err := fleetClaims(ctx, repo.Root, cfg.Shipping.Remote, cfg.Fleet.Lease, time.Now())
+	claims, err := dispatchClaims(ctx, repo.Root, cfg.Shipping.Remote, cfg.Fleet.Lease, time.Now())
 	if err != nil {
 		return in, fmt.Errorf("reading the fleet ref: %v", err)
 	}
