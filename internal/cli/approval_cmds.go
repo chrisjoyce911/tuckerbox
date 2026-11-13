@@ -92,16 +92,18 @@ func (a App) approve(args []string) int {
 				return err
 			}
 			record := approval.Approval{Hash: hash, SettingsHash: shash, Settings: lines, By: by, Login: login, At: time.Now().Truncate(time.Second)}
-			old, err := d.Read(approval.SidecarName)
-			if err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return err
-			}
-			data, err := approval.SetApproval(old, record)
-			if err != nil {
-				return err
-			}
 			ap = approval.Entry{Hash: hash, By: login, At: record.At, Settings: lines}
-			return withSidecar(ctx, p.Dir, func() error { return approval.WriteSidecar(d.SidecarPath(), data) })
+			return withSidecar(ctx, p.Dir, func() error {
+				old, err := d.Read(approval.SidecarName)
+				if err != nil && !errors.Is(err, fs.ErrNotExist) {
+					return err
+				}
+				data, err := approval.SetApproval(old, record)
+				if err != nil {
+					return err
+				}
+				return approval.WriteSidecar(d.SidecarPath(), data)
+			})
 		}
 		by := gitUserName(ctx, p.Dir)
 		if by == "" {

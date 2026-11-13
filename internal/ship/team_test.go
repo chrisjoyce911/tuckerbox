@@ -3,6 +3,8 @@ package ship
 import (
 	"context"
 	"github.com/chrisjoyce911/tuckerbox/internal/forge"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -35,7 +37,9 @@ func TestTwoPeopleTeamClaimAndCopiedMarker(t *testing.T) {
 		wg.Add(1)
 		go func(i int, c *Claim) {
 			defer wg.Done()
-			_, errs[i] = c.Acquire(context.Background(), ownedForge{api, c.Identity.By}, forge.OpenRequest{Draft: true}, func(string) error { return nil })
+			_, errs[i] = c.Acquire(context.Background(), ownedForge{api, c.Identity.By}, forge.OpenRequest{Draft: true}, func(sha string) error {
+				return os.WriteFile(filepath.Join(c.Git.Worktree, ".git", "team-lease"), []byte(sha), 0600)
+			})
 		}(i, c)
 	}
 	wg.Wait()

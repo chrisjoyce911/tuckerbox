@@ -24,18 +24,20 @@ func (c *Client) ProtectedBase(ctx context.Context, branch string) (bool, error)
 	var rules []struct {
 		Name string
 		Push []struct {
-			Level   int  `json:"access_level"`
-			UserID  *int `json:"user_id"`
-			GroupID *int `json:"group_id"`
+			Level       int  `json:"access_level"`
+			UserID      *int `json:"user_id"`
+			GroupID     *int `json:"group_id"`
+			DeployKeyID *int `json:"deploy_key_id"`
 		} `json:"push_access_levels"`
 	}
 	for page := 1; ; page++ {
 		var list []struct {
 			Name string
 			Push []struct {
-				Level   int  `json:"access_level"`
-				UserID  *int `json:"user_id"`
-				GroupID *int `json:"group_id"`
+				Level       int  `json:"access_level"`
+				UserID      *int `json:"user_id"`
+				GroupID     *int `json:"group_id"`
+				DeployKeyID *int `json:"deploy_key_id"`
 			} `json:"push_access_levels"`
 		}
 		h, err := c.http.Do(ctx, "GET", c.project+"/protected_branches?per_page=100&page="+strconv.Itoa(page), nil, &list)
@@ -57,7 +59,7 @@ func (c *Client) ProtectedBase(ctx context.Context, branch string) (bool, error)
 			return false, nil
 		}
 		for _, p := range r.Push {
-			if p.Level != 0 || p.UserID != nil || p.GroupID != nil {
+			if p.Level != 0 || p.UserID != nil || p.GroupID != nil || p.DeployKeyID != nil {
 				return false, nil
 			}
 		}

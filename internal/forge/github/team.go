@@ -76,7 +76,7 @@ func (c *Client) MarkReady(ctx context.Context, n int) error {
 	}
 	var result struct {
 		Data struct {
-			Ready struct{ PullRequest struct{ IsDraft bool } } `json:"markPullRequestReadyForReview"`
+			Ready struct{ PullRequest struct{ IsDraft *bool } } `json:"markPullRequestReadyForReview"`
 		}
 		Errors []struct{ Message string }
 	}
@@ -84,7 +84,7 @@ func (c *Client) MarkReady(ctx context.Context, n int) error {
 	if err == nil && len(result.Errors) > 0 {
 		err = fmt.Errorf("GitHub GraphQL: %s", result.Errors[0].Message)
 	}
-	if err == nil && result.Data.Ready.PullRequest.IsDraft {
+	if err == nil && (result.Data.Ready.PullRequest.IsDraft == nil || *result.Data.Ready.PullRequest.IsDraft) {
 		err = fmt.Errorf("pull request remains draft")
 	}
 	return err
