@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/chrisjoyce911/tuckerbox/internal/config"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -82,6 +83,9 @@ type Run struct {
 	// queued, running or shipping (package fleetslot); a person's own run
 	// holds none.
 	Dispatched bool `json:"dispatched,omitempty"`
+	// Mode is the operating mode the run started in, recorded when the run
+	// is first made; "" (runs from before modes) is solo. See StartedMode.
+	Mode config.Mode `json:"mode,omitempty"`
 	// StepSettings is what the latest step to start began with: its
 	// effective agent, model, effort and permission profile name and the
 	// source of each, as in its step_started history event. A profile's

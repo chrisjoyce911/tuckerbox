@@ -394,6 +394,10 @@ func (e *Engine) Run(ctx context.Context, req Request) (*Run, error) {
 	// anything until Run returns: ended, stopped, blocked or ready.
 	var fleet *fleetslot.Slot
 	defer func() { _ = fleet.Free() }()
+	// An existing run keeps the mode it started in.
+	if err := e.freezeMode(ctx, req); err != nil {
+		return nil, err
+	}
 	if req.Mode == Start && req.Dispatched {
 		if fleet, err = e.takeFleetSlot(); err != nil {
 			return nil, err
@@ -719,6 +723,7 @@ func (e *Engine) prepare(req Request, ws Workspace, adopt bool) (*Run, int, erro
 		rs = &Run{
 			Change: req.Change, Repo: e.Repo.Root, Worktree: ws.Path, Branch: ws.Branch, Base: ws.Base,
 			Step: steps[0].ID, Round: 1, Created: now, Since: now, Scope: sc,
+			Mode: EffectiveMode(e.Config, nil),
 		}
 		if req.Mode == Rerun {
 			rs.Step = req.Step
